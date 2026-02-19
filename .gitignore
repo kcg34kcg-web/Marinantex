@@ -1,0 +1,19 @@
+# Next.js
+.next
+out
+
+# Node
+node_modules
+
+# Env
+.env
+.env.local
+
+# Python venv
+.venv*/
+venv*/
+
+
+# Build
+dist
+build

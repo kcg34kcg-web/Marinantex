@@ -1,0 +1,22 @@
+[
+  { "question": "Kira tespit davasında 5 yıl şartı nedir?", "requiredKeywords": ["TBK m. 344", "hak ve nesafet"] },
+  { "question": "Muris muvazaası davasında ispat nasıl yapılır?", "requiredKeywords": ["muris muvazaası", "tanık", "Yargıtay"] },
+  { "question": "Boşanma davasında kusur değerlendirmesi nasıl yapılır?", "requiredKeywords": ["kusur", "delil", "TMK"] },
+  { "question": "İşe iade davasında bir aylık başvuru süresi ne zaman başlar?", "requiredKeywords": ["işe iade", "bir ay", "tebliğ"] },
+  { "question": "İhtiyati tedbir için yaklaşık ispat yeterli midir?", "requiredKeywords": ["ihtiyati tedbir", "yaklaşık ispat"] },
+  { "question": "Kamulaştırmasız el atma davasında görevli mahkeme hangisidir?", "requiredKeywords": ["kamulaştırmasız el atma", "görevli mahkeme"] },
+  { "question": "Nafaka artırım davasında ekonomik değişiklik nasıl ispatlanır?", "requiredKeywords": ["nafaka", "ekonomik durum", "ispat"] },
+  { "question": "Tenkis davasında saklı pay oranları nasıl hesaplanır?", "requiredKeywords": ["tenkis", "saklı pay"] },
+  { "question": "İcra inkar tazminatı hangi şartlarda verilir?", "requiredKeywords": ["icra inkar tazminatı", "itiraz", "likit"] },
+  { "question": "Ayıplı malda seçimlik haklar nelerdir?", "requiredKeywords": ["ayıplı mal", "seçimlik hak", "bedel iadesi"] },
+  { "question": "Kıdem tazminatında giydirilmiş ücret nasıl belirlenir?", "requiredKeywords": ["kıdem tazminatı", "giydirilmiş ücret"] },
+  { "question": "Taşınmaz satış vaadi sözleşmesinin tapuya şerhi ne sağlar?", "requiredKeywords": ["satış vaadi", "şerh", "üçüncü kişi"] },
+  { "question": "Velayet değişikliği davasında üstün yarar ilkesi nasıl uygulanır?", "requiredKeywords": ["velayet", "üstün yarar"] },
+  { "question": "İş kazasında manevi tazminat miktarı nasıl değerlendirilir?", "requiredKeywords": ["iş kazası", "manevi tazminat"] },
+  { "question": "Ecrimisil davasında zamanaşımı süresi nedir?", "requiredKeywords": ["ecrimisil", "zamanaşımı"] },
+  { "question": "Marka hükümsüzlük davasında karıştırılma ihtimali nasıl incelenir?", "requiredKeywords": ["marka", "karıştırılma ihtimali"] },
+  { "question": "Ortaklığın giderilmesinde aynen taksim ne zaman mümkün olur?", "requiredKeywords": ["ortaklığın giderilmesi", "aynen taksim"] },
+  { "question": "İhtarnamenin temerrüde etkisi nedir?", "requiredKeywords": ["temerrüt", "ihtarname"] },
+  { "question": "Haksız fiilde illiyet bağı nasıl kesilir?", "requiredKeywords": ["haksız fiil", "illiyet bağı"] },
+  { "question": "Tüketici kredi sözleşmesinde cayma hakkı süresi kaç gündür?", "requiredKeywords": ["cayma hakkı", "14 gün"] }
+]
