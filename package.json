@@ -6,12 +6,20 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepare": "husky",
     "eval:ai": "node ./scripts/run-ai-evals.mjs",
     "test": "vitest run",
-    "test:tbk100": "vitest run tests/tbk100.test.ts"
+    "test:tbk100": "vitest run tests/tbk100.test.ts",
+    "test:litigation": "vitest run tests/litigation-core.test.ts",
+    "quality:litigation": "npm run check && npm run test:litigation"
   },
   "dependencies": {
+    "@ai-sdk/cohere": "^3.0.21",
     "@ai-sdk/google": "^1.2.22",
     "@ai-sdk/openai": "^1.3.24",
     "@cosmograph/react": "^2.1.0",
@@ -38,15 +46,29 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@commitlint/cli": "^19.8.0",
+    "@commitlint/config-conventional": "^19.8.0",
     "@types/node": "^24.3.0",
     "@types/react": "^19.1.11",
     "@types/react-dom": "^19.1.7",
     "autoprefixer": "^10.4.21",
     "eslint": "^9.34.0",
     "eslint-config-next": "15.5.3",
+    "eslint-config-prettier": "^10.1.8",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.6",
     "postcss": "^8.5.6",
+    "prettier": "^3.6.2",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.9.2",
     "vitest": "^4.0.18"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,mjs,cjs,json,md,css}": [
+      "prettier --write"
+    ],
+    "*.{ts,tsx}": [
+      "eslint --fix"
+    ]
   }
 }

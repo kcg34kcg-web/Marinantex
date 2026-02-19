@@ -1,4 +1,6 @@
+import { z } from 'zod';
 import { createClient } from '@/utils/supabase/server';
+import { graphPayloadSchema, normalizeGraphRelation } from '@/lib/litigation/graph';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -18,9 +20,25 @@ interface GraphLinkRow {
   semantic_similarity: string;
 }
 
-export async function GET(_: Request, { params }: RouteParams) {
+const querySchema = z.object({
+  minSimilarity: z.coerce.number().min(0).max(1).default(0),
+  maxEdges: z.coerce.number().int().positive().max(10000).default(3000),
+});
+
+export async function GET(req: Request, { params }: RouteParams) {
   try {
     const { id: caseId } = await params;
+    const url = new URL(req.url);
+    const parsedQuery = querySchema.safeParse({
+      minSimilarity: url.searchParams.get('minSimilarity') ?? 0,
+      maxEdges: url.searchParams.get('maxEdges') ?? 3000,
+    });
+
+    if (!parsedQuery.success) {
+      return new Response('Geçersiz grafik filtreleri.', { status: 400 });
+    }
+
+    const { minSimilarity, maxEdges } = parsedQuery.data;
     const supabase = await createClient();
 
     const [{ data: nodesData, error: nodesError }, { data: linksData, error: linksError }] = await Promise.all([
@@ -49,18 +67,35 @@ export async function GET(_: Request, { params }: RouteParams) {
       y: 0,
     }));
 
-    const links = ((linksData ?? []) as GraphLinkRow[]).map((link, index) => ({
-      id: `${link.left_statement_id}-${link.right_statement_id}-${index}`,
-      source: link.left_statement_id,
-      target: link.right_statement_id,
-      relation: link.nli_label ?? 'neutral',
-      weight: Number(link.semantic_similarity),
-    }));
+    const nodeIds = new Set(nodes.map((node) => node.id));
 
-    return Response.json({
+    const allLinks = ((linksData ?? []) as GraphLinkRow[])
+      .filter((link) => nodeIds.has(link.left_statement_id) && nodeIds.has(link.right_statement_id))
+      .map((link, index) => ({
+        id: `${link.left_statement_id}-${link.right_statement_id}-${index}`,
+        source: link.left_statement_id,
+        target: link.right_statement_id,
+        relation: normalizeGraphRelation(link.nli_label),
+        weight: Number.isFinite(Number(link.semantic_similarity)) ? Number(link.semantic_similarity) : 0,
+      }));
+
+    const links = allLinks
+      .filter((link) => link.weight >= minSimilarity)
+      .sort((left, right) => right.weight - left.weight)
+      .slice(0, maxEdges);
+
+    const payload = graphPayloadSchema.parse({
       nodes,
       links,
+      meta: {
+        totalCandidates: allLinks.length,
+        returnedLinks: links.length,
+        minSimilarity,
+        maxEdges,
+      },
     });
+
+    return Response.json(payload);
   } catch {
     return new Response('Graf servisi geçici olarak kullanılamıyor.', { status: 500 });
   }

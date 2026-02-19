@@ -1,6 +1,8 @@
+import { cohere } from '@ai-sdk/cohere';
 import { google } from '@ai-sdk/google';
 import { openai } from '@ai-sdk/openai';
 import { generateObject, streamText } from 'ai';
+import { serverEnv } from '@/lib/config/env.server';
 import { modelHealthSchema } from '@/lib/ai/schemas';
 
 export type LegalModelTier = 'drafting' | 'summary';
@@ -8,11 +10,15 @@ type SupportedModel = Parameters<typeof streamText>[0]['model'];
 
 interface LegalModelSelection {
   model: SupportedModel;
-  providerName: 'google' | 'openai';
+  providerName: 'google' | 'cohere' | 'openai';
   modelId: string;
 }
 
 export const getLegalModel = (tier: LegalModelTier = 'drafting'): SupportedModel => {
+  if (!serverEnv.GOOGLE_GENERATIVE_AI_API_KEY) {
+    return getFallbackDraftingModel();
+  }
+
   if (tier === 'summary') {
     return google('gemini-1.5-flash');
   }
@@ -20,7 +26,19 @@ export const getLegalModel = (tier: LegalModelTier = 'drafting'): SupportedModel
   return google('gemini-1.5-pro');
 };
 
+function getFallbackSummaryModel(): SupportedModel {
+  if (serverEnv.COHERE_API_KEY) {
+    return cohere('command-r') as unknown as SupportedModel;
+  }
+
+  return openai('gpt-4o-mini') as SupportedModel;
+}
+
 function getFallbackDraftingModel(): SupportedModel {
+  if (serverEnv.COHERE_API_KEY) {
+    return cohere('command-r-plus') as unknown as SupportedModel;
+  }
+
   return openai('gpt-4o') as SupportedModel;
 }
 
@@ -41,10 +59,17 @@ async function checkModelHealth(model: SupportedModel, timeoutMs = 10_000): Prom
   return Promise.race([testPromise, timeoutPromise]);
 }
 
-export async function resolveLegalModelWithFallback(
-  tier: LegalModelTier = 'drafting'
-): Promise<LegalModelSelection> {
+export async function resolveLegalModelWithFallback(tier: LegalModelTier = 'drafting'): Promise<LegalModelSelection> {
   if (tier === 'summary') {
+    if (!serverEnv.GOOGLE_GENERATIVE_AI_API_KEY) {
+      const fallbackSummaryModel = getFallbackSummaryModel();
+      return {
+        model: fallbackSummaryModel,
+        providerName: serverEnv.COHERE_API_KEY ? 'cohere' : 'openai',
+        modelId: serverEnv.COHERE_API_KEY ? 'command-r' : 'gpt-4o-mini',
+      };
+    }
+
     const summaryModel = getLegalModel('summary');
     return {
       model: summaryModel,
@@ -66,7 +91,7 @@ export async function resolveLegalModelWithFallback(
 
   return {
     model: getFallbackDraftingModel(),
-    providerName: 'openai',
-    modelId: 'gpt-4o',
+    providerName: serverEnv.COHERE_API_KEY ? 'cohere' : 'openai',
+    modelId: serverEnv.COHERE_API_KEY ? 'command-r-plus' : 'gpt-4o',
   };
 }

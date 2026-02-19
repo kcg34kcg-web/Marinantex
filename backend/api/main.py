@@ -19,9 +19,11 @@ from infrastructure.cache.redis_client import RedisClient
 from infrastructure.agents.checkpoint import AsyncPostgresCheckpointer
 from infrastructure.config import settings
 
-# API routes (will be created in next steps)
-# from api.routes import chat, search, admin
+# API routes
+from api.routes import rag as rag_route   # Step 10 — RAG query endpoint
+# from api.routes import chat, search, admin  (future steps)
 from api.middleware.privacy_gateway import PrivacyMiddleware
+from api.middleware.tenant_middleware import TenantMiddleware
 
 # ============================================================================
 # Logging Configuration
@@ -152,6 +154,9 @@ app.add_middleware(
 # Privacy Middleware (CRITICAL: Must be first in chain)
 # ============================================================================
 
+# TenantMiddleware: resolves bureau_id from X-Bureau-ID header (Step 6)
+app.add_middleware(TenantMiddleware)
+
 app.add_middleware(PrivacyMiddleware)
 
 # ============================================================================
@@ -223,9 +228,13 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 # ============================================================================
-# API Routes (to be implemented in PHASE 2-4)
+# API Routes
 # ============================================================================
 
+# Step 10 — RAG query (event_date + decision_date + lehe kanun)
+app.include_router(rag_route.router, prefix="/api/v1/rag", tags=["RAG"])
+
+# Future steps:
 # app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 # app.include_router(search.router, prefix="/api/v1/search", tags=["Search"])
 # app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])

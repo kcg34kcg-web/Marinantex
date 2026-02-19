@@ -4,6 +4,13 @@ export interface LayoutNode {
   y: number;
 }
 
+type WorkerLikeScope = {
+  onmessage: ((event: MessageEvent<LayoutRequest>) => void) | null;
+  postMessage: (message: LayoutResponse, transfer: ArrayBuffer[]) => void;
+};
+
+const workerScope = self as unknown as WorkerLikeScope;
+
 interface LayoutLink {
   source: string;
   target: string;
@@ -15,10 +22,18 @@ interface LayoutRequest {
   width: number;
   height: number;
   iterations?: number;
+  frameBudgetMs?: number;
 }
 
 interface LayoutResponse {
-  nodes: LayoutNode[];
+  ids: string[];
+  coords: ArrayBuffer;
+  meta: {
+    iterations: number;
+    durationMs: number;
+    nodeCount: number;
+    edgeCount: number;
+  };
 }
 
 function getRandomCoordinate(max: number): number {
@@ -26,8 +41,10 @@ function getRandomCoordinate(max: number): number {
 }
 
 function forceLayout(input: LayoutRequest): LayoutResponse {
-  const iterations = input.iterations ?? 120;
+  const requestedIterations = input.iterations ?? 120;
+  const frameBudgetMs = input.frameBudgetMs ?? 20;
   const nodeMap = new Map<string, LayoutNode>();
+  const startedAt = Date.now();
 
   const nodes = input.nodes.map((node) => ({
     ...node,
@@ -40,8 +57,13 @@ function forceLayout(input: LayoutRequest): LayoutResponse {
   const repulsionStrength = 2200;
   const springStrength = 0.02;
   const damping = 0.8;
+  let completedIterations = 0;
 
-  for (let iteration = 0; iteration < iterations; iteration += 1) {
+  for (let iteration = 0; iteration < requestedIterations; iteration += 1) {
+    if (Date.now() - startedAt > frameBudgetMs) {
+      break;
+    }
+
     const velocityMap = new Map<string, { vx: number; vy: number }>();
 
     for (const node of nodes) {
@@ -100,13 +122,40 @@ function forceLayout(input: LayoutRequest): LayoutResponse {
 
       node.x += velocity.vx * damping;
       node.y += velocity.vy * damping;
+
+      if (!Number.isFinite(node.x)) {
+        node.x = getRandomCoordinate(input.width);
+      }
+
+      if (!Number.isFinite(node.y)) {
+        node.y = getRandomCoordinate(input.height);
+      }
     }
+
+    completedIterations += 1;
   }
 
-  return { nodes };
+  const ids = nodes.map((node) => node.id);
+  const coords = new Float32Array(nodes.length * 2);
+
+  for (let i = 0; i < nodes.length; i += 1) {
+    coords[i * 2] = nodes[i].x;
+    coords[i * 2 + 1] = nodes[i].y;
+  }
+
+  return {
+    ids,
+    coords: coords.buffer,
+    meta: {
+      iterations: completedIterations,
+      durationMs: Date.now() - startedAt,
+      nodeCount: input.nodes.length,
+      edgeCount: input.links.length,
+    },
+  };
 }
 
-self.onmessage = (event: MessageEvent<LayoutRequest>) => {
+workerScope.onmessage = (event: MessageEvent<LayoutRequest>) => {
   const result = forceLayout(event.data);
-  self.postMessage(result);
+  workerScope.postMessage(result, [result.coords]);
 };

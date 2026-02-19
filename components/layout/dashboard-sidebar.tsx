@@ -1,8 +1,20 @@
-"use client";
+'use client';
 
 import Link from 'next/link';
 import type { Route } from 'next';
-import { Briefcase, LayoutDashboard, Users, Scale, PanelLeftClose, PanelLeftOpen, Calculator, Building2, UserPlus, UserCircle2 } from 'lucide-react';
+import {
+  Briefcase,
+  LayoutDashboard,
+  Users,
+  Scale,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Calculator,
+  Building2,
+  UserPlus,
+  UserCircle2,
+  BrainCircuit,
+} from 'lucide-react';
 import { useUiStore } from '@/store/ui-store';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -17,6 +29,7 @@ const navigation = [
   { href: '/tools/calculator/interest', label: 'Faiz Aracı', icon: Calculator },
   { href: '/tools/calculator/smm', label: 'SMM Aracı', icon: Calculator },
   { href: '/tools/calculator/execution', label: 'İcra Masrafı', icon: Calculator },
+  { href: '/tools/hukuk-ai', label: 'Hukuk AI', icon: BrainCircuit },
 ] as const;
 
 export function DashboardSidebar() {
