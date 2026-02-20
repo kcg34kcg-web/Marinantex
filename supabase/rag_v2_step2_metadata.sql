@@ -56,6 +56,11 @@ comment on column public.documents.collected_at is
 --   collected_at.  We replace it here so the RAG service receives full metadata
 --   without an extra round-trip to Supabase.
 --
+--   PostgreSQL does not allow CREATE OR REPLACE to change a function's return
+--   type.  We must DROP the old signature first, then recreate.
+--
+drop function if exists public.hybrid_legal_search(vector, text, uuid, integer);
+
 create or replace function public.hybrid_legal_search(
   query_embedding vector(1536),
   query_text       text,

@@ -6,8 +6,9 @@ Deterministic, pure-Python date arithmetic for Turkish legal deadline calculatio
 Design principles:
     - PURE functions (no side effects, no I/O, no randomness).
     - Turkish calendar rules: Saturdays and Sundays are non-business days.
-      Official Turkish public holidays are NOT encoded here — they change
-      annually.  The deadline_engine layer adds holiday-awareness when needed.
+      Official Turkish public holidays are encoded in ``_RELIGIOUS_HOLIDAYS``
+      for 2024-2030 and static fixed holidays for any year.
+      ``add_business_days()`` and ``next_business_day()`` are holiday-aware.
     - All functions accept and return ``datetime.date`` objects.
     - On invalid input, raises ``ValueError`` with a descriptive message.
 
@@ -106,6 +107,122 @@ def business_days_between(start: date, end: date) -> int:
 
 
 # ============================================================================
+# Turkish Public Holiday Calendar
+# ============================================================================
+
+# Sabit resmî tatiller (ay, gün) — her yıl aynı
+_FIXED_HOLIDAY_MMDD: frozenset[tuple[int, int]] = frozenset({
+    (1, 1),    # Yılbaşı
+    (4, 23),   # Ulusal Egemenlik ve Çocuk Bayramı
+    (5, 1),    # İşçi ve Emekçi Bayramı
+    (5, 19),   # Atatürk'ü Anma, Gençlik ve Spor Bayramı
+    (7, 15),   # Demokrasi ve Millî Birlik Günü (2017 itibarıyla)
+    (8, 30),   # Zafer Bayramı
+    (10, 29),  # Cumhuriyet Bayramı
+})
+
+# Dini bayramlar — Hicrî takvime göre yıla özgü (arife dahil)
+# Kaynak: Diyanet İşleri Başkanlığı takvimi + Cumhurbaşkanlığı Genelgeleri
+_RELIGIOUS_HOLIDAYS: dict[int, frozenset[date]] = {
+    2024: frozenset({
+        # Ramazan Bayramı: arife + 3 gün
+        date(2024, 4, 9),  date(2024, 4, 10), date(2024, 4, 11), date(2024, 4, 12),
+        # Kurban Bayramı: arife + 4 gün
+        date(2024, 6, 15), date(2024, 6, 16), date(2024, 6, 17),
+        date(2024, 6, 18), date(2024, 6, 19),
+    }),
+    2025: frozenset({
+        # Ramazan Bayramı
+        date(2025, 3, 29), date(2025, 3, 30), date(2025, 3, 31), date(2025, 4, 1),
+        # Kurban Bayramı
+        date(2025, 6, 5),  date(2025, 6, 6),  date(2025, 6, 7),
+        date(2025, 6, 8),  date(2025, 6, 9),
+    }),
+    2026: frozenset({
+        # Ramazan Bayramı
+        date(2026, 3, 19), date(2026, 3, 20), date(2026, 3, 21), date(2026, 3, 22),
+        # Kurban Bayramı
+        date(2026, 5, 26), date(2026, 5, 27), date(2026, 5, 28),
+        date(2026, 5, 29), date(2026, 5, 30),
+    }),
+    2027: frozenset({
+        # Ramazan Bayramı
+        date(2027, 3, 8),  date(2027, 3, 9),  date(2027, 3, 10), date(2027, 3, 11),
+        # Kurban Bayramı
+        date(2027, 5, 15), date(2027, 5, 16), date(2027, 5, 17),
+        date(2027, 5, 18), date(2027, 5, 19),
+    }),
+    2028: frozenset({
+        # Ramazan Bayramı
+        date(2028, 2, 25), date(2028, 2, 26), date(2028, 2, 27), date(2028, 2, 28),
+        # Kurban Bayramı
+        date(2028, 5, 4),  date(2028, 5, 5),  date(2028, 5, 6),
+        date(2028, 5, 7),  date(2028, 5, 8),
+    }),
+    2029: frozenset({
+        # Ramazan Bayramı
+        date(2029, 2, 13), date(2029, 2, 14), date(2029, 2, 15), date(2029, 2, 16),
+        # Kurban Bayramı
+        date(2029, 4, 24), date(2029, 4, 25), date(2029, 4, 26),
+        date(2029, 4, 27), date(2029, 4, 28),
+    }),
+    2030: frozenset({
+        # Ramazan Bayramı
+        date(2030, 2, 2),  date(2030, 2, 3),  date(2030, 2, 4),  date(2030, 2, 5),
+        # Kurban Bayramı
+        date(2030, 4, 13), date(2030, 4, 14), date(2030, 4, 15),
+        date(2030, 4, 16), date(2030, 4, 17),
+    }),
+}
+
+
+def get_turkish_holidays(year: int) -> frozenset[date]:
+    """
+    Verilen yıl için Türk resmî tatillerini döndürür.
+
+    Sabit tatiller her yıl hesaplanır; dini bayramlar (Ramazan + Kurban
+    arifeleri dahil) 2024-2030 yılları için kodlanmıştır.  Kapsam dışı
+    yıllarda sadece sabit tatiller döndürülür ve bir uyarı logu yazılır.
+
+    Args:
+        year: Takvim yılı (ör. 2026).
+
+    Returns:
+        O yıla ait tatil tarihlerinden oluşan frozenset[date].
+    """
+    fixed = frozenset(
+        date(year, m, d)
+        for m, d in _FIXED_HOLIDAY_MMDD
+    )
+    religious = _RELIGIOUS_HOLIDAYS.get(year, frozenset())
+    if year not in _RELIGIOUS_HOLIDAYS:
+        logger.warning(
+            "Turkish religious holidays not available for year %d; "
+            "only fixed holidays will be observed. "
+            "Add entries to _RELIGIOUS_HOLIDAYS in date_calculator.py.",
+            year,
+        )
+    return fixed | religious
+
+
+def is_turkish_holiday(d: date) -> bool:
+    """
+    Verilen tarihin Türk resmî tatili olup olmadığını kontrol eder.
+
+    Sabit tatiller O(1), dini bayramlar set-lookup ile kontrol edilir.
+
+    Args:
+        d: Kontrol edilecek tarih.
+
+    Returns:
+        True ise resmî tatil, False ise normal gün.
+    """
+    if (d.month, d.day) in _FIXED_HOLIDAY_MMDD:
+        return True
+    return d in _RELIGIOUS_HOLIDAYS.get(d.year, frozenset())
+
+
+# ============================================================================
 # Calendar arithmetic
 # ============================================================================
 
@@ -198,17 +315,68 @@ def add_years(start: date, years: int) -> DateCalculatorResult:
 
 def next_business_day(d: date) -> date:
     """
-    Returns ``d`` itself if it is a business day, otherwise returns
-    the next Monday.
+    Verilen tarih iş günüyse aynen döndürür; hafta sonu veya resmî
+    tatilse bir sonraki iş gününe ilerler.
 
-    Useful for adjusting deadlines that fall on weekends.
+    Hukuki süre hesabında sürenin son günü tatile denk gelirse süre
+    ilk iş günü uzar (HMK md. 92/3).
 
     Args:
-        d: Target date.
+        d: Hedef tarih.
 
     Returns:
-        ``d`` or the next working day.
+        ``d`` veya sonraki çalışma günü.
     """
-    while not is_business_day(d):
+    while not is_business_day(d) or is_turkish_holiday(d):
         d += timedelta(days=1)
     return d
+
+
+def add_business_days(start: date, days: int) -> DateCalculatorResult:
+    """
+    Başlangıç tarihine ``days`` iş günü ekler.
+
+    Hafta sonları (Cumartesi-Pazar) ve Türkiye resmî tatillerini (sabit
+    + dini bayramlar, arife dahil) atlar.  Negatif değer geçmişe gider.
+
+    Hukuki dayanak:
+        HMK md. 92-94 — Medeni yargılama sürelerinin hesabı
+        İYUK md. 8    — İdari yargılama sürelerinin hesabı
+
+    Args:
+        start: Başlangıç tarihi.
+        days:  Eklenecek iş günü sayısı (negatif olabilir).
+
+    Returns:
+        DateCalculatorResult — result_date, days_from_start, vb.
+    """
+    if days == 0:
+        return DateCalculatorResult(
+            result_date=start,
+            days_from_start=0,
+            business_days_from_start=0,
+            input_date=start,
+            description=f"{start.isoformat()} + 0 iş günü = {start.isoformat()}",
+        )
+
+    step = timedelta(days=1 if days > 0 else -1)
+    remaining = abs(days)
+    current = start
+    while remaining > 0:
+        current += step
+        if is_business_day(current) and not is_turkish_holiday(current):
+            remaining -= 1
+
+    cal_days = (current - start).days
+    bdays = (
+        business_days_between(start, current)
+        if cal_days >= 0
+        else -business_days_between(current, start)
+    )
+    return DateCalculatorResult(
+        result_date=current,
+        days_from_start=cal_days,
+        business_days_from_start=bdays,
+        input_date=start,
+        description=f"{start.isoformat()} + {days} iş günü = {current.isoformat()}",
+    )

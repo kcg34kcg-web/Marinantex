@@ -2,15 +2,15 @@
 Tests — Step 11: Hibrit Arama ve Asenkron Güncelleme Mimarisi
 =============================================================
 Gruplar:
-    A — RRF matematik fonksiyonları                       (6 test)
-    B — reciprocal_rank_fusion() füzyon mantığı           (8 test)
-    C — SynonymStore: expand, expand_query, has_synonyms  (9 test)
-    D — build_expanded_query()                            (4 test)
-    E — RRFRetriever: tam yol, fallback, hata durumu      (7 test)
-    F — IndexTaskResult ve IndexTaskStatus                (4 test)
-    G — _do_index_document / _do_delete_document stub     (4 test)
+    A — RRF matematik fonksiyonları                         (6 test)
+    B — reciprocal_rank_fusion() füzyon mantığı             (8 test)
+    C — SynonymStore: expand, expand_query, has_synonyms    (9 test)
+    D — build_expanded_query()                              (4 test)
+    E — RRFRetriever: tam yol, fallback, Gap1/2 düzeltme    (9 test)
+    F — IndexTaskResult ve IndexTaskStatus                  (4 test)
+    G — _do_index_document / retry wrapper (Gap 3)          (7 test)
 
-Toplam: 42 yeni test  →  351 + 42 = 393 hedef
+Toplam: 47 test
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ from infrastructure.async_indexing.indexing_tasks import (
     IndexTaskStatus,
     _do_delete_document,
     _do_index_document,
+    _do_index_document_with_retry,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -233,6 +234,8 @@ class TestBuildExpandedQuery:
 class TestRRFRetriever:
     """E: RRFRetriever tam yol, fallback ve hata durumu."""
 
+    pytestmark = pytest.mark.asyncio
+
     async def test_rrf_enabled_calls_search_twice(self) -> None:
         rrf = _make_rrf_retriever()
         with patch("infrastructure.search.rrf_retriever.settings") as mock_settings:
@@ -365,6 +368,50 @@ class TestRRFRetriever:
         assert "y" in result.rrf_scores
         assert all(v > 0 for v in result.rrf_scores.values())
 
+    async def test_rrf_scores_normalized_to_unit_interval(self) -> None:
+        """Gap 1: RRF füzyon sonrası normalize edilmiş skorlar ≤ 1.0 olmalı."""
+        rrf = _make_rrf_retriever()
+        with patch("infrastructure.search.rrf_retriever.settings") as mock_settings:
+            mock_settings.rrf_enabled = True
+            mock_settings.synonym_expansion_enabled = False
+            mock_settings.rrf_k = 60
+            result = await rrf.search(
+                embedding=[0.1] * 8,
+                query_text="test",
+                case_id=None,
+                max_sources=10,
+                min_score=0.0,
+            )
+        assert result.fusion_applied is True
+        # Max-normalizasyon sonrası en yüksek skor tam 1.0 olmalı
+        assert max(result.rrf_scores.values()) == pytest.approx(1.0, abs=1e-9)
+        # Tüm skorlar [0, 1] aralığında
+        assert all(0.0 <= v <= 1.0 for v in result.rrf_scores.values())
+
+    async def test_ceza_domain_uses_rrf_k_ceza(self) -> None:
+        """Gap 2: law_domain='CEZA' için rrf_k_ceza (40) kullanılmalı."""
+        sem = [_doc("c1", 0.9), _doc("c2", 0.8)]
+        kw  = [_doc("c1", 0.9), _doc("c2", 0.8)]  # shared → yüksek kombine skor
+        rrf = _make_rrf_retriever(semantic_docs=sem, keyword_docs=kw)
+        with patch("infrastructure.search.rrf_retriever.settings") as mock_settings:
+            mock_settings.rrf_enabled = True
+            mock_settings.synonym_expansion_enabled = False
+            mock_settings.rrf_k = 60
+            mock_settings.rrf_k_ceza = 40
+            result = await rrf.search(
+                embedding=[0.1] * 8,
+                query_text="hapis cezası",
+                case_id=None,
+                max_sources=10,
+                min_score=0.0,
+                law_domain="CEZA",
+            )
+        # Fusion çalışmalı, belgeler dönmeli
+        assert result.fusion_applied is True
+        assert len(result.documents) > 0
+        # Normalize edilmiş maks skor 1.0
+        assert max(result.rrf_scores.values()) == pytest.approx(1.0, abs=1e-9)
+
 
 # ============================================================================
 # F — IndexTaskResult ve IndexTaskStatus
@@ -438,3 +485,55 @@ class TestIndexingTaskStubs:
         ):
             result = _do_delete_document("doc-4")
         assert result.task_name == "delete_document_task"
+
+    # ── Gap 3: _do_index_document_with_retry ─────────────────────────────
+
+    def test_retry_wrapper_recovers_on_second_attempt(self) -> None:
+        """Gap 3: geçici hata sonrası ikinci denemede başarılı → SUCCESS."""
+        fail = IndexTaskResult(
+            "index_document_task", "doc-r1", IndexTaskStatus.FAILED, 5, "geçici hata"
+        )
+        ok = IndexTaskResult(
+            "index_document_task", "doc-r1", IndexTaskStatus.SUCCESS, 10, "ok"
+        )
+        with patch(
+            "infrastructure.async_indexing.indexing_tasks._do_index_document",
+            side_effect=[fail, ok],
+        ):
+            with patch("time.sleep"):  # gecikmeyi atla
+                result = _do_index_document_with_retry(
+                    "doc-r1", "içerik", max_retries=1, retry_delay_base_s=0.0,
+                )
+        assert result.status == IndexTaskStatus.SUCCESS
+
+    def test_retry_wrapper_dead_letter_after_max_retries(self) -> None:
+        """Gap 3: tüm denemeler başarısızsa dead-letter metadata ile FAILED döner."""
+        fail = IndexTaskResult(
+            "index_document_task", "doc-r2", IndexTaskStatus.FAILED, 5, "kalıcı hata"
+        )
+        with patch(
+            "infrastructure.async_indexing.indexing_tasks._do_index_document",
+            return_value=fail,
+        ):
+            with patch("time.sleep"):
+                result = _do_index_document_with_retry(
+                    "doc-r2", "içerik", max_retries=2, retry_delay_base_s=0.0,
+                )
+        assert result.status == IndexTaskStatus.FAILED
+        assert result.retries == 2
+        assert result.metadata.get("dead_letter") is True
+
+    def test_retry_wrapper_zero_retries_returns_immediately(self) -> None:
+        """Gap 3: max_retries=0 → hemen FAILED döner, time.sleep çağrılmaz."""
+        fail = IndexTaskResult(
+            "index_document_task", "doc-r3", IndexTaskStatus.FAILED, 5, "hata"
+        )
+        with patch(
+            "infrastructure.async_indexing.indexing_tasks._do_index_document",
+            return_value=fail,
+        ) as mock_idx:
+            result = _do_index_document_with_retry(
+                "doc-r3", "içerik", max_retries=0, retry_delay_base_s=0.0,
+            )
+        assert result.status == IndexTaskStatus.FAILED
+        assert mock_idx.call_count == 1  # yalnızca bir kez çağrıldı

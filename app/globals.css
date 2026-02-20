@@ -2,25 +2,118 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   BABYLEXIT HUKUK İŞLETİM SİSTEMİ — DESIGN TOKEN ALTYAPISI
+   60/30/10 Kural: legal-primary(%60) + legal-action(%30) + legal-accent(%10)
+   OKLCH renk uzayı: algısal eşit dağılım, kusursuz geçişler
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Aydınlık Tema (Varsayılan) ─────────────────────────────────────────── */
 :root {
+  /* HSL tokenlar — geriye dönük uyumluluk */
   --background: 0 0% 100%;
   --foreground: 222 47% 11%;
   --primary: 221 83% 53%;
   --primary-foreground: 0 0% 100%;
   --accent: 24 95% 53%;
   --accent-foreground: 0 0% 100%;
-  --ring: 24 95% 53%;
+  --ring: 221 83% 53%; /* Focus ring: Royal Blue (önceki orange'dan değişti) */
   --border: 214 32% 91%;
   --input: 214 32% 91%;
   --muted: 210 40% 96%;
   --muted-foreground: 215 16% 47%;
   --radius: 0.75rem;
+
+  /* OKLCH semantik tokenlar — Aydınlık */
+  --color-legal-bg: oklch(98% 0.01 250); /* #F8FAFC — astigmat dostu zemin */
+  --color-legal-surface: oklch(100% 0 0); /* #FFFFFF — form/kart yüzeyi */
+  --color-legal-primary: oklch(25% 0.04 250); /* #0F172A — Deep Navy: otorite, köklülük */
+  --color-legal-action: oklch(60% 0.16 250); /* #3B82F6 — Royal Blue: CTA, WCAG AA */
+  --color-legal-accent: oklch(75% 0.12 70); /* #D4A574 — Soft Gold: premium vurgu */
+  --color-legal-success: oklch(60% 0.12 160); /* #009B77 — Emerald Ice: AI onay */
+  --color-legal-border: oklch(92% 0.01 250); /* ~#E2E8F0 */
+  --color-legal-text-secondary: oklch(55% 0.02 250); /* ~#64748B */
+
+  /* Sepia tokenlar (bu modda kullanılmaz, tanımlanır) */
+  --color-sepia-bg: #fbf0d9;
+  --color-sepia-surface: #f5e5cf;
+  --color-sepia-text: #2b1c14;
+  --color-sepia-text-muted: #5f4b32;
+  --color-sepia-accent: #d1b07b;
+  --color-sepia-border: #e8d5b5;
 }
 
+/* ─── Karanlık Tema ──────────────────────────────────────────────────────── */
+/* Antrasit gri zemin — saf siyah değil (halasyon önleme, astigmat koruması) */
+.dark {
+  --background: 222 47% 7%; /* #0B1120 */
+  --foreground: 214 32% 89%; /* #E2E8F0 — %87 opacity kırık beyaz eşdeğeri */
+  --primary: 221 83% 62%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 24 95% 53%;
+  --accent-foreground: 0 0% 100%;
+  --ring: 221 83% 62%;
+  --border: 215 25% 16%; /* #1E293B */
+  --input: 215 25% 16%;
+  --muted: 217 25% 12%; /* #131C2E */
+  --muted-foreground: 215 16% 55%; /* #7B8EA8 */
+
+  --color-legal-bg: #0f172a; /* Derin lacivert — göz yormuyor */
+  --color-legal-surface: #1e293b; /* Kart yüzeyleri */
+  --color-legal-primary: #e2e8f0; /* Kırık beyaz tipografi */
+  --color-legal-action: #3b82f6; /* Royal Blue — sabit kalır */
+  --color-legal-accent: #d4a574; /* Soft Gold — sabit kalır */
+  --color-legal-success: #34d399; /* Parlak emerald — dark'ta okunabilir */
+  --color-legal-border: #1e293b;
+  --color-legal-text-secondary: #94a3b8; /* Gümüş gri ikincil metin */
+}
+
+/* ─── Sepya Modu (E-Ink / Okuma) ─────────────────────────────────────────── */
+/* Harvey AI, CoCounsel, Lexis+'da bulunmayan eşsiz özellik */
+/* Parşömen hissi: soğuk mavi ışığı nötralize eder, okuma hızını artırır */
+.sepia {
+  --background: 36 60% 93%; /* #FBF0D9 parşömen */
+  --foreground: 24 50% 14%; /* #2B1C14 mürekkep kahvesi */
+  --primary: 25 40% 35%; /* #7A4A28 koyu kahve */
+  --primary-foreground: 36 60% 95%;
+  --accent: 32 55% 55%; /* #C2833A antik altın */
+  --accent-foreground: 0 0% 100%;
+  --ring: 32 55% 55%;
+  --border: 32 30% 80%; /* #E8D5B5 */
+  --input: 32 30% 80%;
+  --muted: 36 30% 88%; /* #F0E4CC */
+  --muted-foreground: 24 30% 45%; /* #8C6B4A */
+
+  --color-legal-bg: #fbf0d9;
+  --color-legal-surface: #f5e5cf;
+  --color-legal-primary: #2b1c14;
+  --color-legal-action: #a27b55; /* Toprak rengi CTA */
+  --color-legal-accent: #d1b07b; /* Antik altın */
+  --color-legal-success: #6b8e6b; /* Nemli orman yeşili */
+  --color-legal-border: #e8d5b5;
+  --color-legal-text-secondary: #8c6b4a;
+}
+
+/* ─── Base ───────────────────────────────────────────────────────────────── */
 * {
   @apply border-border;
 }
 
 body {
-  @apply bg-background text-foreground antialiased;
+  @apply bg-background text-foreground antialiased font-sans;
+}
+
+/* ─── Shimmer skeleton utility (spinner yerine — bekleme psikolojisi yönetimi) */
+@layer utilities {
+  .animate-shimmer {
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.45) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.8s linear infinite;
+  }
+
+  .dark .animate-shimmer {
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.06) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.8s linear infinite;
+  }
 }

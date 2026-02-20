@@ -10,8 +10,9 @@ Gruplar:
     F — lex_posterior_boost()            (7 test)
     G — LegalReranker.rerank()           (9 test)
     H — RAGService entegrasyonu          (3 test)
+    I — Gap 1/2/3 tamamlayıcı testler    (5 test)
 
-Toplam: 46 yeni test  →  393 + 46 = 439 hedef
+Toplam: 52 yeni test  →  874 + 5 = 879 hedef
 """
 
 from __future__ import annotations
@@ -465,6 +466,8 @@ class TestLegalReranker:
 class TestRAGServiceRerankerIntegration:
     """H: RAGService._reranker entegrasyonu."""
 
+    pytestmark = pytest.mark.asyncio
+
     def _make_service(self, docs: List[LegalDocument]):
         from application.services.rag_service import RAGService
         from infrastructure.context.context_builder import ContextBuilder
@@ -541,3 +544,187 @@ class TestRAGServiceRerankerIntegration:
         req = RAGQueryRequest(query="kıdem tazminatı nedir?")
         resp = await svc.query(req)
         assert len(resp.sources) == 2
+
+
+# ============================================================================
+# I — Gap 1/2/3 tamamlayıcı testler
+# ============================================================================
+
+class TestGap123Integration:
+    """
+    I: _write_rerank_audit, law_domain passthrough, conflict_notes response.
+    """
+
+    # ── Gap 1 testleri ────────────────────────────────────────────────────────
+
+    def test_write_rerank_audit_calls_supabase_insert(self) -> None:
+        """_write_rerank_audit reranking_audit tablosuna insert çağırmalı."""
+        reranker = LegalReranker()
+        docs = [_doc("d1", final_score=0.9), _doc("d2", final_score=0.7)]
+        results = [
+            RerankResult(document=docs[0], score=RerankScore(base_score=0.9)),
+            RerankResult(document=docs[1], score=RerankScore(base_score=0.7)),
+        ]
+        mock_sb = MagicMock()
+        with patch(
+            "infrastructure.database.connection.get_supabase_client",
+            return_value=mock_sb,
+        ):
+            reranker._write_rerank_audit(
+                original_docs=docs,
+                results=results,
+                query_text="test sorgusu",
+                query_domain="is_hukuku",
+                bureau_id="bureau-1",
+                case_id="case-1",
+            )
+        mock_sb.table.assert_called_once_with("reranking_audit")
+        mock_sb.table.return_value.insert.assert_called_once()
+        rows = mock_sb.table.return_value.insert.call_args[0][0]
+        assert len(rows) == 2
+
+    def test_write_rerank_audit_nonfatal_on_db_error(self) -> None:
+        """Veritabanı hatası ana akışı çökertmemeli."""
+        reranker = LegalReranker()
+        docs = [_doc("d1")]
+        results = [RerankResult(document=docs[0], score=RerankScore(base_score=0.9))]
+        with patch(
+            "infrastructure.database.connection.get_supabase_client",
+            side_effect=RuntimeError("DB unavailable"),
+        ):
+            # Herhangi bir istisna fırlatmamalı
+            reranker._write_rerank_audit(
+                original_docs=docs,
+                results=results,
+                query_text="sorgu",
+                query_domain=None,
+            )
+
+    def test_write_rerank_audit_original_rank_preserved(self) -> None:
+        """Rerank sonrası sıra değişen belgede original_rank doğru olmalı."""
+        reranker = LegalReranker()
+        docs = [_doc("d1", final_score=0.9), _doc("d2", final_score=0.7)]
+        # Rerank sonucu: d2 öne geçti
+        results = [
+            RerankResult(document=docs[1], score=RerankScore(base_score=0.95)),
+            RerankResult(document=docs[0], score=RerankScore(base_score=0.80)),
+        ]
+        captured: list = []
+        mock_sb = MagicMock()
+        mock_sb.table.return_value.insert.side_effect = (
+            lambda rows: captured.extend(rows) or MagicMock()
+        )
+        with patch(
+            "infrastructure.database.connection.get_supabase_client",
+            return_value=mock_sb,
+        ):
+            reranker._write_rerank_audit(
+                original_docs=docs,
+                results=results,
+                query_text="test",
+                query_domain=None,
+            )
+        d2_row = next(r for r in captured if r["document_id"] == "d2")
+        assert d2_row["original_rank"] == 2   # RRF'de 2. sıradaydı
+        assert d2_row["reranked_rank"] == 1   # rerank sonrası 1. sıraya çıktı
+
+    # ── Gap 2 testi ────────────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_law_domain_passed_to_rrf_search(self) -> None:
+        """RAGService, tespit edilen law_domain'i rrf.search'e iletmeli."""
+        from api.schemas import RAGQueryRequest
+        from application.services.rag_service import RAGService
+        from infrastructure.context.context_builder import ContextBuilder
+
+        docs = [_doc("d1", final_score=0.8)]
+        mock_router = MagicMock()
+        mock_router.decide.return_value = MagicMock(tier=QueryTier.TIER2)
+        mock_router.generate = AsyncMock(return_value=("Cevap.", "openai/gpt-4o-mini"))
+        mock_guard = MagicMock()
+        mock_guard.check_query.return_value = None
+        mock_guard.check_context.return_value = None
+        mock_embedder = MagicMock()
+        mock_embedder._model = "text-embedding-3-small"
+        mock_embedder.embed_query = AsyncMock(return_value=[0.1] * 8)
+        mock_rrf = MagicMock()
+        mock_rrf.search = AsyncMock(return_value=RRFSearchResult(
+            documents=docs,
+            rrf_scores={d.id: d.final_score for d in docs},
+            semantic_count=1, keyword_count=0,
+            expanded_query="", fusion_applied=False,
+        ))
+        mock_reranker = MagicMock(spec=LegalReranker)
+        mock_reranker.rerank = MagicMock(return_value=[
+            RerankResult(document=docs[0], score=RerankScore(base_score=0.8))
+        ])
+        real_builder = ContextBuilder.__new__(ContextBuilder)
+        real_builder._system_reserve = 0
+        real_builder._query_reserve = 0
+        real_builder._response_reserve = 0
+        real_builder._safety_margin = 0.0
+        real_builder._min_snippet_chars = 80
+        svc = RAGService(
+            router=mock_router, guard=mock_guard, embedder=mock_embedder,
+            rrf=mock_rrf, reranker=mock_reranker, ctx_builder=real_builder,
+        )
+        svc._tier_max_tokens = lambda tier: 5000
+
+        # "kıdem + ihbar" -> is_hukuku domainı tespit edilmeli
+        req = RAGQueryRequest(query="kıdem tazminatı ihbar öneli hesabı")
+        await svc.query(req)
+
+        call_kwargs = mock_rrf.search.call_args[1]
+        assert call_kwargs.get("law_domain") == "is_hukuku"
+
+    # ── Gap 3 testi ────────────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_conflict_notes_surfaced_in_response_sources(self) -> None:
+        """Lex kural notları RAGResponse.sources[].conflict_notes'ta görünmeli."""
+        from api.schemas import RAGQueryRequest
+        from application.services.rag_service import RAGService
+        from infrastructure.context.context_builder import ContextBuilder
+
+        docs = [_doc("doc-A", final_score=0.9)]
+        expected_note = "LEX_SPECIALIS: 'doc-A' önceli almaktır"
+        mock_router = MagicMock()
+        mock_router.decide.return_value = MagicMock(tier=QueryTier.TIER2)
+        mock_router.generate = AsyncMock(return_value=("Cevap.", "openai/gpt-4o-mini"))
+        mock_guard = MagicMock()
+        mock_guard.check_query.return_value = None
+        mock_guard.check_context.return_value = None
+        mock_embedder = MagicMock()
+        mock_embedder._model = "text-embedding-3-small"
+        mock_embedder.embed_query = AsyncMock(return_value=[0.1] * 8)
+        mock_rrf = MagicMock()
+        mock_rrf.search = AsyncMock(return_value=RRFSearchResult(
+            documents=docs,
+            rrf_scores={d.id: d.final_score for d in docs},
+            semantic_count=1, keyword_count=0,
+            expanded_query="", fusion_applied=False,
+        ))
+        mock_reranker = MagicMock(spec=LegalReranker)
+        mock_reranker.rerank = MagicMock(return_value=[
+            RerankResult(
+                document=docs[0],
+                score=RerankScore(base_score=0.9),
+                conflict_notes=[expected_note],
+            )
+        ])
+        real_builder = ContextBuilder.__new__(ContextBuilder)
+        real_builder._system_reserve = 0
+        real_builder._query_reserve = 0
+        real_builder._response_reserve = 0
+        real_builder._safety_margin = 0.0
+        real_builder._min_snippet_chars = 80
+        svc = RAGService(
+            router=mock_router, guard=mock_guard, embedder=mock_embedder,
+            rrf=mock_rrf, reranker=mock_reranker, ctx_builder=real_builder,
+        )
+        svc._tier_max_tokens = lambda tier: 5000
+
+        req = RAGQueryRequest(query="kıdem tazminatı nedir?")
+        resp = await svc.query(req)
+
+        assert resp.sources[0].conflict_notes == [expected_note]

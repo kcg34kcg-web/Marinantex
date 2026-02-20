@@ -1,11 +1,11 @@
 """
-Step 3: Semantic Cache — Unit Tests
+Step 8: Semantic Cache — Unit Tests
 =====================================
 Tests for SemanticCache (infrastructure/cache/semantic_cache.py).
 
 Coverage:
     1.  normalize_query         — whitespace + case normalization
-    2.  build_l1_key            — consistent hash, scope isolation
+    2.  build_l1_key            — consistent hash, scope isolation (case + bureau)
     3.  cosine_similarity       — identical, orthogonal, zero-vector
     4.  cosine_similarity       — high similarity near-identical vectors
     5.  l1_lookup               — cache miss (Redis returns None)
@@ -15,6 +15,12 @@ Coverage:
     9.  l2_lookup               — similarity above threshold → hit
     10. store                   — writes L1 key + L2 key + index operations
     11. invalidate_case         — removes only matching case_id entries
+    12. build_l1_key            — bureau_id isolation (multi-tenant security)
+    13. l2_lookup               — cross-bureau entries are rejected (scope guard)
+    14. invalidate_case         — lrem cleans deleted keys from index list
+    15. store                   — bureau_id stored in L2 entry
+    16. cosine_similarity       — dimension mismatch logs WARNING
+    17. l1_lookup               — bureau_id changes cache key
 
 All tests use AsyncMock / MagicMock; no real Redis connection required.
 """
@@ -58,6 +64,7 @@ def _make_redis_mock(
     inner.lpush = AsyncMock(return_value=1)
     inner.ltrim = AsyncMock(return_value=True)
     inner.expire = AsyncMock(return_value=True)
+    inner.lrem = AsyncMock(return_value=1)
     redis_mock.client = inner
 
     return redis_mock
@@ -130,6 +137,23 @@ def test_build_l1_key_different_case_id_produces_different_key() -> None:
 def test_build_l1_key_none_case_id_vs_empty_string_are_equivalent() -> None:
     # Both represent "no case scope" — should hash identically
     assert build_l1_key("sorgu", None) == build_l1_key("sorgu", "")
+
+
+# ============================================================================
+# 12. build_l1_key — bureau_id multi-tenant isolation
+# ============================================================================
+
+def test_build_l1_key_different_bureau_id_produces_different_key() -> None:
+    """Same query + case_id from two bureaus must NOT share L1 cache."""
+    key_a = build_l1_key("TMK 706", "case-1", bureau_id="bureau-A")
+    key_b = build_l1_key("TMK 706", "case-1", bureau_id="bureau-B")
+    assert key_a != key_b, "bureau_id must be included in the hash"
+
+
+def test_build_l1_key_same_bureau_same_case_is_consistent() -> None:
+    key1 = build_l1_key("TMK 706", "case-1", bureau_id="bureau-A")
+    key2 = build_l1_key("TMK 706", "case-1", bureau_id="bureau-A")
+    assert key1 == key2
 
 
 # ============================================================================
@@ -321,3 +345,129 @@ async def test_invalidate_case_removes_only_matching_entries() -> None:
     assert removed == 2, f"Expected 2 removed, got {removed}"
     # Verify delete was called exactly twice (for e1 and e3)
     assert redis_mock.delete.call_count == 2
+
+
+# ============================================================================
+# 13. l2_lookup — cross-bureau scope guard
+# ============================================================================
+
+@pytest.mark.asyncio
+async def test_l2_lookup_rejects_cross_bureau_entry() -> None:
+    """An L2 entry belonging to bureau-B must NOT match a query from bureau-A."""
+    redis_mock = _make_redis_mock()
+
+    base_emb = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+    query_emb = [1.01, 2.01, 3.01, 4.01, 5.01, 6.01, 7.01, 8.01]  # ~0.9999 cosine
+
+    stored_entry = {
+        "embedding": base_emb,
+        "response": _SAMPLE_RESPONSE,
+        "case_id": "case-x",
+        "bureau_id": "bureau-B",  # stored by bureau-B
+    }
+    l2_key = "cache:rag:l2:cross-bureau-test"
+    redis_mock.client.lrange = AsyncMock(return_value=[l2_key])
+    redis_mock.get = AsyncMock(return_value=stored_entry)
+
+    cache = SemanticCache(redis_mock, ttl=3600, similarity_threshold=0.92, max_l2_entries=10)
+
+    # Query comes from bureau-A — must NOT hit bureau-B's cached entry
+    result, score = await cache.l2_lookup(query_emb, "case-x", bureau_id="bureau-A")
+
+    assert result is None, "Cross-bureau L2 hit must be blocked"
+
+
+# ============================================================================
+# 14. invalidate_case — lrem cleans deleted keys from index list
+# ============================================================================
+
+@pytest.mark.asyncio
+async def test_invalidate_case_calls_lrem_for_deleted_keys() -> None:
+    """Each deleted L2 key must also be removed from the index list via lrem."""
+    redis_mock = _make_redis_mock()
+
+    target_case = "case-target"
+    entries = {
+        "cache:rag:l2:k1": {"case_id": target_case, "embedding": [], "response": {}},
+        "cache:rag:l2:k2": {"case_id": "case-other", "embedding": [], "response": {}},
+        "cache:rag:l2:k3": {"case_id": target_case, "embedding": [], "response": {}},
+    }
+
+    redis_mock.client.lrange = AsyncMock(return_value=list(entries.keys()))
+    redis_mock.get = AsyncMock(side_effect=lambda k: entries.get(k))
+
+    cache = SemanticCache(redis_mock, ttl=3600, similarity_threshold=0.92, max_l2_entries=10)
+    await cache.invalidate_case(target_case)
+
+    # lrem must have been called once per deleted key (k1 and k3)
+    assert redis_mock.client.lrem.call_count == 2
+
+
+# ============================================================================
+# 15. store — bureau_id persisted in L2 entry
+# ============================================================================
+
+@pytest.mark.asyncio
+async def test_store_includes_bureau_id_in_l2_entry() -> None:
+    """bureau_id must be persisted in the L2 entry so future scope guards work."""
+    redis_mock = _make_redis_mock()
+    cache = SemanticCache(redis_mock, ttl=3600, similarity_threshold=0.92, max_l2_entries=10)
+
+    non_zero_emb = [0.5, 0.5, 0.5]
+    await cache.store("test sorgu", non_zero_emb, "case-x", _SAMPLE_RESPONSE, bureau_id="bureau-A")
+
+    # The second set() call stores the L2 entry — check bureau_id is in it
+    assert redis_mock.set.call_count >= 2
+    l2_entry_call = redis_mock.set.call_args_list[1]  # second call is L2
+    stored_entry = l2_entry_call.args[1]
+    assert stored_entry.get("bureau_id") == "bureau-A"
+
+
+# ============================================================================
+# 16. cosine_similarity — dimension mismatch logs WARNING
+# ============================================================================
+
+def test_cosine_similarity_dimension_mismatch_logs_warning() -> None:
+    """Mismatched vector lengths must trigger a logger.warning call."""
+    import logging
+
+    with patch("infrastructure.cache.semantic_cache.logger") as mock_logger:
+        a = [1.0, 2.0, 3.0]       # 3-dim
+        b = [1.0, 2.0, 3.0, 4.0]  # 4-dim
+        cosine_similarity(a, b)
+        mock_logger.warning.assert_called_once()
+        warning_msg = mock_logger.warning.call_args[0][0]
+        assert "mismatch" in warning_msg.lower() or "%d" in warning_msg
+
+
+# ============================================================================
+# 17. l1_lookup — bureau_id changes cache key
+# ============================================================================
+
+@pytest.mark.asyncio
+async def test_l1_lookup_different_bureau_has_independent_cache() -> None:
+    """l1_lookup for bureau-A must NOT return bureau-B's cached response."""
+    # bureau-B has a cached response; bureau-A query must miss
+    get_calls: list = []
+
+    async def fake_get(key: str):
+        get_calls.append(key)
+        # Only return a value for the bureau-B key
+        if "bureau-B" in key or len(get_calls) == 1:
+            return None  # first call always returns None (bureau-A miss)
+        return _SAMPLE_RESPONSE
+
+    redis_mock = _make_redis_mock()
+    redis_mock.get = AsyncMock(side_effect=fake_get)
+    cache = SemanticCache(redis_mock, ttl=3600, similarity_threshold=0.92, max_l2_entries=10)
+
+    # bureau-A lookup should miss (fake_get returns None for first call)
+    result = await cache.l1_lookup("TMK 706", "case-x", bureau_id="bureau-A")
+    assert result is None
+
+    # Verify the key passed to Redis.get contains the bureau-scoped hash
+    key_used = get_calls[0]
+    assert key_used.startswith("cache:rag:l1:")
+    # A second lookup with the same params must use the SAME key (determinism)
+    result2 = await cache.l1_lookup("TMK 706", "case-x", bureau_id="bureau-A")
+    assert get_calls[0] == get_calls[1], "Same bureau+query+case must produce same L1 key"

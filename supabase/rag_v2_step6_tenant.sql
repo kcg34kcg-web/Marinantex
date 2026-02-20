@@ -57,18 +57,9 @@ COMMENT ON TABLE public.bureaus IS
 
 ALTER TABLE public.bureaus ENABLE ROW LEVEL SECURITY;
 
--- Service role has full access; authenticated users can only see their own bureau
-CREATE POLICY "bureaus_service_role_all"
-    ON public.bureaus FOR ALL TO service_role USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "bureaus_member_read" ON public.bureaus;
-CREATE POLICY "bureaus_member_read"
-    ON public.bureaus FOR SELECT TO authenticated
-    USING (
-        id = (
-            SELECT bureau_id FROM public.profiles WHERE id = auth.uid() LIMIT 1
-        )
-    );
+-- Policies are created in Section 5, after bureau_id columns on profiles,
+-- cases and documents have all been added — the USING clauses reference
+-- those columns and PostgreSQL validates them at CREATE POLICY time.
 
 -- ---------------------------------------------------------------------------
 -- 2. bureau_id on profiles
@@ -117,7 +108,27 @@ COMMENT ON COLUMN public.documents.bureau_id IS
 
 -- ---------------------------------------------------------------------------
 -- 5. RLS policies — bureau-level isolation
+--    All policies are created here, AFTER every bureau_id column has been
+--    added to profiles / cases / documents.  PostgreSQL validates column
+--    references inside USING / WITH CHECK at CREATE POLICY time, so putting
+--    any policy that touches profiles.bureau_id before that column exists
+--    will raise ERROR 42703 "column does not exist".
+--    Every statement uses DROP … IF EXISTS so the script is safe to re-run.
 -- ---------------------------------------------------------------------------
+
+-- BUREAUS: service-role full access; authenticated users see only their bureau
+DROP POLICY IF EXISTS "bureaus_service_role_all" ON public.bureaus;
+CREATE POLICY "bureaus_service_role_all"
+    ON public.bureaus FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "bureaus_member_read" ON public.bureaus;
+CREATE POLICY "bureaus_member_read"
+    ON public.bureaus FOR SELECT TO authenticated
+    USING (
+        id = (
+            SELECT bureau_id FROM public.profiles WHERE id = auth.uid() LIMIT 1
+        )
+    );
 
 -- CASES: visible only to bureau members
 ALTER TABLE public.cases ENABLE ROW LEVEL SECURITY;
@@ -133,6 +144,7 @@ CREATE POLICY "cases_bureau_isolation"
         )
     );
 
+DROP POLICY IF EXISTS "cases_service_role_all" ON public.cases;
 CREATE POLICY "cases_service_role_all"
     ON public.cases FOR ALL TO service_role USING (true) WITH CHECK (true);
 
@@ -151,12 +163,17 @@ CREATE POLICY "documents_bureau_isolation"
         )
     );
 
+DROP POLICY IF EXISTS "documents_service_role_all" ON public.documents;
 CREATE POLICY "documents_service_role_all"
     ON public.documents FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- ---------------------------------------------------------------------------
 -- 6. Updated hybrid_legal_search — bureau-scoped
 -- ---------------------------------------------------------------------------
+
+-- Drop the previous 5-arg signature (Step 5); parameter list changes require
+-- DROP + CREATE rather than CREATE OR REPLACE.
+DROP FUNCTION IF EXISTS public.hybrid_legal_search(vector, text, uuid, integer, date);
 
 CREATE OR REPLACE FUNCTION public.hybrid_legal_search(
     query_embedding  vector(1536),
@@ -302,6 +319,10 @@ $$;
 -- ---------------------------------------------------------------------------
 -- 7. Updated get_must_cite_documents — bureau-scoped
 -- ---------------------------------------------------------------------------
+
+-- Drop the previous 1-arg signature (Step 5); adding p_bureau_id changes
+-- the parameter list, which requires DROP + CREATE.
+DROP FUNCTION IF EXISTS public.get_must_cite_documents(uuid);
 
 CREATE OR REPLACE FUNCTION public.get_must_cite_documents(
     p_case_id   uuid,

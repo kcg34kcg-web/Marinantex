@@ -15,11 +15,9 @@ import {
   CalendarDays,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 
 // ─── Types (mirror backend RAGResponse) ─────────────────────────────────────
@@ -64,9 +62,13 @@ interface LeheNotice {
 
 interface CostEstimate {
   model_id: string;
-  input_tokens?: number;
-  output_tokens?: number;
-  estimated_usd?: number;
+  tier: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_cost_usd: number;
+  cached: boolean;
+  rate_per_1m_in: number;
+  rate_per_1m_out: number;
 }
 
 interface RagResponse {
@@ -126,7 +128,21 @@ export function HukukAiChat() {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data?.error ?? 'Bir hata oluştu.');
+        // --- HATA DÜZELTME BÖLÜMÜ BAŞLANGICI ---
+        // React'in çökmaması için gelen veriyi güvenli bir string metne çeviriyoruz
+        let errorMessage = 'Bir hata oluştu.';
+
+        if (data?.message && typeof data.message === 'string') {
+          errorMessage = data.message;
+        } else if (data?.error && typeof data.error === 'string') {
+          errorMessage = data.error;
+        } else if (data && typeof data === 'object') {
+          // Eğer hala bir nesne ise, string'e çevirip ekranda görünür ve güvenli hale getiriyoruz
+          errorMessage = JSON.stringify(data);
+        }
+
+        setError(errorMessage);
+        // --- HATA DÜZELTME BÖLÜMÜ BİTİŞİ ---
       } else {
         setResult(data as RagResponse);
         setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
@@ -151,12 +167,12 @@ export function HukukAiChat() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <Textarea
+            <textarea
               placeholder="Örn: İhtiyaç nedeniyle tahliye davasının şartları ve Yargıtay kararları nelerdir?"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               rows={4}
-              className="resize-none text-sm"
+              className="w-full resize-none rounded-md border border-input bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
               disabled={isLoading}
             />
 
@@ -238,25 +254,23 @@ export function HukukAiChat() {
                 Tier {result.tier} — {tier.label}
               </span>
             )}
-            <Badge variant="outline" className="text-xs">
+            <Badge variant="muted" className="text-xs">
               {result.model_used}
             </Badge>
             <Badge
-              variant="outline"
+              variant="muted"
               className={cn(
                 'text-xs',
-                groundingPct === 100
-                  ? 'border-green-300 text-green-700'
-                  : groundingPct >= 50
-                    ? 'border-yellow-300 text-yellow-700'
-                    : 'border-red-300 text-red-700',
+                groundingPct === 100 ? 'text-green-700' : groundingPct >= 50 ? 'text-yellow-700' : 'text-red-700',
               )}
             >
               Doğrulama: %{groundingPct}
             </Badge>
-            {result.cost_estimate?.estimated_usd !== undefined && (
-              <Badge variant="outline" className="text-xs">
-                ~${result.cost_estimate.estimated_usd.toFixed(4)}
+            {result.cost_estimate?.total_cost_usd !== undefined && (
+              <Badge variant="muted" className="text-xs">
+                {result.cost_estimate.cached
+                  ? '$0.0000 (cache)'
+                  : `~$${result.cost_estimate.total_cost_usd.toFixed(4)}`}
               </Badge>
             )}
           </div>
@@ -330,9 +344,24 @@ export function HukukAiChat() {
                   {result.answer_sentences.map((s) => (
                     <span key={s.sentence_id}>
                       <span className={cn(s.is_grounded ? 'text-slate-800' : 'italic text-orange-600')}>{s.text}</span>
-                      {s.source_refs.length > 0 && (
-                        <sup className="ml-0.5 text-blue-600">[{s.source_refs.join(',')}]</sup>
-                      )}{' '}
+                      {s.source_refs.map((ref) => (
+                        <button
+                          key={ref}
+                          type="button"
+                          title={`Kaynağa git: [${ref}]`}
+                          onClick={() => {
+                            setExpandedSources(true);
+                            setTimeout(() => {
+                              document
+                                .getElementById(`source-${ref}`)
+                                ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }, 50);
+                          }}
+                          className="ml-0.5 cursor-pointer text-blue-600 hover:text-blue-800 hover:underline focus:outline-none"
+                        >
+                          <sup>[{ref}]</sup>
+                        </button>
+                      ))}{' '}
                     </span>
                   ))}
                 </p>
@@ -365,30 +394,34 @@ export function HukukAiChat() {
 
               {expandedSources && (
                 <CardContent className="space-y-3 pt-0">
-                  <Separator />
+                  <div className="border-t border-border" />
                   {result.sources.map((src, idx) => (
-                    <div key={src.doc_id} className="rounded-md border border-border p-3 text-xs">
+                    <div
+                      id={`source-${idx + 1}`}
+                      key={src.doc_id}
+                      className="rounded-md border border-border p-3 text-xs"
+                    >
                       <div className="mb-1 flex flex-wrap items-center gap-2">
                         <span className="font-semibold text-slate-700">
                           [{idx + 1}] {src.title ?? src.doc_id}
                         </span>
                         {src.court && (
-                          <Badge variant="outline" className="text-xs">
+                          <Badge variant="muted" className="text-xs">
                             {src.court}
                           </Badge>
                         )}
                         {src.article_no && (
-                          <Badge variant="outline" className="text-xs">
+                          <Badge variant="muted" className="text-xs">
                             {src.article_no}
                           </Badge>
                         )}
                         {src.version_type && (
-                          <Badge variant="outline" className="bg-purple-50 text-xs text-purple-700">
+                          <Badge variant="muted" className="bg-purple-50 text-xs text-purple-700">
                             {src.version_type}
                           </Badge>
                         )}
                         {src.aym_warning && (
-                          <Badge variant="outline" className="bg-red-50 text-xs text-red-700">
+                          <Badge variant="muted" className="bg-red-50 text-xs text-red-700">
                             AYM İptal
                           </Badge>
                         )}

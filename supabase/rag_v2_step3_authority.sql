@@ -150,6 +150,8 @@ $$;
 --   • final_score includes binding_boost (capped at 1.0)
 --   • New output columns: chamber, majority_type, dissent_present, norm_hierarchy
 --
+drop function if exists public.hybrid_legal_search(vector, text, uuid, integer);
+
 create or replace function public.hybrid_legal_search(
   query_embedding  vector(1536),
   query_text       text,
@@ -259,6 +261,8 @@ $$;
 --
 -- Surfaces new Step 3 columns so must-cite docs carry the same metadata.
 --
+drop function if exists public.get_must_cite_documents(uuid);
+
 create or replace function public.get_must_cite_documents(
   p_case_id uuid
 )

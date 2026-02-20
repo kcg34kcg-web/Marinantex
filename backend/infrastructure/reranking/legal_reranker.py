@@ -101,6 +101,22 @@ _DOMAIN_KEYWORDS: Dict[str, FrozenSet[str]] = {
 
 
 # ============================================================================
+# Domain Öncelik Tablosu — eşit anahtar kelime sayısında tie-break için
+# Yüksek değer = eşit koşullarda tercih edilir
+# ============================================================================
+
+_DOMAIN_PRIORITY: Dict[str, int] = {
+    "ceza":      6,   # Özgürlüğü bağlayıcı ceza → en yüksek öncelik
+    "medeni":    5,   # Aile/miras
+    "is_hukuku": 4,   # İş uyuşmazlıkları
+    "ticaret":   3,   # Ticari uyuşmazlıklar
+    "idare":     2,   # İdari yargı
+    "vergi":     2,   # Vergi (idareyle eşit)
+    "kira":      1,   # Kira uyuşmazlıkları
+}
+
+
+# ============================================================================
 # Uzman Daire Eşleme — hangi chamber hangi domain'e özgüdür
 # ============================================================================
 
@@ -230,7 +246,12 @@ def detect_query_domain(query_text: str) -> Optional[str]:
     best_count = 0
     for domain, keywords in _DOMAIN_KEYWORDS.items():
         count = sum(1 for kw in keywords if kw in q_lower)
-        if count > best_count:
+        if count > best_count or (
+            count == best_count
+            and count > 0
+            and _DOMAIN_PRIORITY.get(domain, 0)
+            > _DOMAIN_PRIORITY.get(best_domain or "", 0)
+        ):
             best_count = count
             best_domain = domain
     return best_domain if best_count > 0 else None
@@ -390,6 +411,9 @@ class LegalReranker:
         self,
         docs: List[LegalDocument],
         query_text: str,
+        *,
+        bureau_id: Optional[str] = None,
+        case_id: Optional[str] = None,
     ) -> List[RerankResult]:
         """
         Re-ranking ana giriş noktası.
@@ -397,6 +421,8 @@ class LegalReranker:
         Args:
             docs:       RRF çıktısı belgeler (desc sıralı final_score).
             query_text: Kullanıcı sorgusu — domain tespiti için kullanılır.
+            bureau_id:  Tenant UUID (audit trail için, opsiyonel).
+            case_id:    Dava UUID (audit trail için, opsiyonel).
 
         Returns:
             List[RerankResult] — re-rank skoru ile desc sıralı.
@@ -413,6 +439,9 @@ class LegalReranker:
                 )
                 for doc in docs
             ]
+
+        # Preserve original order for audit rank comparison
+        original_docs = list(docs)
 
         domain = detect_query_domain(query_text)
         logger.info(
@@ -445,9 +474,78 @@ class LegalReranker:
             lex_post_count,
         )
 
+        self._write_rerank_audit(
+            original_docs=original_docs,
+            results=results,
+            query_text=query_text,
+            query_domain=domain,
+            bureau_id=bureau_id,
+            case_id=case_id,
+        )
+
         return results
 
     # ── Özel Metodlar ────────────────────────────────────────────────────────
+
+    def _write_rerank_audit(
+        self,
+        original_docs: List[LegalDocument],
+        results: List[RerankResult],
+        query_text: str,
+        query_domain: Optional[str],
+        bureau_id: Optional[str] = None,
+        case_id: Optional[str] = None,
+    ) -> None:
+        """
+        reranking_audit tablosuna audit kaydı yazar.
+
+        Best-effort: herhangi bir veritabanı hatasında yapı çökerı üretmez,
+        sadece WARNING log yazar.  Ana iş akışı etkilenmez.
+
+        Args:
+            original_docs:  RRF çıktısı sırasıyla belgeler (rerank öncesi).
+            results:        Re-ranking sonrası sıralı RerankResult listesi.
+            query_text:     Kullanıcı sorgusu.
+            query_domain:   Tespit edilen hukuk alanı (None olabilir).
+            bureau_id:      Tenant UUID (opsiyonel).
+            case_id:        Dava UUID (opsiyonel).
+        """
+        original_rank_map: Dict[str, int] = {
+            doc.id: i + 1 for i, doc in enumerate(original_docs)
+        }
+        try:
+            from infrastructure.database.connection import get_supabase_client  # noqa: PLC0415
+            supabase = get_supabase_client()
+            rows = [
+                {
+                    "query_text":          query_text[:500],
+                    "query_domain":        query_domain,
+                    "document_id":         r.document.id,
+                    "document_citation":   r.document.citation,
+                    "norm_hierarchy":      r.document.norm_hierarchy,
+                    "court_level":         r.document.court_level,
+                    "original_rank":       original_rank_map.get(r.document.id, 0),
+                    "reranked_rank":       reranked_rank,
+                    "base_score":          r.score.base_score,
+                    "authority_boost":     r.score.authority_boost,
+                    "hierarchy_boost":     r.score.hierarchy_boost,
+                    "binding_boost":       r.score.binding_boost,
+                    "lex_specialis_boost": r.score.lex_specialis_boost,
+                    "lex_posterior_boost": r.score.lex_posterior_boost,
+                    "total_score":         r.score.total,
+                    "conflict_notes":      r.conflict_notes,
+                    "bureau_id":           bureau_id,
+                    "case_id":             case_id,
+                }
+                for reranked_rank, r in enumerate(results, start=1)
+            ]
+            supabase.table("reranking_audit").insert(rows).execute()
+            logger.debug(
+                "RERANK_AUDIT_WRITTEN | rows=%d | query_len=%d",
+                len(rows), len(query_text),
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.warning("RERANK_AUDIT_WRITE_FAILED (non-fatal): %s", exc)
 
     def _compute_score(
         self,

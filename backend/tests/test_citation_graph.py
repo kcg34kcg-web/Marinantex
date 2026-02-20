@@ -10,8 +10,9 @@ Gruplar:
     F — max_nodes sınırı                        (5 test)
     G — CitationGraphResult alan doğrulaması    (4 test)
     H — RAGService entegrasyonu                 (3 test)
+    I — SupabaseCitationRepository              (6 test)
 
-Toplam: 40 yeni test  →  440 + 40 = 480 hedef
+Toplam: 46 yeni test  →  879 + 6 = 885 hedef
 """
 
 from __future__ import annotations
@@ -138,6 +139,8 @@ class TestCitationType:
 class TestCitationGraphTierGate:
     """C: GraphRAG katman geçidi."""
 
+    pytestmark = pytest.mark.asyncio
+
     async def test_tier1_returns_root_only(self) -> None:
         """Tier 1 → genişletme yok, yalnızca kök belgeler döner."""
         docs = [_doc("d1"), _doc("d2")]
@@ -206,6 +209,8 @@ class TestCitationGraphTierGate:
 
 class TestCitationGraphDepth:
     """D: BFS derinlik kontrolü."""
+
+    pytestmark = pytest.mark.asyncio
 
     async def test_max_depth_zero_no_expansion(self) -> None:
         """max_depth=0 → kök belgeler dışında genişletme yok."""
@@ -307,6 +312,8 @@ class TestCitationGraphDepth:
 class TestCitationGraphCycleDetection:
     """E: Döngü tespiti — sonsuz döngü önleme."""
 
+    pytestmark = pytest.mark.asyncio
+
     async def test_self_referencing_doc_cycle_detected(self) -> None:
         """Kendine atıf yapan belge döngü olarak tespit edilmeli."""
         root_doc = _doc("root", content="4857 sayılı İş Kanunu")
@@ -400,6 +407,8 @@ class TestCitationGraphCycleDetection:
 class TestCitationGraphMaxNodes:
     """F: max_nodes sınırı — token bütçesi koruması."""
 
+    pytestmark = pytest.mark.asyncio
+
     async def test_max_nodes_one_root_only(self) -> None:
         """max_nodes=1 → yalnızca kök belge döner."""
         root = _doc("root", content="4857 sayılı İş Kanunu")
@@ -491,6 +500,8 @@ class TestCitationGraphMaxNodes:
 class TestCitationGraphResult:
     """G: CitationGraphResult alan doğrulaması."""
 
+    pytestmark = pytest.mark.asyncio
+
     async def test_root_docs_preserved_in_result(self) -> None:
         """root_docs her zaman sonuçta korunur."""
         docs = [_doc("d1"), _doc("d2")]
@@ -547,6 +558,8 @@ class TestCitationGraphResult:
 
 class TestRAGServiceGraphRAGIntegration:
     """H: RAGService GraphRAG entegrasyonu (Tier 3/4 aktif, Tier 1 pasif)."""
+
+    pytestmark = pytest.mark.asyncio
 
     def _make_service(
         self,
@@ -673,3 +686,140 @@ class TestRAGServiceGraphRAGIntegration:
             await svc.query(req)
 
         mock_ge.expand.assert_not_called()
+
+
+# ============================================================================
+# I — SupabaseCitationRepository
+# ============================================================================
+
+
+class TestSupabaseCitationRepository:
+    """
+    I: SupabaseCitationRepository metot testleri.
+    save_citations, resolve_citation, get_outgoing, get_unresolved
+    Supabase istemcisi Mock'lanır; gerçek DB bağlantısı gerekmez.
+    """
+
+    pytestmark = pytest.mark.asyncio
+
+    def _make_repo(self):
+        from infrastructure.database.supabase_citation_repository import (
+            SupabaseCitationRepository,
+        )
+        return SupabaseCitationRepository()
+
+    def _mock_supabase(self, data: list = None):
+        """Supabase table chain'ini mock'lar; .execute() data döndürür."""
+        mock_sb = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.data = data or []
+        chain = MagicMock()
+        chain.execute.return_value = mock_resp
+        chain.upsert.return_value = chain
+        chain.update.return_value = chain
+        chain.select.return_value = chain
+        chain.eq.return_value = chain
+        chain.is_.return_value = chain
+        chain.limit.return_value = chain
+        chain.not_ = chain
+        mock_sb.table.return_value = chain
+        return mock_sb, chain
+
+    # ── save_citations ───────────────────────────────────────────────────────
+
+    async def test_save_citations_calls_upsert_with_correct_columns(self) -> None:
+        """save_citations raw_citation ve source_doc_id kolonlarıyla upsert yapmalı."""
+        from uuid import uuid4
+        from infrastructure.ingest.citation_extractor import CitationType, ExtractedCitation
+
+        repo = self._make_repo()
+        mock_sb, chain = self._mock_supabase(data=[{"id": "row-1"}])
+        cits = [
+            ExtractedCitation(
+                raw_text="4857 sayılı İş Kanunu",
+                citation_type=CitationType.KANUN_NO.value,
+            )
+        ]
+        src_id = uuid4()
+        with patch(
+            "infrastructure.database.connection.get_supabase_client",
+            return_value=mock_sb,
+        ):
+            count = await repo.save_citations(source_doc_id=src_id, citations=cits)
+        mock_sb.table.assert_called_with("citation_edges")
+        upsert_call_rows = chain.upsert.call_args[0][0]
+        assert upsert_call_rows[0]["raw_citation"] == "4857 sayılı İş Kanunu"
+        assert upsert_call_rows[0]["source_doc_id"] == str(src_id)
+        assert count == 1
+
+    async def test_save_citations_empty_list_returns_zero(self) -> None:
+        """Boş liste için upsert çağrılmaz, 0 döner."""
+        from uuid import uuid4
+        repo = self._make_repo()
+        count = await repo.save_citations(source_doc_id=uuid4(), citations=[])
+        assert count == 0
+
+    # ── resolve_citation ─────────────────────────────────────────────────────
+
+    async def test_resolve_citation_calls_update_with_target_doc_id(self) -> None:
+        """resolve_citation target_doc_id ile update çağırmalı."""
+        from uuid import uuid4
+        repo = self._make_repo()
+        mock_sb, chain = self._mock_supabase()
+        edge_id = uuid4()
+        target_id = uuid4()
+        with patch(
+            "infrastructure.database.connection.get_supabase_client",
+            return_value=mock_sb,
+        ):
+            await repo.resolve_citation(
+                citation_edge_id=edge_id, target_doc_id=target_id
+            )
+        update_kwargs = chain.update.call_args[0][0]
+        assert update_kwargs["target_doc_id"] == str(target_id)
+        assert "resolved_at" in update_kwargs
+
+    # ── get_outgoing ─────────────────────────────────────────────────────────
+
+    async def test_get_outgoing_returns_target_uuids(self) -> None:
+        """get_outgoing UUID listesi döndürmeli."""
+        from uuid import uuid4, UUID
+        repo = self._make_repo()
+        target_id = str(uuid4())
+        mock_sb, _ = self._mock_supabase(data=[{"target_doc_id": target_id}])
+        with patch(
+            "infrastructure.database.connection.get_supabase_client",
+            return_value=mock_sb,
+        ):
+            result = await repo.get_outgoing(source_doc_id=uuid4())
+        assert result == [UUID(target_id)]
+
+    async def test_get_outgoing_returns_empty_on_db_error(self) -> None:
+        """DB hatasında get_outgoing boş liste dönmeli."""
+        from uuid import uuid4
+        repo = self._make_repo()
+        with patch(
+            "infrastructure.database.connection.get_supabase_client",
+            side_effect=RuntimeError("DB unavailable"),
+        ):
+            result = await repo.get_outgoing(source_doc_id=uuid4())
+        assert result == []
+
+    # ── get_unresolved ───────────────────────────────────────────────────────
+
+    async def test_get_unresolved_uses_raw_citation_column(self) -> None:
+        """get_unresolved select'inde raw_citation kolonu kullanılmalı."""
+        from uuid import uuid4
+        repo = self._make_repo()
+        mock_sb, chain = self._mock_supabase(data=[
+            {"id": str(uuid4()), "source_doc_id": str(uuid4()),
+             "raw_citation": "4857 sayılı Kanun", "citation_type": "KANUN_NO"}
+        ])
+        with patch(
+            "infrastructure.database.connection.get_supabase_client",
+            return_value=mock_sb,
+        ):
+            rows = await repo.get_unresolved()
+        select_arg = chain.select.call_args[0][0]
+        assert "raw_citation" in select_arg
+        assert len(rows) == 1

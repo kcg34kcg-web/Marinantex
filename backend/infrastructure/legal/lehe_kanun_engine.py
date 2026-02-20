@@ -51,7 +51,7 @@ _CEZA_KEYWORDS: FrozenSet[str] = frozenset({
     # Codes / abbreviations
     "tck", "cmk", "ceza kanunu", "türk ceza kanunu", "ceza muhakemesi",
     # Offence types
-    "suç", "suç", "suçu", "suçun", "suçla", "suça",
+    "suç", "suçu", "suçun", "suçla", "suça",
     "hırsızlık", "dolandırıcılık", "sahtecilik", "zimmet", "irtikap",
     "rüşvet", "hakaret", "tehdit", "şantaj", "öldürme", "yaralama",
     "taksirle", "kasten", "uyuşturucu", "uyuşturucudan", "kaçakçılık",
@@ -228,6 +228,13 @@ class LeheKanunEngine:
             LeheKanunResult (frozen).
         """
         domain = classify_domain(query_text)
+
+        # Guard: event_date cannot logically be after decision_date
+        if event_date > decision_date:
+            raise ValueError(
+                f"event_date ({event_date}) karar tarihinden ({decision_date}) "
+                "sonra olamaz. Lütfen tarihleri kontrol edin."
+            )
 
         if not domain.lehe_applicable:
             reason = (

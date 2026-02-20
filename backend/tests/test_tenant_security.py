@@ -3,12 +3,12 @@ Tests for Step 6 — KVKK Güvenliği ve Multi-Tenancy
 ====================================================
 Groups:
     A — TenantContext domain object          (8 tests)
-    B — KVKKRedactor PII patterns           (12 tests)
+    B — KVKKRedactor PII patterns           (14 tests)
     C — validate_bureau_id + header extract  (7 tests)
     D — TenantMiddleware HTTP enforcement    (8 tests)
     E — RAGQueryRequest bureau_id field      (4 tests)
 
-Total: 39 new tests  →  252 + 39 = 291 passing target
+Total: 41 new tests
 """
 
 from __future__ import annotations
@@ -191,6 +191,30 @@ class TestKVKKRedactor:
         twice, records2 = redactor.redact(once)
         assert twice == once
         assert records2 == []
+
+    def test_vkn_is_replaced(self, redactor: KVKKRedactor) -> None:
+        """B.13 — Vergi Kimlik Numarası (10-digit, labelled) is redacted as VKN."""
+        text, records = redactor.redact("VKN: 1234567890 numaralı firma faturası.")
+        assert "[VKN]" in text
+        assert "1234567890" not in text
+        assert len(records) >= 1
+        assert any(r.pii_type == "VKN" for r in records)
+
+    def test_legal_terms_not_redacted_as_ad_soyad(self, redactor: KVKKRedactor) -> None:
+        """B.14 — Known legal terms (e.g. 'İhbar Tazminatı') must NOT trigger AD_SOYAD."""
+        legal_sentences = [
+            "İhbar Tazminatı hesaplama yöntemi nedir?",
+            "Ağır Ceza Mahkemesi bu davada yetkisizdir.",
+            "İş Kanunu kapsamında işverenin yükümlülükleri.",
+            "Asliye Hukuk Mahkemesi kararı incelendi.",
+        ]
+        for sentence in legal_sentences:
+            _, records = redactor.redact(sentence)
+            ad_soyad_hits = [r for r in records if r.pii_type == "AD_SOYAD"]
+            assert ad_soyad_hits == [], (
+                f"Legal term false positive in: {sentence!r}\n"
+                f"  Matched as AD_SOYAD: {[r for r in ad_soyad_hits]}"
+            )
 
 
 # ============================================================================

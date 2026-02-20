@@ -25,14 +25,28 @@ from __future__ import annotations
 
 import logging
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Request, status
 
 from api.schemas import RAGQueryRequest, RAGResponse
 from application.services.rag_service import rag_service
+from application.use_cases.query_legal_rag import (
+    QueryLegalRAGRequest,
+    QueryLegalRAGUseCase,
+)
 from domain.entities.tenant import TenantContext
+from infrastructure.database.supabase_audit_repository import supabase_audit_repository
 
 logger = logging.getLogger("babylexit.routes.rag")
+
+# Module-level singleton — constructed once at import time.
+# Injects supabase_audit_repository so every query automatically
+# persists audit_log / cost_log / ragas_metrics_log rows.
+_rag_use_case = QueryLegalRAGUseCase(
+    rag_service=rag_service,
+    audit_repository=supabase_audit_repository,
+)
 
 router = APIRouter()
 
@@ -124,4 +138,16 @@ async def rag_query(
         getattr(request_body, "decision_date", None),
     )
 
-    return await rag_service.query(request_body, tenant_context)
+    # Build the framework-agnostic DTO for the use case.
+    # execute_for_api() calls rag_service internally, persists the audit
+    # trail as a side effect, and returns the full RAGResponse (Pydantic).
+    dto = QueryLegalRAGRequest(
+        query=request_body.query,
+        tenant=tenant_context,
+        case_id=UUID(request_body.case_id) if getattr(request_body, "case_id", None) else None,
+        event_date=request_body.event_date,
+        decision_date=getattr(request_body, "decision_date", None),
+        max_sources=getattr(request_body, "max_sources", 8),
+    )
+
+    return await _rag_use_case.execute_for_api(dto)

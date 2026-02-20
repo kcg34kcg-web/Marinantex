@@ -14,13 +14,14 @@ User Input → Detect PII → Mask → Process → Unmask → User Output
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response as StarletteResponse
 import re
 import logging
 from typing import Dict, List, Tuple
 import uuid
 
 from infrastructure.config import settings
+from infrastructure.security.kvkk_redactor import kvkk_redactor
 
 logger = logging.getLogger("babylexit.privacy")
 
@@ -174,13 +175,54 @@ class PrivacyMiddleware(BaseHTTPMiddleware):
     
     async def _unmask_response(self, response: Response, mask_id: str) -> Response:
         """
-        Restores original PII values in response.
-        
-        Note: Only unmasks for end-user display. LLM never sees real PII.
+        Restores original PII values in the response body.
+
+        Reads the response body stream, replaces every mask token with its
+        original value from self.mask_store, and returns a new Response with
+        the same status code, headers, and media type.
+
+        If the mask store has no entries for this request (e.g. no PII was
+        detected), the original response is returned unchanged.
         """
-        # TODO: Implement response body unmasking
-        # For PHASE 1, we'll handle this in individual route handlers
-        return response
+        if mask_id not in self.mask_store or not self.mask_store[mask_id]:
+            return response
+
+        try:
+            # Collect full body — handles both Response (.body) and
+            # StreamingResponse (.body_iterator)
+            if hasattr(response, "body"):
+                body_bytes: bytes = response.body  # type: ignore[attr-defined]
+            else:
+                chunks: list[bytes] = []
+                async for chunk in response.body_iterator:  # type: ignore[attr-defined]
+                    chunks.append(chunk if isinstance(chunk, bytes) else chunk.encode("utf-8"))
+                body_bytes = b"".join(chunks)
+
+            body_text = body_bytes.decode("utf-8", errors="replace")
+
+            # Replace each mask token with the original PII value
+            for mask_token, original_value in self.mask_store[mask_id].items():
+                body_text = body_text.replace(mask_token, original_value)
+
+            logger.debug(
+                "PRIVACY_UNMASK | mask_id=%s | tokens_restored=%d",
+                mask_id[:8],
+                len(self.mask_store[mask_id]),
+            )
+
+            return StarletteResponse(
+                content=body_text.encode("utf-8"),
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=response.media_type,
+            )
+
+        except Exception as exc:
+            logger.warning(
+                "PRIVACY_UNMASK_FAILED | mask_id=%s | error=%s",
+                mask_id[:8], exc,
+            )
+            return response
     
     def _unmask_text(self, text: str, mask_id: str) -> str:
         """
@@ -202,18 +244,12 @@ class PrivacyMiddleware(BaseHTTPMiddleware):
 
 def mask_pii_simple(text: str) -> str:
     """
-    Quick PII masking for logging/debugging.
-    Does not store mask map (irreversible).
+    Quick PII masking for logging/debugging.  Irreversible — does not store
+    a mask map.  Delegates to the canonical KVKKRedactor singleton so that
+    all PII detection uses a single, consistent pattern registry.
+
+    Usage:
+        safe_line = mask_pii_simple(raw_input)
+        logger.info("User query: %s", safe_line)
     """
-    patterns = {
-        "tc_id": (re.compile(r'\b\d{11}\b'), "[TC_ID]"),
-        "phone": (re.compile(r'\b0?5\d{2}[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}\b'), "[PHONE]"),
-        "email": (re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'), "[EMAIL]"),
-        "iban": (re.compile(r'\bTR\d{24}\b', re.IGNORECASE), "[IBAN]"),
-    }
-    
-    masked = text
-    for pii_type, (pattern, replacement) in patterns.items():
-        masked = pattern.sub(replacement, masked)
-    
-    return masked
+    return kvkk_redactor.redact_for_log(text)

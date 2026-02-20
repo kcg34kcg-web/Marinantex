@@ -227,6 +227,7 @@ class RRFRetriever:
         min_score: float,
         event_date: Optional[date] = None,
         bureau_id: Optional[str] = None,
+        law_domain: Optional[str] = None,
     ) -> RRFSearchResult:
         """
         Hibrit RRF araması.
@@ -242,6 +243,8 @@ class RRFRetriever:
             min_score:   Minimum final_score filtresi.
             event_date:  Lehe kanun / time-travel için olay tarihi (Step 10).
             bureau_id:   Büro izolasyonu (Step 6).
+            law_domain:  Hukuk alanı kodu (Gap 2: CEZA/IDARI_CEZA/VERGI_CEZA için
+                         domain-specific k=rrf_k_ceza kullanılır).
 
         Returns:
             RRFSearchResult
@@ -326,28 +329,51 @@ class RRFRetriever:
             )
 
         # ── RRF Füzyon ────────────────────────────────────────────────────
+        # Gap 2: domain'e göre k sabiti — CEZA/IDARI_CEZA/VERGI_CEZA için
+        # rrf_k_ceza (varsayılan 40) kullanılır; diğer domain'ler settings.rrf_k
+        # (varsayılan 60) kullanır.  Düşük k → sıralama farkı daha belirgin.
+        k = (
+            settings.rrf_k_ceza
+            if law_domain in ("CEZA", "IDARI_CEZA", "VERGI_CEZA")
+            else self._k
+        )
         fused = reciprocal_rank_fusion(
             ranked_lists=[semantic_docs, keyword_docs],
-            k=self._k,
+            k=k,
             max_results=max_sources,
         )
 
-        # min_score filtresi: orijinal final_score kullan (RRF skoru değil)
-        filtered = [
-            (doc, rrf) for doc, rrf in fused
-            if doc.final_score >= min_score
-        ]
+        # Gap 1: Min-Score Filtresi (pre-RRF-overwrite) ──────────────────────
+        # Pre-fusion final_score (cosine ~[0,1] veya BM25 ~[0,∞]) min_score
+        # eşiğini karşılamayan belgeler elenir.  Bu adım, ölçek uyumsuzluğunu
+        # giderir: BM25 skoru cosine eşiğiyle doğrudan karşılaştırılmaz.
+        if min_score > 0.0:
+            fused = [
+                (doc, rrf) for doc, rrf in fused
+                if doc.final_score >= min_score
+            ]
 
-        result_docs = [doc for doc, _ in filtered]
-        rrf_score_map = {doc.id: rrf for doc, rrf in filtered}
+        # Gap 1: RRF Skor Normalizasyonu [0, 1] ─────────────────────────────
+        # Ham RRF değerleri ~[0, 1/k] aralığındadır (k=60 → max ≈ 0.016).
+        # Max-normalizasyon ile [0, 1]'e taşınır — downstream scoring ve UI
+        # ile ölçek tutarlılığı sağlanır.
+        _max_rrf = max((rrf for _, rrf in fused), default=1.0)
+        if _max_rrf > 0 and fused:
+            fused = [(doc, rrf / _max_rrf) for doc, rrf in fused]
+
+        # Normalize edilmiş RRF skoru belgeye yaz
+        for doc, rrf in fused:
+            doc.final_score = rrf
+
+        result_docs = [doc for doc, _ in fused]
+        rrf_score_map = {doc.id: rrf for doc, rrf in fused}
 
         logger.info(
             "RRF_SEARCH_COMPLETE | semantic=%d | keyword=%d | fused=%d | "
-            "filtered=%d | query_len=%d | case_id=%s",
+            "query_len=%d | case_id=%s",
             len(semantic_docs),
             len(keyword_docs),
             len(fused),
-            len(filtered),
             len(query_text),
             case_id,
         )

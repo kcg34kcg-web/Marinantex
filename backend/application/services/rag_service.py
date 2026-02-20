@@ -77,11 +77,12 @@ from api.schemas import (
 from domain.entities.legal_document import LegalDocument
 from infrastructure.cache.semantic_cache import SemanticCache
 from infrastructure.config import settings
-from infrastructure.llm.tiered_router import LLMTieredRouter, QueryTier, llm_router
+from infrastructure.llm.tiered_router import LLMTieredRouter, QueryTier, classify_query_tier, llm_router
+from infrastructure.llm.query_rewriter import QueryRewriter, query_rewriter
 from infrastructure.embeddings.embedder import QueryEmbedder, query_embedder
 from infrastructure.retrieval.retrieval_client import RetrieverClient, retriever_client
 from infrastructure.search.rrf_retriever import RRFRetriever, rrf_retriever
-from infrastructure.reranking.legal_reranker import LegalReranker, legal_reranker
+from infrastructure.reranking.legal_reranker import LegalReranker, detect_query_domain, legal_reranker
 from infrastructure.security.prompt_guard import PromptGuard, prompt_guard
 from infrastructure.context.context_builder import ContextBuilder, context_builder
 from infrastructure.context.context_summarizer import ContextSummarizer, context_summarizer
@@ -124,6 +125,21 @@ class NoSourceError(Exception):
 
 
 # ============================================================================
+# Module-level constants
+# ============================================================================
+
+_SAFE_REFUSAL: str = (
+    "Mevcut kaynaklarda bu konuda yeterli bilgi bulunamadı. "
+    "Lütfen sorunuzu daha spesifik hukuki terimlerle yeniden deneyin."
+)
+"""Safe refusal text returned to the client when the post-LLM Grounding
+Hard-Fail gate fires (grounding_ratio < settings.zero_trust_min_grounding_ratio).
+Defined at module level so tests can import it directly for assertion equality.
+When the gate fires, answer_sentences and inline_citations are also cleared.
+"""
+
+
+# ============================================================================
 # RAG Service
 # ============================================================================
 
@@ -162,6 +178,7 @@ class RAGService:
         cost_tracker_inst: Optional[CostTracker] = None,
         audit_recorder_inst: Optional[AuditTrailRecorder] = None,
         ragas_adapter_inst: Optional[RAGASAdapter] = None,
+        rewriter: Optional[QueryRewriter] = None,
     ) -> None:
         self._cache: Optional[SemanticCache] = cache
         self._router: LLMTieredRouter = router or llm_router
@@ -172,7 +189,18 @@ class RAGService:
         self._reranker: LegalReranker = reranker or legal_reranker
         self._graph_expander: CitationGraphExpander = graph_expander or citation_graph_expander
         self._tool_dispatcher: ToolDispatcher = dispatcher or tool_dispatcher
-        self._summarizer: ContextSummarizer = summarizer or context_summarizer
+        if summarizer is not None:
+            self._summarizer: ContextSummarizer = summarizer
+        else:
+            # Production: LLM-backed summarisation — secondary docs are
+            # summarised by the router so critical details are preserved.
+            _rtr = self._router
+
+            async def _llm_summarize_fn(prompt: str) -> str:
+                _ans, _ = await _rtr.generate(prompt, "", 0)
+                return _ans
+
+            self._summarizer = ContextSummarizer(summarize_fn=_llm_summarize_fn)
         self._zt_builder: ZeroTrustPromptBuilder = zt_builder or zero_trust_builder
         self._disclaimer_engine: LegalDisclaimerEngine = disc_engine or disclaimer_engine
         self._cost_tracker: CostTracker = cost_tracker_inst or cost_tracker
@@ -180,6 +208,7 @@ class RAGService:
         self._ragas_adapter: RAGASAdapter = ragas_adapter_inst or ragas_adapter
         self._ctx_builder: ContextBuilder = ctx_builder or context_builder
         self._lehe_engine: LeheKanunEngine = lehe_engine or lehe_kanun_engine
+        self._rewriter: QueryRewriter = rewriter or query_rewriter
         logger.info(
             "RAGService initialised — Hard-Fail: ACTIVE | cache: %s | "
             "router: %s | prompt_guard: ACTIVE | embedder: %s | retriever: ACTIVE | "
@@ -242,10 +271,21 @@ class RAGService:
                 len(request.query),
             )
 
-        # ── 0c. Semantic cache — L1 exact match (BEFORE embedding) ───────────
+        # ── 0c. Resolve bureau_id early (needed for cache key scoping) ────────
+        #        TenantContext (middleware) takes precedence;
+        #        fall back to request.bureau_id (explicit client header / test fixture).
+        _bureau_id = (
+            tenant_context.bureau_id
+            if tenant_context and tenant_context.is_isolated
+            else getattr(request, "bureau_id", None)
+        )
+
+        # ── 0d. Semantic cache — L1 exact match (BEFORE embedding) ─────────────
         #       Cheapest possible path: 1 Redis GET.  If hit, cost = $0.
         if self._cache and settings.semantic_cache_enabled:
-            l1_hit = await self._cache.l1_lookup(request.query, request.case_id)
+            l1_hit = await self._cache.l1_lookup(
+                request.query, request.case_id, bureau_id=_bureau_id
+            )
             if l1_hit:
                 logger.info(
                     "CACHE_HIT L1 — embed+retrieve+LLM skipped | cost=$0 | "
@@ -254,14 +294,28 @@ class RAGService:
                 )
                 return RAGResponse.model_validate(l1_hit)
 
+        # ── 0d. Query Rewriting (Step 9) ─────────────────────────────────────
+        #        Tier 2+ sorgularını gündelik Türkçe'den formal hukuki
+        #        terminolojiye dönüştürür.  Retrieval için kullanılır;
+        #        audit trail, LLM prompt ve kullanıcı cevabı her zaman
+        #        ORIGINAL sorguyu görür.
+        #        Tier 1 veya query_rewrite_enabled=False → pass-through.
+        _prelim_tier = classify_query_tier(request.query, "", 0)
+        _search_query: str = (
+            await self._rewriter.rewrite(request.query, _prelim_tier.value)
+            if settings.query_rewrite_enabled
+            and _prelim_tier.value >= settings.query_rewrite_min_tier
+            else request.query
+        )
+
         # ── 1. Embed the query ───────────────────────────────────────────────
-        query_embedding = await self._embed_query(request.query)
+        query_embedding = await self._embed_query(_search_query)
 
         # ── 1b. Semantic cache — L2 cosine match (AFTER embedding) ───────────
         #        If hit, retrieval + LLM are skipped.  Cost = $0.
         if self._cache and settings.semantic_cache_enabled:
             l2_hit, similarity = await self._cache.l2_lookup(
-                query_embedding, request.case_id
+                query_embedding, request.case_id, bureau_id=_bureau_id
             )
             if l2_hit:
                 logger.info(
@@ -273,14 +327,6 @@ class RAGService:
                 return RAGResponse.model_validate(l2_hit)
 
         # ── 2. Retrieve documents ────────────────────────────────────────────
-        # Determine bureau_id: TenantContext (middleware) takes precedence;
-        # fall back to request.bureau_id (explicit client header / test fixture).
-        _bureau_id = (
-            tenant_context.bureau_id
-            if tenant_context and tenant_context.is_isolated
-            else getattr(request, "bureau_id", None)
-        )
-
         # ── 2a. Lehe Kanun check (Step 10) ──────────────────────────────────────
         #        When event_date + decision_date are both present and the query
         #        is in the criminal / penalty domain, retrieve BOTH law versions.
@@ -309,7 +355,7 @@ class RAGService:
             # Two-version retrieval — fetch event_date version AND decision_date version
             event_docs, decision_docs = await self._retriever.lehe_kanun_search(
                 embedding=query_embedding,
-                query_text=request.query,
+                query_text=_search_query,
                 case_id=request.case_id,
                 max_sources=request.max_sources,
                 min_score=request.min_score,
@@ -348,25 +394,38 @@ class RAGService:
             # Standard single-version retrieval (Step 11: via RRFRetriever when enabled)
             # When settings.rrf_enabled=True  → hibrit RRF füzyon (vektör + BM25)
             # When settings.rrf_enabled=False → doğrudan RetrieverClient.search()
+            _query_domain = detect_query_domain(request.query)  # Step 12: Gap 2
             rrf_result = await self._rrf.search(
                 embedding=query_embedding,
-                query_text=request.query,
+                query_text=_search_query,
                 case_id=request.case_id,
                 max_sources=request.max_sources,
                 min_score=request.min_score,
                 event_date=request.event_date,  # Step 4: time-travel
                 bureau_id=_bureau_id,            # Step 6: tenant isolation
+                law_domain=_query_domain,        # Step 12: Gap 2 — domain-aware RRF k
             )
             retrieved_docs = rrf_result.documents
             version_type_map = {}  # no version tagging in standard mode
+
+        # Step 12: Gap 3 — init conflict map; populated below if reranking runs
+        _conflict_notes_map: dict[str, list[str]] = {}
 
         # ── 2b. Hiyerarşi & Çatışma Duyarlı Re-Ranking (Step 12) ────────────
         #        RRF çıktısı belgeler norm hiyerarşisi, otorite skoru ve
         #        Lex Specialis / Lex Posterior kurallarıyla yeniden sıralanır.
         #        reranking_enabled=False → sıra korunur (pass-through).
         if retrieved_docs:
-            rerank_results = self._reranker.rerank(retrieved_docs, request.query)
+            rerank_results = self._reranker.rerank(
+                retrieved_docs,
+                request.query,
+                bureau_id=_bureau_id,    # Step 12: Gap 1 — audit trail
+                case_id=request.case_id, # Step 12: Gap 1 — audit trail
+            )
             retrieved_docs = [r.document for r in rerank_results]
+            _conflict_notes_map = {
+                r.document.id: r.conflict_notes for r in rerank_results
+            }
 
         # ── 3. HARD-FAIL GATE ────────────────────────────────────────────────
         #       "Kaynak yoksa cevap yok"
@@ -414,8 +473,11 @@ class RAGService:
             async def _citation_fetcher(ref: str) -> Optional[LegalDocument]:
                 """RRF retriever üzerinden atıf çözümleme kapatması."""
                 try:
+                    # Step 13 Gap 4: atıf metnini ayrıca vektörize et
+                    # (orijinal sorgu vektörü değil, ref metni semantik araması için)
+                    ref_embedding = await self._embedder.embed_query(ref)
                     rrf_result = await self._rrf.search(
-                        embedding=query_embedding,
+                        embedding=ref_embedding,
                         query_text=ref,
                         case_id=request.case_id,
                         max_sources=1,
@@ -447,7 +509,38 @@ class RAGService:
                 )
             retrieved_docs = graph_result.all_docs
 
-        # ── 4a. Context Summarisation — Secondary Docs (Step 15) ─────────────
+            # Step 13 Gap 5: BFS sırasında çıkarılan kenarları citation_edges'e kaydet
+            # Best-effort: hata main pipeline'ı çökertmez
+            if graph_result.edges:
+                try:
+                    from collections import defaultdict
+                    from uuid import UUID as _UUID
+                    from infrastructure.ingest.citation_extractor import ExtractedCitation as _EC
+                    from infrastructure.database.supabase_citation_repository import (
+                        supabase_citation_repository as _cit_repo,
+                    )  # noqa: PLC0415
+                    _edges_by_source: dict = defaultdict(list)
+                    for _edge in graph_result.edges:
+                        _edges_by_source[_edge.source_id].append(_edge)
+                    for _src_id, _src_edges in _edges_by_source.items():
+                        _cits = [
+                            _EC(raw_text=e.raw_text, citation_type=e.citation_type)
+                            for e in _src_edges
+                        ]
+                        await _cit_repo.save_citations(
+                            source_doc_id=_UUID(_src_id),
+                            citations=_cits,
+                            bureau_id=_UUID(_bureau_id) if _bureau_id else None,
+                        )
+                    logger.debug(
+                        "GRAPHRAG_EDGES_PERSISTED | sources=%d | total_edges=%d",
+                        len(_edges_by_source),
+                        len(graph_result.edges),
+                    )
+                except Exception as _exc:
+                    logger.warning("GRAPHRAG_EDGE_PERSIST_FAILED (non-fatal): %s", _exc)
+        _docs_summarized_count: int = 0  # Step 15: set inside summarisation block
+        _tokens_saved: int = 0            # Step 15: approximate tokens saved        # ── 4a. Context Summarisation — Secondary Docs (Step 15) ─────────────
         #        Tier 4 (MUAZZAM) sorgularında düşük-öncelikli belgeler özetlenerek
         #        daha fazla kaynak bağlam penceresine sığdırılır.  Birincil
         #        belgeler (top-N) tam içerikle, ikincil belgeler özetlenmiş
@@ -466,6 +559,12 @@ class RAGService:
             )
             _summarized_docs = [r.document for r in _summary_results]
             retrieved_docs = _primary_docs + _summarized_docs
+            _docs_summarized_count = sum(1 for r in _summary_results if r.was_summarized)
+            _tokens_saved = sum(
+                r.original_tokens - r.summary_tokens
+                for r in _summary_results
+                if r.was_summarized
+            )
             logger.info(
                 "CONTEXT_SUMMARIZE | tier=%s | primary=%d | secondary=%d | "
                 "summarized=%d | target_tokens=%d",
@@ -484,6 +583,7 @@ class RAGService:
         )
         context = ctx_result.context_str
         used_docs = ctx_result.used_docs
+        _litm_applied: bool = ctx_result.litm_applied
 
         # ── 4b. Agentic Tool Dispatch (Step 14) ──────────────────────────────
         #        Tier 3/4 sorgularında sorgu metni zamanaşımı/süre hesabı
@@ -493,6 +593,7 @@ class RAGService:
             query_text=request.query,
             tier=tier_decision.tier,
             start_date=request.event_date,
+            seniority_years=request.seniority_years,
         )
 
         if ctx_result.truncated or ctx_result.dropped_count:
@@ -552,27 +653,50 @@ class RAGService:
                 _zt_invalid,
             )
 
-        _answer_sentences: List[AnswerSentence] = [
-            AnswerSentence(
-                sentence_id=s.sentence_id,
-                text=s.text,
-                source_refs=sorted(s.source_refs),
+        # ── 5c. Post-LLM Grounding Hard-Fail Gate (Hukuki Güvenlik Sözleşmesi) ──
+        #        If grounding_ratio is below the configured threshold the LLM
+        #        answer is discarded and replaced with _SAFE_REFUSAL text so
+        #        no hallucinated claim ever reaches the user ("kaynak yoksa cevap yok").
+        #        answer_sentences + inline_citations are ALSO cleared atomically
+        #        so the client never receives hallucinated sentence-level data.
+        _grounding_hard_fail = False
+        if _zt_report.grounding_ratio < settings.zero_trust_min_grounding_ratio:
+            logger.warning(
+                "GROUNDING_HARD_FAIL | ratio=%.2f | threshold=%.2f | "
+                "answer replaced with safe refusal",
+                _zt_report.grounding_ratio,
+                settings.zero_trust_min_grounding_ratio,
             )
-            for s in _zt_sentences
-        ]
-        _inline_citations: List[InlineCitation] = [
-            InlineCitation(
-                sentence_id=s.sentence_id,
-                source_indices=sorted(s.source_refs),
-                source_ids=[
-                    used_docs[idx - 1].id
-                    for idx in s.source_refs
-                    if 1 <= idx <= len(used_docs)
-                ],
-            )
-            for s in _zt_sentences
-            if s.source_refs
-        ]
+            answer = _SAFE_REFUSAL
+            _grounding_hard_fail = True
+
+        if _grounding_hard_fail:
+            # The original LLM sentences are discarded alongside the answer;
+            # returning them would expose potentially hallucinated claims.
+            _answer_sentences: List[AnswerSentence] = []
+            _inline_citations: List[InlineCitation] = []
+        else:
+            _answer_sentences = [
+                AnswerSentence(
+                    sentence_id=s.sentence_id,
+                    text=s.text,
+                    source_refs=sorted(s.source_refs),
+                )
+                for s in _zt_sentences
+            ]
+            _inline_citations = [
+                InlineCitation(
+                    sentence_id=s.sentence_id,
+                    source_indices=sorted(s.source_refs),
+                    source_ids=[
+                        used_docs[idx - 1].id
+                        for idx in s.source_refs
+                        if 1 <= idx <= len(used_docs)
+                    ],
+                )
+                for s in _zt_sentences
+                if s.source_refs
+            ]
         # ── 6. Build + validate response ─────────────────────────────────────
         #       RAGResponse @model_validator acts as second Hard-Fail guard.
         #       STEP 8: source_schemas reflects used_docs, not all retrieved_docs.
@@ -604,6 +728,7 @@ class RAGService:
                 final_score=doc.final_score,
                 bureau_id=doc.bureau_id,               # Step 6: tenant ownership
                 version_type=version_type_map.get(doc.id),  # Step 10: lehe kanun tag
+                conflict_notes=_conflict_notes_map.get(doc.id, []),  # Step 12: lex notes
             )
             for doc in used_docs
         ]
@@ -631,6 +756,8 @@ class RAGService:
             has_aym_warnings=bool(aym_warnings),
             has_lehe_notice=lehe_notice is not None,
             tier_value=tier_decision.tier.value,
+            grounding_ratio=_zt_report.grounding_ratio,
+            min_grounding_ratio=settings.zero_trust_min_grounding_ratio,
         )
         _legal_disclaimer = LegalDisclaimerSchema(
             disclaimer_text=_disc_data.disclaimer_text,
@@ -672,6 +799,10 @@ class RAGService:
                 model_used=model_used,
                 source_docs=used_docs,
                 tool_calls=list(dispatch_result.tools_invoked),
+                tool_errors=list(dispatch_result.tools_errored),
+                docs_summarized_count=_docs_summarized_count,
+                tokens_saved=_tokens_saved,
+                litm_applied=_litm_applied,
                 grounding_ratio=_zt_report.grounding_ratio,
                 disclaimer_severity=_legal_disclaimer.severity,
                 latency_ms=latency_ms,
@@ -686,6 +817,10 @@ class RAGService:
                 model_used=_audit_entry.model_used,
                 source_count=len(used_docs),
                 tool_calls_made=_audit_entry.tool_calls_made,
+                tool_errors=_audit_entry.tool_errors,
+                docs_summarized_count=_audit_entry.docs_summarized_count,
+                tokens_saved=_audit_entry.tokens_saved,
+                litm_applied=_audit_entry.litm_applied,
                 grounding_ratio=_audit_entry.grounding_ratio,
                 disclaimer_severity=_audit_entry.disclaimer_severity,
                 latency_ms=_audit_entry.latency_ms,
@@ -733,6 +868,7 @@ class RAGService:
                 embedding=query_embedding,
                 case_id=request.case_id,
                 response=response.model_dump(mode="json"),
+                bureau_id=_bureau_id,
             )
 
         logger.info(

@@ -1,5 +1,5 @@
 """
-Tiered LLM Router  —  Step 4
+Tiered LLM Router  —  Step 9
 ==============================
 Routes each RAG query to the cheapest LLM tier that can answer it.
 
@@ -380,9 +380,14 @@ class LLMTieredRouter:
             logger.info("Tier 4 (Anthropic): UNAVAILABLE — will fallback to Tier 3")
 
         if not available:
-            raise RuntimeError(
-                "LLMTieredRouter: No LLM provider keys configured. "
-                "Set at least OPENAI_API_KEY or GROQ_API_KEY in .env."
+            # API anahtarları henüz yüklenmemiş olabilir (test ortamı, CI, lazy env).
+            # Import-time RuntimeError yerine uyarı logu basıyoruz; gerçek hata
+            # `_resolve()` içinde call-time'da fırlatılır, böylece modülü import
+            # eden her kod parçası (örn. bağımlılık enjeksiyonu, test modülleri)
+            # API anahtarı olmadan da güvenle import edebilir.
+            logger.warning(
+                "LLMTieredRouter: no LLM provider keys configured at init time. "
+                "Set OPENAI_API_KEY or GROQ_API_KEY before calling generate()."
             )
 
         return available
@@ -514,7 +519,9 @@ class LLMTieredRouter:
                 )
 
         raise RuntimeError(
-            f"LLMTieredRouter: No available tier for desired={desired}. "
+            f"LLMTieredRouter: No LLM provider keys configured or no available tier "
+            f"for desired={desired}. "
+            f"Set OPENAI_API_KEY or GROQ_API_KEY in .env before calling generate(). "
             f"Available: {sorted(int(t) for t in self._available)}"
         )
 

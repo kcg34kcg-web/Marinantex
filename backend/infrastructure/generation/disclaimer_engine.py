@@ -60,6 +60,10 @@ class DisclaimerType(str, Enum):
     UZMAN_ZORUNLU = "UZMAN_ZORUNLU"
     """Expert review required: complex legal analysis — consult a qualified lawyer."""
 
+    DUSUK_GROUNDING = "DUSUK_GROUNDING"
+    """Low grounding warning: grounding_ratio fell below the configured threshold;
+    LLM answer was replaced with a safe refusal text."""
+
 
 # ---------------------------------------------------------------------------
 # Severity levels
@@ -103,6 +107,13 @@ _TEXTS: dict[DisclaimerType, str] = {
         "avukata danışınız. TBB Meslek Kuralları md. 3 gereği bağımsız hukuki "
         "değerlendirme zorunludur."
     ),
+    DisclaimerType.DUSUK_GROUNDING: (
+        "🚫 DÜŞÜK GROUNDING UYARISI: Bu yanıttaki ifadelerin önemli bir kısmı "
+        "kaynak belgelerde yeterince desteklenmemektedir. Yanıt güvenilirlik "
+        "eşiğinin altında kalmış ve bazı ifadeler doğrulanamamıştır. "
+        "Bu bilgilere dayanarak herhangi bir hukuki işlem yapmadan önce "
+        "mutlaka alanında uzman bir avukata danışınız."
+    ),
 }
 
 _LEGAL_BASIS = (
@@ -127,6 +138,7 @@ def _compute_severity(types: List[DisclaimerType]) -> DisclaimerSeverity:
     if (
         DisclaimerType.UZMAN_ZORUNLU in type_set
         or DisclaimerType.AYM_IPTAL_UYARISI in type_set
+        or DisclaimerType.DUSUK_GROUNDING in type_set
     ):
         return DisclaimerSeverity.CRITICAL
     if DisclaimerType.LEHE_KANUN in type_set:
@@ -145,6 +157,7 @@ def _combine_disclaimer_text(types: List[DisclaimerType]) -> str:
         DisclaimerType.AYM_IPTAL_UYARISI,
         DisclaimerType.LEHE_KANUN,
         DisclaimerType.UZMAN_ZORUNLU,
+        DisclaimerType.DUSUK_GROUNDING,
     ]:
         if t in types and t not in ordered:
             ordered.append(t)
@@ -177,6 +190,8 @@ class LegalDisclaimerEngine:
         has_lehe_notice: bool = False,
         tier_value: int = 1,
         expert_review_min_tier: int = 3,
+        grounding_ratio: float = 1.0,
+        min_grounding_ratio: float = 0.5,
     ) -> "LegalDisclaimerData":
         """
         Produces a LegalDisclaimerData object for inclusion in the RAGResponse.
@@ -187,6 +202,9 @@ class LegalDisclaimerEngine:
             tier_value             : QueryTier.value (1-4) — determines UZMAN_ZORUNLU.
             expert_review_min_tier : Tier threshold at which UZMAN_ZORUNLU activates.
                                      Default 3 (Tier 3 = complex legal analysis).
+            grounding_ratio        : Zero-Trust grounding ratio (0.0–1.0) from GroundingReport.
+                                     Activates DUSUK_GROUNDING when below min_grounding_ratio.
+            min_grounding_ratio    : Threshold below which DUSUK_GROUNDING fires (default 0.5).
 
         Returns:
             LegalDisclaimerData with combined disclaimer text, types, severity, etc.
@@ -202,6 +220,10 @@ class LegalDisclaimerEngine:
         if tier_value >= expert_review_min_tier:
             if DisclaimerType.UZMAN_ZORUNLU not in active_types:
                 active_types.append(DisclaimerType.UZMAN_ZORUNLU)
+
+        if grounding_ratio < min_grounding_ratio:
+            if DisclaimerType.DUSUK_GROUNDING not in active_types:
+                active_types.append(DisclaimerType.DUSUK_GROUNDING)
 
         severity = _compute_severity(active_types)
         combined_text = _combine_disclaimer_text(active_types)

@@ -12,10 +12,12 @@ This module provides:
 
 Detected PII types (Turkish-specific patterns):
     TC_KIMLIK   — T.C. Kimlik No (11-digit Turkish national ID)
+    VKN         — Vergi Kimlik Numarası (10-digit Turkish tax ID)
     TELEFON     — Turkish mobile / landline phone number
     EPOSTA      — E-mail address
     IBAN        — Turkish IBAN (TR + 24 digits)
     ADRES       — Street address (Sokak / Cadde / Bulvar / Cad. / Sok.)
+    AD_SOYAD    — Turkish person name (2–4 consecutive capitalised words)
 
 Design principles:
     IRREVERSIBLE  — unlike PrivacyMiddleware (which can restore PII),
@@ -112,7 +114,74 @@ _ADRES_RE = re.compile(
     r"\b(?:Sokak|Cadde|Bulvar)\s+No\s*[:.]?\s*\d+\b",
     re.IGNORECASE | re.UNICODE,
 )
+# VKN — Vergi Kimlik Numarası (10 haneli, baş rakam 1-9)
+# İki form desteklenir:
+#   Etiketli : VKN: 1234567890  /  Vergi No: 1234567890
+#   Bağımsız: kelime sınırı içinde 10 haneli sayı
+# TC_KİMLİK (11 hane) sonrasında çalıştırılmalı; kısmi örtüşme riskini önler.
+_VKN_RE = re.compile(
+    r"(?:"
+    r"(?:VKN|V\.K\.N\.|Vergi\s+(?:Kimlik\s+)?No\.?)\s*[:\-]?\s*[1-9]\d{9}"  # etiketli
+    r"|"
+    r"\b[1-9]\d{9}\b"   # bağımsız 10 hane
+    r")",
+    re.IGNORECASE,
+)
 
+# Türkçe ad soyad — 2-4 ardışık büyük harfle başlayan Türkçe kelime
+# Büyük Türkçe harfler: A-Z + Ç Ğ İ Ö Ş Ü
+# Küçük Türkçe harfler: a-z + ç ğ ı i ö ş ü
+# Her kelime için min 3 karakter (büyük + 2 küçük) gerekli: "İş" gibi kısa hukuki
+# terimlerle yanlış eşleşmeyi önler.
+# Doğruluk artışı için bu kalıp hattın SONUNDA çalıştırılır; önceki eşleşmeler
+# (IBAN, TC, VKN, TELEFON, ADRES) zaten maskelenmiş olur.
+_AD_SOYAD_RE = re.compile(
+    r"\b[A-ZÇĞİÖŞÜ][a-zçğışöü]{2,}"
+    r"(?:\s+[A-ZÇĞİÖŞÜ][a-zçğışöü]{2,}){1,3}",
+    re.UNICODE,
+)
+
+# Bilinen Türkçe hukuki kurum/terim kelimeleri — AD_SOYAD eşleşmesinden dışlanır.
+# Örn: "İhbar Tazminatı", "Ağır Ceza Mahkemesi", "İş Kanunu"
+# Aşırı maskeleme (over-redaction) riskini azaltır, KVKK uyumunu korur.
+_AD_SOYAD_LEGAL_EXCLUDE_RE = re.compile(
+    r"\b(?:"
+    r"Kanun[a-zçğışöü]*"           # Kanun, Kanunu, Kanunun
+    r"|Mahkeme[a-zçğışöü]*"        # Mahkeme, Mahkemesi
+    r"|Daire[a-zçğışöü]*"          # Daire, Dairesi
+    r"|Karar[a-zçğışöü]*"          # Karar, Kararı, Kararname
+    r"|Tazminat[a-zçğışöü]*"       # Tazminat, Tazminatı
+    r"|Yönetmelik[a-zçğışöü]*"     # Yönetmelik
+    r"|Tebliğ[a-zçğışöü]*"         # Tebliğ
+    r"|Anayasa[a-zçğışöü]*"        # Anayasa
+    r"|Cumhurba[sş]kanlığ[a-zçğışöü]*"  # Cumhurbaşkanlığı
+    r"|Yargıtay[a-zçğışöü]*"       # Yargıtay
+    r"|Danıştay[a-zçğışöü]*"       # Danıştay
+    r"|Sayıştay[a-zçğışöü]*"       # Sayıştay
+    r"|Müdürlüğ[a-zçğışöü]*"       # Müdürlüğü
+    r"|Başkanlığ[a-zçğışöü]*"      # Başkanlığı
+    r"|Bakanlığ[a-zçğışöü]*"       # Bakanlığı
+    r"|Hukuk[a-zçğışöü]*"          # Hukuku, Hukuki
+    r"|Ceza[a-zçğışöü]*"           # Ceza, Cezası
+    r"|Tebliğ[a-zçğışöü]*"         # Tebliğ
+    r"|Müvekkil[a-zçğışöü]*"       # Müvekkil
+    r"|İtiraz[a-zçğışöü]*"          # İtiraz
+    r"|İcra[a-zçğışöü]*"            # İcra
+    r"|Sicil[a-zçğışöü]*"           # Sicil
+    r"|Kurul[a-zçğışöü]*"           # Kurul, Kurulu
+    r"|Kurum[a-zçğışöü]*"           # Kurum, Kurumu
+    r"|Birim[a-zçğışöü]*"           # Birim, Birimi
+    r"|Türkiye[a-zçğışöü]*"         # Türkiye
+    r"|Cumhuriyet[a-zçğışöü]*"      # Cumhuriyeti
+    r"|Davası?"                      # Dava, Davası
+    r"|Uyuşmazlık[a-zçğışöü]*"      # Uyuşmazlık
+    r"|Yargılama[a-zçğışöü]*"       # Yargılama
+    r"|Tahliye[a-zçğışöü]*"         # Tahliye
+    r"|Temyiz[a-zçğışöü]*"          # Temyiz
+    r"|İstinaf[a-zçğışöü]*"         # İstinaf
+    r")\b",
+    re.UNICODE,
+)
 
 # ============================================================================
 # Replacement tokens (display in redacted text)
@@ -121,18 +190,22 @@ _ADRES_RE = re.compile(
 _TOKENS: dict[str, str] = {
     "IBAN":      "[IBAN]",
     "TC_KIMLIK": "[TC_KİMLİK]",
+    "VKN":       "[VKN]",
     "TELEFON":   "[TELEFON]",
     "EPOSTA":    "[EPOSTA]",
     "ADRES":     "[ADRES]",
+    "AD_SOYAD":  "[AD_SOYAD]",
 }
 
 # Pattern pipeline: (pii_type, compiled_pattern) — applied in order
 _PATTERN_PIPELINE: list[tuple[str, re.Pattern]] = [
     ("IBAN",      _IBAN_RE),
     ("TC_KIMLIK", _TC_KIMLIK_RE),
+    ("VKN",       _VKN_RE),       # 10 haneli — TC (11 hane) sonrası, telefon öncesi
     ("TELEFON",   _TELEFON_RE),
     ("EPOSTA",    _EPOSTA_RE),
     ("ADRES",     _ADRES_RE),
+    ("AD_SOYAD",  _AD_SOYAD_RE),  # en son — önceki maskeleme yanlış pozitif riskini azaltır
 ]
 
 
@@ -192,6 +265,15 @@ class KVKKRedactor:
                 start, end = m.start(), m.end()
                 # Skip if fully overlapped by a previously collected hit
                 if any(cs <= start and end <= ce for cs, ce in covered):
+                    continue
+                # AD_SOYAD: skip matches that contain known legal institution words.
+                # Prevents false positives on legal terms like "İhbar Tazminatı",
+                # "Ağır Ceza Mahkemesi", "Yargıtay Kararı" etc.
+                if pii_type == "AD_SOYAD" and _AD_SOYAD_LEGAL_EXCLUDE_RE.search(m.group(0)):
+                    logger.debug(
+                        "AD_SOYAD_SKIP_LEGAL | span=[%d:%d] | text=%r",
+                        start, end, m.group(0)[:40],
+                    )
                     continue
                 raw_hits.append((start, end, pii_type))
                 covered.append((start, end))

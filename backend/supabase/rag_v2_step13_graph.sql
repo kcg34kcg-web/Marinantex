@@ -25,15 +25,15 @@
 -- 1. citation_edges tablosu
 -- ----------------------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS citation_edges (
+CREATE TABLE IF NOT EXISTS public.citation_edges (
     id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- Kaynak belge (atıf yapan)
     source_doc_id    UUID        NOT NULL
-                                 REFERENCES legal_documents(id) ON DELETE CASCADE,
+                                 REFERENCES public.documents(id) ON DELETE CASCADE,
 
     -- Hedef belge (atıf yapılan) — null = henüz çözümlenmedi
-    target_doc_id    UUID        REFERENCES legal_documents(id) ON DELETE SET NULL,
+    target_doc_id    UUID        REFERENCES public.documents(id) ON DELETE SET NULL,
 
     -- Çözümlenmemiş atıfın ham metni ("4857 sayılı Kanun md. 17" vb.)
     raw_citation     TEXT        NOT NULL,
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS citation_edges (
     citation_type    TEXT        NOT NULL DEFAULT 'UNKNOWN',
 
     -- Tenant yalıtımı (Step 6)
-    bureau_id        UUID        REFERENCES bureaus(id) ON DELETE CASCADE,
+    bureau_id        UUID        REFERENCES public.bureaus(id) ON DELETE CASCADE,
 
     -- Zaman damgaları
     extracted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -56,20 +56,27 @@ CREATE TABLE IF NOT EXISTS citation_edges (
     )
 );
 
+-- Idempotent ingest için ünik kısıtlama (upsert on_conflict hedefi)
+ALTER TABLE public.citation_edges
+    DROP CONSTRAINT IF EXISTS uq_citation_edges_source_raw;
+ALTER TABLE public.citation_edges
+    ADD CONSTRAINT uq_citation_edges_source_raw
+    UNIQUE (source_doc_id, raw_citation);
+
 -- İndeksler
 CREATE INDEX IF NOT EXISTS idx_citation_edges_source
-    ON citation_edges (source_doc_id);
+    ON public.citation_edges (source_doc_id);
 
 CREATE INDEX IF NOT EXISTS idx_citation_edges_target
-    ON citation_edges (target_doc_id)
+    ON public.citation_edges (target_doc_id)
     WHERE target_doc_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_citation_edges_bureau
-    ON citation_edges (bureau_id)
+    ON public.citation_edges (bureau_id)
     WHERE bureau_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_citation_edges_type
-    ON citation_edges (citation_type);
+    ON public.citation_edges (citation_type);
 
 -- ----------------------------------------------------------------------------
 -- 2. citation_traversal() — recursive CTE, max 2 derece derinlik
@@ -105,7 +112,7 @@ WITH RECURSIVE traversal AS (
         t.depth + 1                 AS depth,
         t.path || ce.target_doc_id  AS path,
         ce.target_doc_id = ANY(t.path) AS cycle
-    FROM   citation_edges ce
+    FROM   public.citation_edges ce
     JOIN   traversal t ON ce.source_doc_id = t.doc_id
     WHERE
         -- Hedef belge çözümlü olmalı
@@ -135,7 +142,7 @@ cycle=TRUE işaretlenir; bu yol izlenmez (sonsuz döngü önlemi).';
 -- 3. document_citations view — basitleştirilmiş atıf sorgusu
 -- ----------------------------------------------------------------------------
 
-CREATE OR REPLACE VIEW document_citations AS
+CREATE OR REPLACE VIEW public.document_citations AS
 SELECT
     ce.id,
     ce.source_doc_id,
@@ -147,9 +154,9 @@ SELECT
     ce.bureau_id,
     ce.extracted_at,
     ce.resolved_at
-FROM citation_edges ce
-LEFT JOIN legal_documents src ON src.id = ce.source_doc_id
-LEFT JOIN legal_documents tgt ON tgt.id = ce.target_doc_id;
+FROM public.citation_edges ce
+LEFT JOIN public.documents src ON src.id = ce.source_doc_id
+LEFT JOIN public.documents tgt ON tgt.id = ce.target_doc_id;
 
 COMMENT ON VIEW document_citations IS
 'citation_edges + kaynak/hedef belge atıf etiketleriyle birleştirilmiş görünüm.';
@@ -158,31 +165,45 @@ COMMENT ON VIEW document_citations IS
 -- 4. RLS politikaları (Row-Level Security — Step 6 tenant isolation)
 -- ----------------------------------------------------------------------------
 
-ALTER TABLE citation_edges ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.citation_edges ENABLE ROW LEVEL SECURITY;
 
 -- Büro sahibi okuyabilir
+DROP POLICY IF EXISTS citation_edges_bureau_select ON public.citation_edges;
 CREATE POLICY citation_edges_bureau_select
-    ON citation_edges
+    ON public.citation_edges
     FOR SELECT
     USING (
         bureau_id IS NULL
-        OR bureau_id = current_setting('app.current_bureau_id', TRUE)::UUID
+        OR bureau_id = (SELECT bureau_id FROM public.profiles WHERE id = auth.uid() LIMIT 1)
     );
 
 -- Büro sahibi yazabilir
+DROP POLICY IF EXISTS citation_edges_bureau_insert ON public.citation_edges;
 CREATE POLICY citation_edges_bureau_insert
-    ON citation_edges
+    ON public.citation_edges
     FOR INSERT
     WITH CHECK (
         bureau_id IS NULL
-        OR bureau_id = current_setting('app.current_bureau_id', TRUE)::UUID
+        OR bureau_id = (SELECT bureau_id FROM public.profiles WHERE id = auth.uid() LIMIT 1)
     );
 
 -- Büro sahibi silebilir
+DROP POLICY IF EXISTS citation_edges_bureau_delete ON public.citation_edges;
 CREATE POLICY citation_edges_bureau_delete
-    ON citation_edges
+    ON public.citation_edges
     FOR DELETE
     USING (
         bureau_id IS NULL
-        OR bureau_id = current_setting('app.current_bureau_id', TRUE)::UUID
+        OR bureau_id = (SELECT bureau_id FROM public.profiles WHERE id = auth.uid() LIMIT 1)
     );
+
+-- Servis rolü her şeyi yapabilir
+DROP POLICY IF EXISTS citation_edges_service_role_all ON public.citation_edges;
+CREATE POLICY citation_edges_service_role_all
+    ON public.citation_edges FOR ALL TO service_role
+    USING (true) WITH CHECK (true);
+
+-- Grants
+GRANT ALL ON TABLE public.citation_edges TO service_role;
+GRANT SELECT, INSERT ON TABLE public.citation_edges TO authenticated;
+GRANT EXECUTE ON FUNCTION public.citation_traversal(uuid, int, uuid) TO authenticated, service_role;

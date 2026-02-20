@@ -64,6 +64,9 @@ COMMENT ON TABLE lehe_kanun_searches IS
 --    Bureau isolation: p_bureau_id filter is applied to BOTH version queries.
 -- ---------------------------------------------------------------------------
 
+-- Drop previous version so the return type can be freely changed on re-runs.
+DROP FUNCTION IF EXISTS public.hybrid_lehe_kanun_search(vector, text, uuid, int, date, date, uuid);
+
 CREATE OR REPLACE FUNCTION hybrid_lehe_kanun_search(
     query_embedding  vector(1536),
     query_text       text,
@@ -74,38 +77,46 @@ CREATE OR REPLACE FUNCTION hybrid_lehe_kanun_search(
     p_bureau_id      uuid    DEFAULT NULL
 )
 RETURNS TABLE (
-    -- All columns from hybrid_legal_search
-    id                    uuid,
-    case_id               uuid,
-    content               text,
-    file_path             text,
-    created_at            timestamptz,
-    source_url            text,
-    version               text,
-    collected_at          timestamptz,
-    court_level           text,
-    ruling_date           date,
-    citation              text,
-    norm_hierarchy        text,
-    chamber               text,
-    majority_type         text,
-    dissent_present       boolean,
-    effective_date        date,
-    expiry_date           date,
-    aym_iptal_durumu      text,
-    iptal_yururluk_tarihi date,
-    aym_karar_no          text,
-    aym_karar_tarihi      date,
-    authority_score       float,
-    is_binding_precedent  boolean,
-    bureau_id             uuid,
-    semantic_score        float,
-    keyword_score         float,
-    recency_score         float,
-    hierarchy_score       float,
-    final_score           float,
-    -- Step 10 additions
-    version_type          text    -- 'EVENT_DATE' | 'DECISION_DATE'
+    -- Identity (matches hybrid_legal_search exactly)
+    id                      uuid,
+    case_id                 uuid,
+    content                 text,
+    file_path               text,
+    created_at              timestamptz,
+    -- Step 2: Provenance
+    source_url              text,
+    version                 text,
+    collected_at            timestamptz,
+    -- Classification
+    court_level             text,
+    ruling_date             date,
+    citation                text,
+    norm_hierarchy          text,
+    -- Step 3: Authority
+    chamber                 text,
+    majority_type           text,
+    dissent_present         boolean,
+    -- Step 4: Versioning + AYM
+    effective_date          date,
+    expiry_date             date,
+    aym_iptal_durumu        text,
+    iptal_yururluk_tarihi   date,
+    aym_karar_no            text,
+    aym_karar_tarihi        date,
+    -- Step 5: Ingest / Parsing
+    segment_type            text,
+    madde_no                text,
+    fikra_no                integer,
+    bent_no                 text,
+    citation_refs           text[],
+    -- Scores
+    semantic_score          float,
+    keyword_score           float,
+    recency_score           float,
+    hierarchy_score         float,
+    final_score             float,
+    -- Step 10: which law version this row belongs to
+    version_type            text    -- 'EVENT_DATE' | 'DECISION_DATE'
 )
 LANGUAGE sql
 STABLE
@@ -160,6 +171,7 @@ GRANT EXECUTE ON FUNCTION hybrid_lehe_kanun_search TO service_role;
 ALTER TABLE lehe_kanun_searches ENABLE ROW LEVEL SECURITY;
 
 -- Service role can read and write all rows
+DROP POLICY IF EXISTS lehe_searches_service_all ON lehe_kanun_searches;
 CREATE POLICY lehe_searches_service_all ON lehe_kanun_searches
     FOR ALL
     TO service_role
@@ -167,6 +179,7 @@ CREATE POLICY lehe_searches_service_all ON lehe_kanun_searches
     WITH CHECK (true);
 
 -- Bureau members can read their own bureau's audit rows
+DROP POLICY IF EXISTS lehe_searches_bureau_read ON lehe_kanun_searches;
 CREATE POLICY lehe_searches_bureau_read ON lehe_kanun_searches
     FOR SELECT
     TO authenticated

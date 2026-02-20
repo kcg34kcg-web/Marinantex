@@ -3,13 +3,13 @@ Tests — Step 10: Time-Travel Search ve "Lehe Kanun" Motoru
 ===========================================================
 Groups:
     A — LawDomain enum                         (5 tests)
-    B — LeheKanunResult domain object           (7 tests)
+    B — LeheKanunResult domain object           (8 tests)
     C — classify_domain() keyword detection    (10 tests)
-    D — LeheKanunEngine.check() logic           (8 tests)
+    D — LeheKanunEngine.check() logic          (10 tests)
     E — LeheKanunNoticeSchema / RAGQueryRequest (6 tests)
     F — RAGResponse lehe_kanun_notice field     (4 tests)
 
-Total: 40 new tests  →  291 + 40 = 331 passing target
+Total: 43 tests
 """
 
 from __future__ import annotations
@@ -141,6 +141,16 @@ class TestLeheKanunResult:
         )
         assert r.both_versions_needed is False
 
+    def test_reversed_dates_raises_value_error(self) -> None:
+        """Creating a LeheKanunResult with event_date > decision_date must raise ValueError."""
+        with pytest.raises(ValueError, match="karar tarihinden"):
+            LeheKanunResult.not_applicable(
+                law_domain=LawDomain.CEZA,
+                event_date=_KARAR,        # 2026 — later
+                decision_date=_EVENT,     # 2020 — earlier
+                reason="Ters tarih testi",
+            )
+
 
 # ============================================================================
 # C — classify_domain() keyword detection
@@ -267,7 +277,28 @@ class TestLeheKanunEngineCheck:
         assert str(_EVENT) in result.reason
         assert str(_KARAR) in result.reason
 
+    def test_reversed_dates_raises_value_error(
+        self, engine: LeheKanunEngine
+    ) -> None:
+        """Engine must raise ValueError when event_date is after decision_date."""
+        with pytest.raises(ValueError, match="karar tarihinden"):
+            engine.check(
+                query_text="Hırsızlık suçu lehe kanun?",
+                event_date=_KARAR,    # 2026 — later than decision
+                decision_date=_EVENT, # 2020 — earlier
+            )
 
+    def test_engine_with_same_dates_not_applicable(
+        self, engine: LeheKanunEngine
+    ) -> None:
+        """event_date == decision_date must produce not_applicable even for CEZA domain."""
+        result = engine.check(
+            query_text="Sanığın hırsızlık suçu",
+            event_date=date(2023, 5, 15),
+            decision_date=date(2023, 5, 15),
+        )
+        assert result.lehe_applicable is False
+        assert result.both_versions_needed is False
 # ============================================================================
 # E — LeheKanunNoticeSchema + RAGQueryRequest.decision_date
 # ============================================================================

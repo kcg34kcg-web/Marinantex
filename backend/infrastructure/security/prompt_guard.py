@@ -80,6 +80,25 @@ def _p(threat: ThreatType, pattern: str, description: str) -> _Pattern:
     )
 
 
+def _pm(threat: ThreatType, pattern: str, description: str) -> _Pattern:
+    """Helper: compiles a pattern with IGNORECASE + MULTILINE flags.
+
+    Use this instead of _p() when the pattern uses ``^`` or ``$`` anchors
+    that must match at each *line* boundary, not just the string boundary.
+    """
+    return _Pattern(
+        threat=threat,
+        regex=re.compile(pattern, re.IGNORECASE | re.MULTILINE),
+        description=description,
+    )
+
+
+# Maximum input length scanned by scan_query().
+# Queries longer than this are truncated BEFORE regex matching to prevent
+# catastrophic backtracking (ReDoS) on patterns such as \bDAN\b.*?\w+
+_QUERY_MAX_LEN: int = 4_000
+
+
 # ── Query-surface patterns ─────────────────────────────────────────────────
 _QUERY_PATTERNS: List[_Pattern] = [
     # ── Jailbreak ─────────────────────────────────────────────────────────
@@ -147,6 +166,9 @@ _QUERY_PATTERNS: List[_Pattern] = [
     _p(ThreatType.ENCODED_INJECTION,
        r"\\x[0-9a-f]{2}(\\x[0-9a-f]{2}){4,}",
        "Hex-encoded injection sequence"),
+    _p(ThreatType.ENCODED_INJECTION,
+       r"(\\u[0-9a-f]{4}){4,}",
+       "Unicode escape injection sequence (\\uXXXX)"),
 ]
 
 # ── Context/document-surface patterns ─────────────────────────────────────
@@ -159,10 +181,10 @@ _CONTEXT_PATTERNS: List[_Pattern] = [
     _p(ThreatType.CONTEXT_POISONING,
        r"<\|im_start\|>|<\|im_end\|>",
        "ChatML injection markers"),
-    # Injected role headers in doc text
-    _p(ThreatType.CONTEXT_POISONING,
-       r"^(SYSTEM|HUMAN|ASSISTANT|USER)\s*:",
-       "Injected role-header in document"),
+    # Injected role headers in doc text — uses MULTILINE so ^ matches each line start
+    _pm(ThreatType.CONTEXT_POISONING,
+        r"^(SYSTEM|HUMAN|ASSISTANT|USER)\s*:",
+        "Injected role-header in document"),
     # Classic document-level override
     _p(ThreatType.CONTEXT_POISONING,
        r"ignore\s+(the\s+)?(above|previous|following|all)",
@@ -220,14 +242,19 @@ def scan_query(query: str) -> PromptGuardResult:
 
     Pure function — no logging, no exceptions.  Callers decide what to do.
 
+    Input is truncated to _QUERY_MAX_LEN characters before matching to prevent
+    catastrophic backtracking (ReDoS) on greedy patterns.
+
     Args:
         query: The user's legal question (post-PII-masking, pre-embedding).
 
     Returns:
         PromptGuardResult with safe=True if no threat found, else safe=False.
     """
+    # Truncate to prevent ReDoS on very long inputs
+    scan_text = query[:_QUERY_MAX_LEN]
     for pattern in _QUERY_PATTERNS:
-        match = pattern.regex.search(query)
+        match = pattern.regex.search(scan_text)
         if match:
             return PromptGuardResult(
                 safe=False,

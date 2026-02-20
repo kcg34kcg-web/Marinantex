@@ -11,8 +11,11 @@ Coverage groups:
     G  —  api/schemas: AnswerSentence / InlineCitation / LegalDisclaimerSchema  (7 tests)
     H  —  RAGResponse.legal_disclaimer auto-generation (model_validator)        (6 tests)
     I  —  RAGService integration: numbered context + citation + disclaimer       (5 tests)
+    J  —  DUSUK_GROUNDING disclaimer type activation tests                      (8 tests)
+    K  —  Post-LLM GROUNDING_HARD_FAIL: answer replaced, sentences cleared      (5 tests)
+    L  —  Pre-LLM NoSource Hard-Fail: HTTP 422, LLM never called                (4 tests)
 
-Total: 57 tests
+Total: 74 tests
 """
 
 from __future__ import annotations
@@ -626,3 +629,324 @@ class TestRAGServiceStep16Integration:
         for sentence in resp.answer_sentences:
             for ref in sentence.source_refs:
                 assert 1 <= ref <= source_count
+
+
+# ============================================================================
+# J — DUSUK_GROUNDING disclaimer type activation
+# ============================================================================
+
+class TestDusukGroundingDisclaimer:
+    """J. DUSUK_GROUNDING risk class — grounding ratio threshold enforcement."""
+
+    def test_low_grounding_activates_dusuk_grounding_type(self):
+        """grounding_ratio below threshold must add DUSUK_GROUNDING to types."""
+        data = disclaimer_engine.generate(grounding_ratio=0.3, min_grounding_ratio=0.5)
+        assert "DUSUK_GROUNDING" in data.disclaimer_types
+
+    def test_grounding_at_threshold_not_activated(self):
+        """Exactly at threshold (0.5 == 0.5) uses strict less-than — must NOT activate."""
+        data = disclaimer_engine.generate(grounding_ratio=0.5, min_grounding_ratio=0.5)
+        assert "DUSUK_GROUNDING" not in data.disclaimer_types
+
+    def test_high_grounding_not_activated(self):
+        """Well above threshold — must NOT activate."""
+        data = disclaimer_engine.generate(grounding_ratio=0.9, min_grounding_ratio=0.5)
+        assert "DUSUK_GROUNDING" not in data.disclaimer_types
+
+    def test_low_grounding_produces_critical_severity(self):
+        """DUSUK_GROUNDING must escalate overall severity to CRITICAL."""
+        data = disclaimer_engine.generate(grounding_ratio=0.2, min_grounding_ratio=0.5)
+        assert data.severity == "CRITICAL"
+
+    def test_zero_ratio_activates_and_is_critical(self):
+        """Zero grounding (no citations at all) must trigger DUSUK_GROUNDING + CRITICAL."""
+        data = disclaimer_engine.generate(grounding_ratio=0.0, min_grounding_ratio=0.5)
+        assert "DUSUK_GROUNDING" in data.disclaimer_types
+        assert data.severity == "CRITICAL"
+
+    def test_default_call_ratio_1_does_not_activate(self):
+        """Default generate() call uses ratio=1.0 — must not trigger DUSUK_GROUNDING."""
+        data = disclaimer_engine.generate()
+        assert "DUSUK_GROUNDING" not in data.disclaimer_types
+
+    def test_dusuk_grounding_text_warns_about_sources(self):
+        """Disclaimer text must reference source-limitation in Turkish."""
+        data = disclaimer_engine.generate(grounding_ratio=0.1, min_grounding_ratio=0.5)
+        assert "DUSUK_GROUNDING" in data.disclaimer_types
+        lowered = data.disclaimer_text.lower()
+        assert "kaynak" in lowered or "desteklenmemektedir" in lowered
+
+    def test_dusuk_grounding_combined_with_aym_still_critical(self):
+        """Low grounding + AYM warning: both types active, severity CRITICAL."""
+        data = disclaimer_engine.generate(
+            has_aym_warnings=True,
+            grounding_ratio=0.1,
+            min_grounding_ratio=0.5,
+        )
+        assert "AYM_IPTAL_UYARISI" in data.disclaimer_types
+        assert "DUSUK_GROUNDING" in data.disclaimer_types
+        assert data.severity == "CRITICAL"
+
+
+# ============================================================================
+# K — Post-LLM GROUNDING_HARD_FAIL: answer replaced, sentences cleared
+# ============================================================================
+
+class TestGroundingHardFailGate:
+    """K. Post-LLM gate: answer and answer_sentences/inline_citations are
+    replaced/cleared atomically when grounding_ratio < threshold."""
+
+    def _make_doc(self, doc_id: str, content: str, citation: str, score: float):
+        from domain.entities.legal_document import LegalDocument
+        doc = MagicMock(spec=LegalDocument)
+        doc.id = doc_id
+        doc.content = content
+        doc.citation = citation
+        doc.final_score = score
+        doc.court_level = None
+        doc.ruling_date = None
+        doc.source_url = None
+        doc.version = None
+        doc.collected_at = None
+        doc.norm_hierarchy = None
+        doc.chamber = None
+        doc.majority_type = None
+        doc.dissent_present = False
+        doc.authority_score = 0.5
+        doc.is_binding_precedent = False
+        doc.effective_date = None
+        doc.expiry_date = None
+        doc.aym_iptal_durumu = None
+        doc.iptal_yururluk_tarihi = None
+        doc.aym_karar_no = None
+        doc.aym_karar_tarihi = None
+        doc.aym_warning_text = ""
+        doc.bureau_id = None
+        doc.requires_aym_warning = False
+        doc.is_currently_effective = True
+        return doc
+
+    def _make_low_grounding_service(self):
+        """RAGService whose LLM returns an answer with ZERO [K:N] citations.
+        Two long sentences, no markers → grounding_ratio=0.0 < 0.5 → gate fires.
+        """
+        from infrastructure.context.context_builder import ContextBuildResult
+        from infrastructure.llm.tiered_router import QueryTier, TierDecision
+        from application.services.rag_service import RAGService
+
+        docs = [
+            self._make_doc("d1", "\u0130hbar süresi 4 haftadır.", "\u0130\u015f Kanunu md. 17", 0.9),
+            self._make_doc("d2", "Kıdem tazminatı hesaplanır.", "\u0130\u015f Kanunu md. 14", 0.8),
+        ]
+
+        mock_rrf = MagicMock()
+        mock_rrf_result = MagicMock()
+        mock_rrf_result.documents = docs
+        mock_rrf.search = AsyncMock(return_value=mock_rrf_result)
+
+        mock_reranker = MagicMock()
+        mock_reranker.rerank = MagicMock(
+            return_value=[MagicMock(document=d) for d in docs]
+        )
+
+        mock_ctx = MagicMock()
+        mock_ctx.build = MagicMock(
+            return_value=ContextBuildResult(
+                context_str="\u0130hbar süresi 4 haftadır. | Kıdem tazminatı hesaplanır.",
+                used_docs=docs,
+                total_tokens=60,
+                dropped_count=0,
+                truncated=False,
+            )
+        )
+
+        mock_router = MagicMock()
+        mock_router.decide = MagicMock(
+            return_value=TierDecision(
+                tier=QueryTier.TIER1,
+                model_id="llama-3.3-70b-versatile",
+                provider="groq",
+                reason="test",
+            )
+        )
+        # Two long sentences with NO [K:N] markers → grounding_ratio = 0.0
+        mock_router.generate = AsyncMock(
+            return_value=(
+                "Bu hukuki konuda kaynaklar yeterince bilgi içermemektedir ve detaylı araştırma gereklidir. "
+                "Ayrıca bu meseleye ilişkin içtihat oldukça sınırlı kalmaktadır bu nedenle uzmana danışılmalıdır.",
+                "groq/llama-3.3-70b-versatile",
+            )
+        )
+
+        mock_dispatcher = MagicMock()
+        mock_dispatch_result = MagicMock()
+        mock_dispatch_result.was_triggered = False
+        mock_dispatcher.dispatch = MagicMock(return_value=mock_dispatch_result)
+
+        mock_graph = MagicMock()
+        graph_result = MagicMock()
+        graph_result.expansion_count = 0
+        graph_result.all_docs = docs
+        mock_graph.expand = AsyncMock(return_value=graph_result)
+
+        mock_embedder = MagicMock()
+        mock_embedder._model = "text-embedding-3-small"
+        mock_embedder.embed_query = AsyncMock(return_value=[0.1] * 1536)
+
+        return RAGService(
+            rrf=mock_rrf,
+            reranker=mock_reranker,
+            ctx_builder=mock_ctx,
+            router=mock_router,
+            dispatcher=mock_dispatcher,
+            graph_expander=mock_graph,
+            embedder=mock_embedder,
+        )
+
+    @pytest.mark.asyncio
+    async def test_answer_replaced_with_safe_refusal(self):
+        """Gate fires → answer must equal the module-level _SAFE_REFUSAL text."""
+        from api.schemas import RAGQueryRequest
+        from application.services.rag_service import _SAFE_REFUSAL
+        svc = self._make_low_grounding_service()
+        req = RAGQueryRequest(query="Yargıtay kararı nedir?")
+        resp = await svc.query(req)
+        assert resp.answer == _SAFE_REFUSAL
+
+    @pytest.mark.asyncio
+    async def test_answer_sentences_cleared_on_hard_fail(self):
+        """Gate fires → answer_sentences must be [] (no hallucinated sentences)."""
+        from api.schemas import RAGQueryRequest
+        svc = self._make_low_grounding_service()
+        req = RAGQueryRequest(query="Yargıtay kararı nedir?")
+        resp = await svc.query(req)
+        assert resp.answer_sentences == []
+
+    @pytest.mark.asyncio
+    async def test_inline_citations_cleared_on_hard_fail(self):
+        """Gate fires → inline_citations must be []."""
+        from api.schemas import RAGQueryRequest
+        svc = self._make_low_grounding_service()
+        req = RAGQueryRequest(query="Yargıtay kararı nedir?")
+        resp = await svc.query(req)
+        assert resp.inline_citations == []
+
+    @pytest.mark.asyncio
+    async def test_disclaimer_severity_critical_on_hard_fail(self):
+        """Gate fires → DUSUK_GROUNDING active → disclaimer severity must be CRITICAL."""
+        from api.schemas import RAGQueryRequest
+        svc = self._make_low_grounding_service()
+        req = RAGQueryRequest(query="Yargıtay kararı nedir?")
+        resp = await svc.query(req)
+        assert resp.legal_disclaimer.severity == "CRITICAL"
+
+    @pytest.mark.asyncio
+    async def test_disclaimer_contains_dusuk_grounding_on_hard_fail(self):
+        """Gate fires → DUSUK_GROUNDING must appear in disclaimer_types."""
+        from api.schemas import RAGQueryRequest
+        svc = self._make_low_grounding_service()
+        req = RAGQueryRequest(query="Yargıtay kararı nedir?")
+        resp = await svc.query(req)
+        assert "DUSUK_GROUNDING" in resp.legal_disclaimer.disclaimer_types
+
+
+# ============================================================================
+# L — Pre-LLM NoSource Hard-Fail: HTTP 422, LLM never called
+# ============================================================================
+
+class TestPreLLMNoSourceHardFail:
+    """L. Pre-LLM Hard-Fail gate: empty retrieval → HTTP 422, LLM never called."""
+
+    def _make_empty_retrieval_service(self):
+        """RAGService where RRF returns zero documents."""
+        from infrastructure.llm.tiered_router import QueryTier, TierDecision
+        from application.services.rag_service import RAGService
+
+        mock_rrf = MagicMock()
+        mock_rrf_result = MagicMock()
+        mock_rrf_result.documents = []  # ← empty retrieval triggers Hard-Fail
+        mock_rrf.search = AsyncMock(return_value=mock_rrf_result)
+
+        mock_reranker = MagicMock()
+        mock_reranker.rerank = MagicMock(return_value=[])
+
+        mock_router = MagicMock()
+        mock_router.decide = MagicMock(
+            return_value=TierDecision(
+                tier=QueryTier.TIER1,
+                model_id="llama-3.3-70b-versatile",
+                provider="groq",
+                reason="test",
+            )
+        )
+        mock_router.generate = AsyncMock(
+            return_value=("Bu bir cevaptır.", "groq/llama-3.3-70b-versatile")
+        )
+
+        mock_embedder = MagicMock()
+        mock_embedder._model = "text-embedding-3-small"
+        mock_embedder.embed_query = AsyncMock(return_value=[0.1] * 1536)
+
+        mock_dispatcher = MagicMock()
+        mock_dispatch_result = MagicMock()
+        mock_dispatch_result.was_triggered = False
+        mock_dispatcher.dispatch = MagicMock(return_value=mock_dispatch_result)
+
+        mock_graph = MagicMock()
+        graph_result = MagicMock()
+        graph_result.expansion_count = 0
+        graph_result.all_docs = []
+        mock_graph.expand = AsyncMock(return_value=graph_result)
+
+        return RAGService(
+            rrf=mock_rrf,
+            reranker=mock_reranker,
+            router=mock_router,
+            embedder=mock_embedder,
+            dispatcher=mock_dispatcher,
+            graph_expander=mock_graph,
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_retrieval_raises_http_422(self):
+        """Zero retrieved docs must raise HTTPException with status 422."""
+        from fastapi import HTTPException
+        from api.schemas import RAGQueryRequest
+        svc = self._make_empty_retrieval_service()
+        req = RAGQueryRequest(query="Hiçbir kaynakta bulunmayan çok spesifik bir soru.")
+        with pytest.raises(HTTPException) as exc_info:
+            await svc.query(req)
+        assert exc_info.value.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_error_code_is_no_source_hard_fail(self):
+        """HTTP 422 detail must carry error_code='NO_SOURCE_HARD_FAIL'."""
+        from fastapi import HTTPException
+        from api.schemas import RAGQueryRequest
+        svc = self._make_empty_retrieval_service()
+        req = RAGQueryRequest(query="Hiçbir kaynakta bulunmayan çok spesifik bir soru.")
+        with pytest.raises(HTTPException) as exc_info:
+            await svc.query(req)
+        assert exc_info.value.detail["error_code"] == "NO_SOURCE_HARD_FAIL"
+
+    @pytest.mark.asyncio
+    async def test_llm_never_called_on_no_source_fail(self):
+        """LLM generate() must NOT be called when retrieval returns empty."""
+        from fastapi import HTTPException
+        from api.schemas import RAGQueryRequest
+        svc = self._make_empty_retrieval_service()
+        req = RAGQueryRequest(query="Hiçbir kaynakta bulunmayan çok spesifik bir soru.")
+        with pytest.raises(HTTPException):
+            await svc.query(req)
+        svc._router.generate.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_detail_llm_called_false(self):
+        """HTTP 422 detail must report llm_called=False."""
+        from fastapi import HTTPException
+        from api.schemas import RAGQueryRequest
+        svc = self._make_empty_retrieval_service()
+        req = RAGQueryRequest(query="Hiçbir kaynakta bulunmayan çok spesifik bir soru.")
+        with pytest.raises(HTTPException) as exc_info:
+            await svc.query(req)
+        assert exc_info.value.detail["llm_called"] is False

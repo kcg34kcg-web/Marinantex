@@ -47,6 +47,7 @@ from typing import Dict, FrozenSet, List, Optional, Tuple
 
 from infrastructure.legal.tools.date_calculator import (
     DateCalculatorResult,
+    add_business_days,
     add_calendar_days,
     add_months,
     add_years,
@@ -116,6 +117,7 @@ class _DeadlineRule:
     months: Optional[int] = None          # month-based deadline
     years: Optional[int] = None           # year-based deadline
     adjust_to_business: bool = True       # shift to next business day if weekend
+    use_business_days: bool = False       # if True, use add_business_days() instead of add_calendar_days()
 
 
 # ============================================================================
@@ -152,8 +154,13 @@ _RULES: Dict[DeadlineTool, _DeadlineRule] = {
     # ── Kıdem tazminatı zamanaşımı ────────────────────────────────────────────
     DeadlineTool.KIDEM_TAZMINATI: _DeadlineRule(
         tool=DeadlineTool.KIDEM_TAZMINATI,
-        legal_basis="İş Kanunu md. 32/8 (7444 sk. ile değişik) — 5 yıl",
-        description_tr="Kıdem tazminatı davası zamanaşımı: 5 yıl (işten ayrılma tarihinden itibaren)",
+        legal_basis="İş Kanunu md. 32/8 (7444 sk. ile değişik) — 5 yıl mutlak hak düşürücü süre",
+        description_tr=(
+            "Kıdem tazminatı davası zamanaşımı: işten ayrılma tarihinden itibaren "
+            "5 yıl (İş K. md. 32/8 — 7444 sayılı Kanun ile eklendi, yayım: 27.04.2023). "
+            "Bu süre hak düşürücü nitelikte olup resen göz önünde bulundurulur; "
+            "taraflar tarafından değiştirilemez."
+        ),
         years=5,
         adjust_to_business=False,
     ),
@@ -193,6 +200,7 @@ _RULES: Dict[DeadlineTool, _DeadlineRule] = {
         legal_basis="İYUK md. 7/1 — tebliğden itibaren 60 gün",
         description_tr="İdari işleme karşı iptal davası açma süresi: tebliğ tarihinden itibaren 60 takvim günü",
         calendar_days=60,
+        use_business_days=False,  # İYUK md. 8: takvim günü; son gün tatile denk gelirse iş gününe kayar
     ),
     DeadlineTool.TAM_YARGI_DAVASI: _DeadlineRule(
         tool=DeadlineTool.TAM_YARGI_DAVASI,
@@ -255,8 +263,22 @@ _TOOL_KEYWORDS: List[Tuple[FrozenSet[str], DeadlineTool]] = [
     (frozenset({"ihbar süresi", "ihbar öneli", "fesih bildirimi", "iş sözleşmesi feshi"}),
      DeadlineTool.IS_AKDI_IHBAR_6AY),   # default; engine picks correct tier
 
-    # Kıdem tazminatı zamanaşımı
-    (frozenset({"kıdem tazminatı zamanaşımı", "kıdem zamanaşımı", "kıdem davası süre"}),
+    # İhbar alt-kademeleri — belirli kıdem ifadesi içeren sorgular için
+    (frozenset({"ış akdi 1 yıl", "kıdem altı aydan az", "altı aydan kısa kıdem",
+               "ihbar iki hafta", "2 hafta ihbar"}),
+     DeadlineTool.IS_AKDI_IHBAR_1YIL),
+
+    (frozenset({"on sekiz ay kıdem", "18 ay ihbar", "bir buçuk yıl kıdem",
+               "ihbar altı hafta", "6 hafta ihbar"}),
+     DeadlineTool.IS_AKDI_IHBAR_18AY),
+
+    (frozenset({"kıdem üç yıl", "3 yıl kıdem", "üç yıldan fazla kıdem",
+               "ihbar sekiz hafta", "8 hafta ihbar"}),
+     DeadlineTool.IS_AKDI_IHBAR_3YIL),
+
+    # Kıdem tazminatı zaman aşımı
+    (frozenset({"kıdem tazminatı zaman aşımı", "kıdem zaman aşımı", "kıdem davası süre",
+               "kıdem tazminatı hak düşürür", "kıdem 5 yıl", "ış k md 32"}),
      DeadlineTool.KIDEM_TAZMINATI),
 
     # TBK genel zamanaşımı
@@ -270,7 +292,9 @@ _TOOL_KEYWORDS: List[Tuple[FrozenSet[str], DeadlineTool]] = [
     # TCK dava zamanaşımı
     (frozenset({"dava zamanaşımı", "tck zamanaşımı", "ceza zamanaşımı", "tck md. 66"}),
      DeadlineTool.TCK_DAVA_ZAMANASIMI_8),
-
+    (frozenset({"15 yıl tck", "tck 66/1-d", "on beş yıl ceza zaman aşımı",
+               "ğar ceza zaman aşımı", "tck md. 66/1-d", "10-20 yıl ceza"}),
+     DeadlineTool.TCK_DAVA_ZAMANASIMI_15),
     # İdari dava
     (frozenset({"idari dava", "iptal davası süre", "iyuk 7", "iyuk md. 7", "60 gün idari"}),
      DeadlineTool.IDARI_DAVA),
@@ -415,7 +439,10 @@ class LegalDeadlineEngine:
 
         # Run the appropriate arithmetic
         if rule.calendar_days is not None:
-            calc = add_calendar_days(start_date, rule.calendar_days)
+            if rule.use_business_days:
+                calc = add_business_days(start_date, rule.calendar_days)
+            else:
+                calc = add_calendar_days(start_date, rule.calendar_days)
         elif rule.months is not None:
             calc = add_months(start_date, rule.months)
         elif rule.years is not None:

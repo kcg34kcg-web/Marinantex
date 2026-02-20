@@ -288,18 +288,22 @@ class QueryEmbedder:
                 await asyncio.sleep(delay)
 
             except APIError as exc:
+                # DÜZELTME BURADA: Pylance'i mutlu etmek ve güvenli kod yazmak için getattr kullanıyoruz
+                status_code = getattr(exc, "status_code", None)
+                error_message = getattr(exc, "message", str(exc))
+                
                 # Only retry on 5xx server errors
-                if exc.status_code is not None and exc.status_code < 500:
+                if status_code is not None and status_code < 500:
                     logger.error(
                         "EMBED_CLIENT_ERROR: %s (status=%s) — not retrying",
-                        exc.message,
-                        exc.status_code,
+                        error_message,
+                        status_code,
                     )
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                         detail={
                             "error": "EMBEDDING_CLIENT_ERROR",
-                            "message": f"OpenAI embedding error: {exc.message}",
+                            "message": f"OpenAI embedding error: {error_message}",
                         },
                     ) from exc
 
@@ -309,7 +313,7 @@ class QueryEmbedder:
                     "EMBED_API_ERROR: attempt %d/%d status=%s — sleeping %.1fs",
                     attempt,
                     self._max_retries,
-                    exc.status_code,
+                    status_code,
                     delay,
                 )
                 await asyncio.sleep(delay)

@@ -2,17 +2,22 @@
 Tests — Step 14: Agentic Tool Calling (Matematik/Süre Hesabı)
 =============================================================
 Gruplar:
-    A — is_business_day()                          (6 test)
-    B — add_calendar_days()                        (5 test)
-    C — add_months()                               (5 test)
-    D — business_days_between()                    (5 test)
-    E — LegalDeadlineEngine.detect_tools()         (6 test)
-    F — LegalDeadlineEngine.calculate()            (6 test)
-    G — calculate_ihbar() tier seçimi             (4 test)
-    H — ToolDispatcher.dispatch()                  (7 test)
-    I — RAGService entegrasyon                     (3 test)
+    A  — is_business_day()                          (6 test)
+    A2 — is_turkish_holiday() / next_business_day() (3 test)  ← Gap 3
+    B  — add_calendar_days()                        (5 test)
+    B2 — add_business_days()                        (3 test)  ← Gap 4
+    C  — add_months()                               (5 test)
+    C2 — add_years() artık yıl edge-case            (3 test)  ← Gap 2
+    D  — business_days_between()                    (5 test)
+    E  — LegalDeadlineEngine.detect_tools()         (6 test)
+    F  — LegalDeadlineEngine.calculate()            (6 test)
+    G  — calculate_ihbar() tier seçimi              (4 test)
+    H  — ToolDispatcher.dispatch()                  (8 test)  ← +1 Gap 1
+    H2 — tools_errored audit trail                  (2 test)  ← Gap 5
+    H3 — AYIP_IHBARI_TBK approximation uyarısı      (1 test)  ← Gap 6
+    I  — RAGService entegrasyon                     (3 test)
 
-Toplam: 47 yeni test  →  480 + 47 = 527 hedef
+Toplam: 62 yeni test  →  892 + 8 = 900 hedef
 """
 
 from __future__ import annotations
@@ -25,11 +30,14 @@ import pytest
 
 from infrastructure.agents.tool_dispatcher import DispatchResult, ToolDispatcher
 from infrastructure.legal.tools.date_calculator import (
+    add_business_days,
     add_calendar_days,
     add_months,
     add_years,
     business_days_between,
+    get_turkish_holidays,
     is_business_day,
+    is_turkish_holiday,
     next_business_day,
 )
 from infrastructure.legal.tools.deadline_engine import (
@@ -108,6 +116,28 @@ class TestIsBusinessDay:
 
 
 # ============================================================================
+# A2 — is_turkish_holiday() / next_business_day() resmî tatil  (Gap 3)
+# ============================================================================
+
+
+class TestTurkishHolidays:
+    """A2: Türkiye resmî tatil tespiti ve son günün tatile denk gelmesi."""
+
+    def test_fixed_holiday_april23_detected(self) -> None:
+        """23 Nisan sabit tatil → is_turkish_holiday True döndürmeli."""
+        assert is_turkish_holiday(date(2025, 4, 23)) is True
+
+    def test_ordinary_wednesday_is_not_holiday(self) -> None:
+        """Normal çarşamba → resmî tatil değil."""
+        assert is_turkish_holiday(date(2025, 4, 16)) is False
+
+    def test_next_business_day_skips_fixed_holiday(self) -> None:
+        """Son gün 23 Nisan 2025 (Çar, tatil) → 24 Nisan'a (Perş) kaydırılmalı."""
+        result = next_business_day(date(2025, 4, 23))
+        assert result == date(2025, 4, 24)
+
+
+# ============================================================================
 # B — add_calendar_days()
 # ============================================================================
 
@@ -148,6 +178,36 @@ class TestAddCalendarDays:
 
 
 # ============================================================================
+# B2 — add_business_days()  (Gap 4)
+# ============================================================================
+
+
+class TestAddBusinessDays:
+    """B2: add_business_days() — hafta sonu + resmî tatil atlama."""
+
+    def test_add_5_business_days_skips_weekend(self) -> None:
+        """Pazartesi'den +5 iş günü = sonraki Pazartesi (Cmt+Paz atlanır)."""
+        # 2025-01-06 (Mon) + 5 iş günü = 2025-01-13 (Mon)
+        # days_from_start = 7 takvim günü (6'dan 13'e)
+        r = add_business_days(date(2025, 1, 6), 5)
+        assert r.result_date == date(2025, 1, 13)
+        assert r.days_from_start == 7
+
+    def test_add_zero_business_days_returns_same_day(self) -> None:
+        """+0 iş günü → aynı gün döner."""
+        r = add_business_days(_START, 0)
+        assert r.result_date == _START
+
+    def test_add_business_days_skips_fixed_holiday(self) -> None:
+        """23 Nisan (Çarşamba, tatil) 1 iş günü olarak sayılmamalı."""
+        # 2025-04-22 (Sal) + 2 iş günü:
+        # +1 → 2025-04-23 Tatil (atla) → 2025-04-24 (Perş) 1. iş günü
+        # +1 → 2025-04-25 (Cuma) 2. iş günü
+        r = add_business_days(date(2025, 4, 22), 2)
+        assert r.result_date == date(2025, 4, 25)
+
+
+# ============================================================================
 # C — add_months()
 # ============================================================================
 
@@ -179,6 +239,31 @@ class TestAddMonths:
         """Kasım 30 + 3 ay = Şubat 28 2026 (artık yıl değil → kırpma)."""
         r = add_months(date(2025, 11, 30), 3)
         assert r.result_date == date(2026, 2, 28)
+
+
+# ============================================================================
+# C2 — add_years() artık yıl edge-case  (Gap 2)
+# ============================================================================
+
+
+class TestAddYears:
+    """C2: add_years() — artık yıl kırpma ve yıl sınırı edge-case'leri."""
+
+    def test_leap_feb29_plus_1year_clamps_to_feb28(self) -> None:
+        """29 Şubat 2024 + 1 yıl = 28 Şubat 2025 (2025 artık yıl değil → kırpma)."""
+        r = add_years(date(2024, 2, 29), 1)
+        assert r.result_date == date(2025, 2, 28)
+
+    def test_leap_feb29_plus_4years_stays_feb29(self) -> None:
+        """29 Şubat 2020 + 4 yıl = 29 Şubat 2024 (2024 artık yıl → kırpma yok)."""
+        r = add_years(date(2020, 2, 29), 4)
+        assert r.result_date == date(2024, 2, 29)
+
+    def test_normal_date_add_years_no_clamping(self) -> None:
+        """15 Ocak 2025 + 5 yıl = 15 Ocak 2030 (normal tarih, kırpma yok)."""
+        r = add_years(date(2025, 1, 15), 5)
+        assert r.result_date == date(2030, 1, 15)
+        assert r.days_from_start == (date(2030, 1, 15) - date(2025, 1, 15)).days
 
 
 # ============================================================================
@@ -446,6 +531,98 @@ class TestToolDispatcher:
             )
         assert result.was_triggered is False
         assert result.tools_invoked == []
+
+    def test_seniority_years_selects_correct_ihbar_tier(self) -> None:
+        """seniority_years=4.0 + ihbar keyword + Tier3 → IS_AKDI_IHBAR_3YIL (56 gün)."""
+        from infrastructure.config import settings as app_settings
+
+        d = self._dispatcher()
+        with patch.object(app_settings, "agentic_tools_enabled", True), \
+             patch.object(app_settings, "agentic_tools_min_tier", 3):
+            result = d.dispatch(
+                "ihbar süresi hesaplanması",
+                QueryTier.TIER3,
+                start_date=_START,
+                seniority_years=4.0,
+            )
+        assert result.was_triggered is True
+        assert result.tool_results[0].tool == DeadlineTool.IS_AKDI_IHBAR_3YIL
+        assert result.tool_results[0].deadline_date == date(2025, 3, 12)
+
+
+# ============================================================================
+# H2 — tools_errored audit trail  (Gap 5)
+# ============================================================================
+
+
+class TestToolsErroredAudit:
+    """H2: tools_errored DispatchResult'ta toplanır ve AuditTrailSchema'ya yansır."""
+
+    def test_dispatch_result_records_errored_tools(self) -> None:
+        """Araç hata fırlatırsa tools_errored listesine eklenmeli, was_triggered=False."""
+        from infrastructure.config import settings as app_settings
+        from infrastructure.legal.tools.deadline_engine import LegalDeadlineEngine
+
+        bad_engine = MagicMock(spec=LegalDeadlineEngine)
+        bad_engine.detect_tools.return_value = [DeadlineTool.IS_AKDI_IHBAR_6AY]
+        bad_engine.calculate.side_effect = RuntimeError("calc fail")
+
+        d = ToolDispatcher(engine=bad_engine)
+        with patch.object(app_settings, "agentic_tools_enabled", True), \
+             patch.object(app_settings, "agentic_tools_min_tier", 3):
+            result = d.dispatch("ihbar süresi", QueryTier.TIER3, start_date=_START)
+
+        assert result.was_triggered is False
+        assert DeadlineTool.IS_AKDI_IHBAR_6AY.value in result.tools_errored
+
+    def test_audit_schema_exposes_tool_errors(self) -> None:
+        """AuditTrailSchema.tool_errors alanı dolu liste ile inşa edilebilmeli."""
+        from datetime import datetime, timezone
+
+        from api.schemas import AuditTrailSchema
+
+        schema = AuditTrailSchema(
+            request_id="req-1",
+            timestamp_utc=datetime(2025, 1, 15, 12, 0, tzinfo=timezone.utc),
+            query_hash="abc123",
+            bureau_id=None,
+            tier=3,
+            model_used="openai/gpt-4o",
+            source_count=2,
+            tool_calls_made=["IS_AKDI_IHBAR_6AY"],
+            tool_errors=["CEZA_TEMYIZ"],
+            grounding_ratio=0.9,
+            disclaimer_severity="INFO",
+            latency_ms=500,
+            why_this_answer="Test.",
+            audit_signature="sig123",
+        )
+        assert schema.tool_errors == ["CEZA_TEMYIZ"]
+        assert schema.tool_calls_made == ["IS_AKDI_IHBAR_6AY"]
+
+
+# ============================================================================
+# H3 — AYIP_IHBARI_TBK approximation uyarısı  (Gap 6)
+# ============================================================================
+
+
+class TestAyipIhbariApproximationWarning:
+    """H3: AYIP_IHBARI_TBK araç bloğunda yaklaşık süre uyarısı bulunmalı."""
+
+    def test_ayip_ihbari_context_block_contains_approximation_warning(self) -> None:
+        """AYIP_IHBARI_TBK tetiklenince context_block Yaklaşık Süre uyarısı içermeli."""
+        from infrastructure.config import settings as app_settings
+
+        d = ToolDispatcher(engine=legal_deadline_engine)
+        with patch.object(app_settings, "agentic_tools_enabled", True), \
+             patch.object(app_settings, "agentic_tools_min_tier", 3):
+            result = d.dispatch(
+                "ayıp ihbarı süresi nedir tbk 223",
+                QueryTier.TIER3,
+                start_date=_START,
+            )
+        assert result.was_triggered is True
+        assert "YAKLAŞIK SÜRE UYARISI" in result.context_block
 
 
 # ============================================================================

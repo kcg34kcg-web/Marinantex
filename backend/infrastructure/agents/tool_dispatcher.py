@@ -95,6 +95,7 @@ class ToolDispatcher:
         query_text: str,
         tier: QueryTier,
         start_date: Optional[date] = None,
+        seniority_years: Optional[float] = None,
     ) -> DispatchResult:
         """
         Main entry point for agentic tool dispatch.
@@ -104,10 +105,14 @@ class ToolDispatcher:
             returns empty DispatchResult immediately — no tools run.
 
         Args:
-            query_text:  The user's Turkish legal query.
-            tier:        LLM routing tier for this query.
-            start_date:  Reference date for deadline calculations.
-                         Falls back to ``date.today()`` if None.
+            query_text:      The user's Turkish legal query.
+            tier:            LLM routing tier for this query.
+            start_date:      Reference date for deadline calculations.
+                             Falls back to ``date.today()`` if None.
+            seniority_years: Optional — işçi kıdemi (ondalık yıl).
+                             Ihbar aracı tespit edildiğinde doğru tier
+                             otomatik seçilir (Gap 1: engine.calculate'e
+                             iletilir).
 
         Returns:
             DispatchResult — always succeeds (errors are caught and logged).
@@ -145,7 +150,9 @@ class ToolDispatcher:
 
         for tool in matched_tools:
             try:
-                result = self._engine.calculate(tool, _start_date)
+                result = self._engine.calculate(
+                    tool, _start_date, seniority_years=seniority_years
+                )
                 tool_results.append(result)
                 tools_invoked.append(tool.value)
                 logger.info(
@@ -164,6 +171,14 @@ class ToolDispatcher:
                 )
 
         if not tool_results:
+            if tools_errored:
+                return DispatchResult(
+                    tool_results=[],
+                    context_block="",
+                    tools_invoked=[],
+                    tools_errored=tools_errored,
+                    was_triggered=False,
+                )
             return _empty_result()
 
         # ── Build context block ──────────────────────────────────────────────
@@ -214,6 +229,12 @@ def _format_tool_block(results: List[DeadlineResult]) -> str:
         lines.append(f"Son Gün          : {r.deadline_date.isoformat()}")
         if r.adjusted_for_weekend:
             lines.append("Hafta sonu düzeltmesi uygulandı (son gün iş gününe kaydırıldı).")
+        if r.tool.value == "AYIP_IHBARI_TBK":
+            lines.append(
+                "⚠️  YAKLAŞIK SÜRE UYARISI: TBK md. 223 'derhal' ihbarı öngörür; "
+                "buradaki 8 gün, Yargıtay uygulamasından türetilmiş yaklaşık bir "
+                "süredir, kanuni kesin süre değildir. Uzman hukuki danışmanlık alınız."
+            )
         lines.append(f"Açıklama         : {r.description_tr}")
         lines.append("")
 

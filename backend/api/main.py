@@ -18,9 +18,12 @@ from infrastructure.database.connection import get_supabase_client, init_postgre
 from infrastructure.cache.redis_client import RedisClient
 from infrastructure.agents.checkpoint import AsyncPostgresCheckpointer
 from infrastructure.config import settings
+from infrastructure.audit.audit_trail import audit_recorder as _audit_recorder
+from infrastructure.database.supabase_audit_repository import SupabaseAuditRepository
 
 # API routes
-from api.routes import rag as rag_route   # Step 10 — RAG query endpoint
+from api.routes import rag as rag_route       # Step 10 — RAG query endpoint
+from api.routes import ingest as ingest_route  # Step 5/11 — Document ingest endpoint
 # from api.routes import chat, search, admin  (future steps)
 from api.middleware.privacy_gateway import PrivacyMiddleware
 from api.middleware.tenant_middleware import TenantMiddleware
@@ -87,7 +90,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     else:
         logger.warning("⚠️ SUPABASE_URL/SUPABASE_SERVICE_KEY not set; skipping Supabase initialization")
     
-    # 4. LangGraph Checkpointer (persistent agent state)
+    # 4. Audit Trail DB persistence (Step 17)
+    try:
+        _audit_recorder.set_repository(SupabaseAuditRepository())
+        logger.info("✅ Audit trail DB persistence enabled (SupabaseAuditRepository wired)")
+    except Exception as e:
+        logger.error(f"❌ Failed to enable audit trail DB persistence: {e}")
+
+    # 5. LangGraph Checkpointer (persistent agent state)
     if hasattr(app.state, "postgres_pool"):
         try:
             checkpointer = AsyncPostgresCheckpointer(app.state.postgres_pool)
@@ -233,6 +243,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Step 10 — RAG query (event_date + decision_date + lehe kanun)
 app.include_router(rag_route.router, prefix="/api/v1/rag", tags=["RAG"])
+
+# Step 5/11 — Document ingest (OCR → parse → embed → upsert → async index)
+app.include_router(ingest_route.router, prefix="/api/v1/ingest", tags=["Ingest"])
 
 # Future steps:
 # app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])

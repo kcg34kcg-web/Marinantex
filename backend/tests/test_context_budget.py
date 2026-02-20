@@ -33,6 +33,8 @@ from infrastructure.context.context_summarizer import (
     ContextSummarizer,
     SummaryResult,
     _extractive_summary,
+    _SUMMARY_PROMPT_TEMPLATE,
+    build_summary_prompt,
     context_summarizer,
 )
 from infrastructure.llm.tiered_router import QueryTier
@@ -269,6 +271,8 @@ class TestExtractiveSummary:
 class TestSummaryResultFields:
     """C: SummaryResult alan doğrulaması."""
 
+    pytestmark = pytest.mark.asyncio
+
     async def test_not_summarized_when_short(self) -> None:
         """Kısa belge → was_summarized=False."""
         summarizer = ContextSummarizer()
@@ -299,6 +303,8 @@ class TestSummaryResultFields:
 class TestContextSummarizerSingle:
     """D: ContextSummarizer.summarize() — tekli belge davranışı."""
 
+    pytestmark = pytest.mark.asyncio
+
     async def test_short_doc_not_summarized(self) -> None:
         """Token hedefinden kısa belge → özetlenmez, original döner."""
         summarizer = ContextSummarizer()
@@ -320,7 +326,7 @@ class TestContextSummarizerSingle:
         expected_summary = "Özetlenmiş hukuki metin."
         fn_called = {"n": 0}
 
-        async def mock_fn(content, query, target_tokens):
+        async def mock_fn(prompt: str) -> str:
             fn_called["n"] += 1
             return expected_summary
 
@@ -334,7 +340,7 @@ class TestContextSummarizerSingle:
     async def test_llm_error_falls_back_to_extractive(self) -> None:
         """LLM fn hata verirse → çıkarıcı özetleme fallback olarak kullanılır."""
 
-        async def failing_fn(content, query, target_tokens):
+        async def failing_fn(prompt: str) -> str:
             raise ValueError("LLM API hatası")
 
         summarizer = ContextSummarizer(summarize_fn=failing_fn)
@@ -369,6 +375,8 @@ class TestContextSummarizerSingle:
 class TestContextSummarizerBatch:
     """E: ContextSummarizer.summarize_batch() — toplu işlem."""
 
+    pytestmark = pytest.mark.asyncio
+
     async def test_empty_list_returns_empty(self) -> None:
         """Boş liste → boş sonuç."""
         summarizer = ContextSummarizer()
@@ -395,7 +403,7 @@ class TestContextSummarizerBatch:
         """Bir belgede hata → diğerleri başarıyla tamamlanır."""
         call_count = {"n": 0}
 
-        async def sometimes_failing_fn(content, query, target_tokens):
+        async def sometimes_failing_fn(prompt: str) -> str:
             call_count["n"] += 1
             if call_count["n"] == 2:
                 raise RuntimeError("Geçici LLM hatası")
@@ -486,6 +494,8 @@ class TestContextBuilderLitM:
 
 class TestRAGServiceStep15Integration:
     """G: RAGService Step 15 pipeline entegrasyonu."""
+
+    pytestmark = pytest.mark.asyncio
 
     async def test_summarizer_called_for_tier4_with_enough_docs(self) -> None:
         """Tier 4 + belge sayısı > primary_count → summarizer çağrılır."""
@@ -623,3 +633,54 @@ class TestStep15ConfigDefaults:
         """context_summarization_min_tier varsayılan olarak 4 (Tier 4 only)."""
         from infrastructure.config import settings
         assert settings.context_summarization_min_tier == 4
+
+    def test_summary_target_tokens_is_200(self) -> None:
+        """context_summary_target_tokens varsayılan olarak 200."""
+        from infrastructure.config import settings
+        assert settings.context_summary_target_tokens == 200
+
+    def test_summarization_primary_count_is_3(self) -> None:
+        """context_summarization_primary_count varsayılan olarak 3."""
+        from infrastructure.config import settings
+        assert settings.context_summarization_primary_count == 3
+
+
+# ============================================================================
+# I — _SUMMARY_PROMPT_TEMPLATE format key doğrulaması
+# ============================================================================
+
+
+class TestSummaryPromptTemplate:
+    """I: _SUMMARY_PROMPT_TEMPLATE format key ve build_summary_prompt() doğrulaması."""
+
+    def test_template_has_content_key(self) -> None:
+        """{content} key şablonda mevcut olmalı."""
+        assert "{content}" in _SUMMARY_PROMPT_TEMPLATE
+
+    def test_template_has_target_tokens_key(self) -> None:
+        """{target_tokens} key şablonda mevcut olmalı."""
+        assert "{target_tokens}" in _SUMMARY_PROMPT_TEMPLATE
+
+    def test_template_has_query_context_key(self) -> None:
+        """{query_context} key şablonda mevcut olmalı."""
+        assert "{query_context}" in _SUMMARY_PROMPT_TEMPLATE
+
+    def test_build_summary_prompt_formats_content(self) -> None:
+        """build_summary_prompt() içerik, sorgu ve token hedefini prompt'a yerleştirmeli."""
+        content = "Test hukuki içerik."
+        query = "test sorgusu"
+        target = 100
+        prompt = build_summary_prompt(content, query, target)
+        assert content in prompt
+        assert query in prompt
+        assert str(target) in prompt
+
+    def test_build_summary_prompt_empty_query_uses_fallback(self) -> None:
+        """Boş query_context verilirse fallback metin kullanılmalı."""
+        prompt = build_summary_prompt("içerik", "", 50)
+        assert "Genel hukuki bağlam" in prompt
+
+    def test_build_summary_prompt_returns_string(self) -> None:
+        """build_summary_prompt() her zaman str dönmeli."""
+        result = build_summary_prompt("Kanun metni.", "soru", 200)
+        assert isinstance(result, str)

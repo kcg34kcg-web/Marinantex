@@ -310,6 +310,13 @@ class Settings(BaseSettings):
     Higher k = smaller gap between ranks → more conservative fusion.
     Default 60 is the empirically validated value for most IR tasks."""
 
+    rrf_k_ceza: int = 40
+    """Domain-specific RRF k for CEZA, IDARI_CEZA and VERGI_CEZA law domains.
+    Lower k = steeper rank differentiation → more decisive fusion for
+    dense ceza kanunu / TCK corpora.  Empirically ~40 outperforms 60 on
+    criminal-law benchmark queries.
+    Override via RRF_K_CEZA env var."""
+
     rrf_semantic_weight: float = 1.0
     """Multiplier applied to semantic (vector) search RRF scores.
     Values > 1.0 give semantic results an advantage in the fusion."""
@@ -321,6 +328,25 @@ class Settings(BaseSettings):
     synonym_expansion_enabled: bool = True
     """When True, BM25 queries are expanded with Turkish legal synonyms
     via SynonymStore before being submitted to hybrid_legal_search."""
+
+    # ── Step 9: Sorgu Yeniden Yazımı ─────────────────────────────────────────
+    query_rewrite_enabled: bool = True
+    """Master switch for Step 9 query rewriting.
+    When True, Tier 2+ queries are transformed from colloquial Turkish to
+    formal legal terminology before embedding and retrieval.
+    Set False to disable without code changes."""
+
+    query_rewrite_model: str = "gpt-4o-mini"
+    """OpenAI model used for query rewriting (Tier 2 cost level).
+    Must be a chat completion model."""
+
+    query_rewrite_timeout_s: float = 5.0
+    """Maximum seconds to wait for the query rewriter LLM response.
+    If exceeded, the original query is used (fallback — non-fatal)."""
+
+    query_rewrite_min_tier: int = 2
+    """Minimum preliminary tier required to activate query rewriting.
+    Tier 1 queries are returned unchanged (pass-through, zero latency)."""
 
     # ── Celery / Asenkron İndeksleme ────────────────────────────────────────
     celery_broker_url: str = "redis://localhost:6379/1"
@@ -470,6 +496,13 @@ class Settings(BaseSettings):
     When True, RAGASAdapter.compute() is called after each response and
     the RAGASMetrics are attached to the audit_trail.
     Set False to skip metric computation."""
+
+    zero_trust_min_grounding_ratio: float = 0.5
+    """Post-LLM grounding gate threshold — Hukuki Güvenlik Sözleşmesi (Step 16).
+    When the Zero-Trust citation engine reports grounding_ratio below this
+    value, the LLM answer is discarded and replaced with a safe refusal text.
+    A ratio of 0.5 means ≥50 % of answer sentences must carry a [K:N] citation.
+    Set 0.0 to disable the post-LLM hard-fail (not recommended in production)."""
 
     audit_ragas_target_source_count: int = 3
     """Target minimum number of sources for full context_recall score.

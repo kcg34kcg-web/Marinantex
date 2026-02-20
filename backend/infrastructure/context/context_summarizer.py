@@ -124,6 +124,35 @@ def _extractive_summary(content: str, target_tokens: int) -> str:
 
 
 # ============================================================================
+# Public helper: summary prompt factory
+# ============================================================================
+
+def build_summary_prompt(content: str, query_context: str, target_tokens: int) -> str:
+    """
+    Applies ``_SUMMARY_PROMPT_TEMPLATE`` to produce a ready-to-send LLM prompt.
+
+    This is the canonical entry point for constructing Turkish-law summarisation
+    instructions.  Any injected ``summarize_fn`` receives the formatted prompt
+    (a single ``str``) rather than raw content fragments, keeping the template
+    in one place and making it testable independently.
+
+    Args:
+        content:       Full text of the legal document to summarise.
+        query_context: The user's query — guides which details to preserve.
+                       If empty, a generic fallback phrase is used.
+        target_tokens: Approximate desired output length in tokens.
+
+    Returns:
+        Formatted prompt string.
+    """
+    return _SUMMARY_PROMPT_TEMPLATE.format(
+        content=content,
+        query_context=query_context or "Genel hukuki bağlam.",
+        target_tokens=target_tokens,
+    )
+
+
+# ============================================================================
 # ContextSummarizer
 # ============================================================================
 
@@ -136,8 +165,9 @@ class ContextSummarizer:
     robust, zero-cost fallback.
 
     Args:
-        summarize_fn:  Optional async callable with signature
-                       ``(content: str, query_context: str, target_tokens: int) -> str``.
+        summarize_fn:  Optional async callable with signature ``(prompt: str) -> str``.
+                       The prompt is pre-formatted by ``build_summary_prompt()`` and
+                       contains a complete Turkish-law summarisation instruction.
                        When None, extractive fallback is always used.
 
     Example (production wiring in RAGService):
@@ -191,9 +221,8 @@ class ContextSummarizer:
 
         try:
             if self._summarize_fn is not None:
-                summary_text: str = await self._summarize_fn(
-                    doc.content, query_context, target_tokens
-                )
+                _prompt = build_summary_prompt(doc.content, query_context, target_tokens)
+                summary_text: str = await self._summarize_fn(_prompt)
             else:
                 summary_text = _extractive_summary(doc.content, target_tokens)
 

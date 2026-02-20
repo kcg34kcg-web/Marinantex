@@ -122,6 +122,11 @@ $$;
 -- 4. Update hybrid_legal_search to surface Step 4 columns + time-travel
 -- ---------------------------------------------------------------------------
 
+-- Drop both the old 4-arg signature (Step 3) and the new 5-arg signature so
+-- CREATE OR REPLACE can freely change the return type.
+DROP FUNCTION IF EXISTS public.hybrid_legal_search(vector, text, uuid, integer);
+DROP FUNCTION IF EXISTS public.hybrid_legal_search(vector, text, uuid, integer, date);
+
 CREATE OR REPLACE FUNCTION public.hybrid_legal_search(
     query_embedding  vector(1536),
     query_text       text,
@@ -267,6 +272,8 @@ $$;
 -- ---------------------------------------------------------------------------
 -- 5. Update get_must_cite_documents to also return Step 4 columns
 -- ---------------------------------------------------------------------------
+
+DROP FUNCTION IF EXISTS public.get_must_cite_documents(uuid);
 
 CREATE OR REPLACE FUNCTION public.get_must_cite_documents(
     p_case_id uuid

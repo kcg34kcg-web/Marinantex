@@ -4,16 +4,17 @@ Tests — Step 5: Türkçe Hukuk Ingest/Parsing Hattı
 Test groups:
   A. OCRCleaner          (11 tests)
   B. TurkishNormalizer    (6 tests)
-  C. LegalParser         (14 tests)
+  C. LegalParser         (16 tests)
   D. CitationExtractor   (10 tests)
-  E. IngestPipeline       (8 tests)
+  E. IngestPipeline       (9 tests)
 
-Total: 49 tests
+Total: 52 tests
 """
 
 from __future__ import annotations
 
 import pytest
+from datetime import datetime
 
 from infrastructure.ingest.ocr_cleaner import OCRCleaner
 from infrastructure.ingest.text_normalizer import TurkishNormalizer
@@ -305,6 +306,32 @@ class TestLegalParser:
         for expected_idx, seg in enumerate(segments):
             assert seg.segment_index == expected_idx
 
+    def test_mevzuat_short_madde_with_bent_items_produces_bent_segments(self, parser):
+        """C.15 — Short MADDE with a)/b)/c) sub-items produces BENT segments with correct bent_no."""
+        bent_madde = (
+            "MADDE 4 \u2013 T\u00fcrler\n"
+            "a) Hizmet akdi t\u00fcr\u00fc.\n"
+            "b) \u0130\u015f akdi t\u00fcr\u00fc.\n"
+            "c) Eser akdi t\u00fcr\u00fc.\n"
+        )
+        segments = parser.parse(bent_madde)
+        bent_segs = [s for s in segments if s.segment_type == SegmentType.BENT.value]
+        assert len(bent_segs) == 3
+        bent_nos = {s.bent_no for s in bent_segs}
+        assert {"a", "b", "c"} == bent_nos
+        # madde_no inherited, fikra_no is None (direct bent, no enclosing fıkra)
+        assert all(s.madde_no == "4" for s in bent_segs)
+        assert all(s.fikra_no is None for s in bent_segs)
+
+    def test_detect_mevzuat_takes_priority_over_ictihat_signals(self, parser):
+        """C.16 — Text with both 'MADDE N' and case-number signals is classified as MEVZUAT."""
+        ambiguous = (
+            "MADDE 17 \u2013 Fesih bildirimi\n"
+            "Bu madde kapsam\u0131nda Esas No: 2023/100 say\u0131l\u0131 karar de\u011ferlendirilmi\u015ftir.\n"
+        )
+        result = parser.detect_document_type(ambiguous)
+        assert result == DocumentType.MEVZUAT
+
 
 # ===========================================================================
 # D. CitationExtractor (10 tests)
@@ -397,6 +424,7 @@ class TestCitationExtractor:
 # ===========================================================================
 
 class TestIngestPipeline:
+    pytestmark = pytest.mark.asyncio
 
     async def test_mevzuat_pipeline_returns_success_and_madde_segments(self):
         """E.1 — Full pipeline on mevzuat text: success=True, three MADDE segments."""
@@ -485,3 +513,28 @@ class TestIngestPipeline:
         pipeline = IngestPipeline(cleaner=tight_cleaner)
         result = await pipeline.run(text_with_ligatures, document_id="doc-e08")
         assert any("HIGH_LIGATURE_DENSITY" in w for w in result.warnings)
+
+    async def test_provenance_fields_propagated_to_segments(self):
+        """E.9 — source_url, version, collected_at passed to run() appear on every segment."""
+        pipeline = IngestPipeline()
+        url = "https://mevzuat.gov.tr/kanun/4857"
+        ver = "2024-01-15"
+        ts = datetime(2024, 1, 15, 12, 0, 0)
+        result = await pipeline.run(
+            MEVZUAT_TEXT,
+            document_id="doc-e09",
+            source_url=url,
+            version=ver,
+            collected_at=ts,
+        )
+        assert result.success is True
+        # Provenance echoed at result level
+        assert result.source_url == url
+        assert result.version == ver
+        assert result.collected_at == ts
+        # Provenance propagated to every ParsedSegment
+        assert len(result.segments) > 0, "expected segments to be produced"
+        for seg in result.segments:
+            assert seg.source_url == url, f"segment {seg.segment_index} missing source_url"
+            assert seg.version == ver, f"segment {seg.segment_index} missing version"
+            assert seg.collected_at == ts, f"segment {seg.segment_index} missing collected_at"

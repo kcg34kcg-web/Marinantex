@@ -30,7 +30,11 @@ services:
       
       # Redis
       - REDIS_URL=redis://redis:6379
-      
+
+      # Celery (Step 11 — Async Indexing / Zero-Downtime)
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+
       # LLM Providers
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -54,6 +58,59 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    restart: unless-stopped
+    networks:
+      - babylexit-network
+
+  # ── Step 11: Celery Worker — Async Indexing / Zero-Downtime ──────────────
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: babylexit-celery-worker
+    environment:
+      # Database (Supabase)
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+
+      # Redis
+      - REDIS_URL=redis://redis:6379
+
+      # Celery
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+
+      # LLM Providers
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+
+      # Privacy
+      - PII_ENCRYPTION_KEY=${PII_ENCRYPTION_KEY}
+
+      # Environment
+      - ENVIRONMENT=development
+      - LOG_LEVEL=info
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    command: >
+      celery -A infrastructure.async_indexing.celery_app worker
+      --loglevel=info
+      --concurrency=4
+      --queues=ingest,default
+      --hostname=worker@%h
+    healthcheck:
+      test: ["CMD", "celery", "-A", "infrastructure.async_indexing.celery_app", "inspect", "ping", "-d", "worker@%h"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
     networks:
       - babylexit-network

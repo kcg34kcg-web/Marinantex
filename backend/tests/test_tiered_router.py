@@ -1,5 +1,5 @@
 """
-Step 4: Tiered LLM Router — Unit Tests
+Step 9: Tiered LLM Router — Unit Tests
 =========================================
 All pure functions are tested without any mocking.
 LLM invocation (generate / _invoke) tests use unittest.mock to avoid
@@ -259,8 +259,19 @@ def test_decide_tier1_falls_back_to_tier2_when_groq_missing() -> None:
 # ============================================================================
 
 def test_router_raises_runtime_error_when_all_keys_missing() -> None:
+    """
+    RuntimeError must be raised at call time (decide()), not at init time.
+    The router logs a warning when no keys are configured at startup but
+    only fails hard when generate/decide is actually invoked.
+    """
+    router = _make_router(openai_key="", groq_key="", anthropic_key="")
     with pytest.raises(RuntimeError, match="No LLM provider keys configured"):
-        _make_router(openai_key="", groq_key="", anthropic_key="")
+        with patch("infrastructure.llm.tiered_router.settings") as mock:
+            mock.llm_tier1_max_context_tokens = 800
+            mock.llm_tier2_max_context_tokens = 2500
+            mock.llm_tier3_max_context_tokens = 5000
+            mock.llm_tier4_use_reasoning = False
+            router.decide(query="Basit soru", context="test", source_count=1)
 
 
 # ============================================================================

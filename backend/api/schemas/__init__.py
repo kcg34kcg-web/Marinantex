@@ -108,7 +108,7 @@ class LegalDisclaimerSchema(BaseModel):
         ...,
         description=(
             "Active disclaimer type identifiers: "
-            "GENEL_HUKUKI | AYM_IPTAL_UYARISI | LEHE_KANUN | UZMAN_ZORUNLU"
+            "GENEL_HUKUKI | AYM_IPTAL_UYARISI | LEHE_KANUN | UZMAN_ZORUNLU | DUSUK_GROUNDING"
         ),
     )
     severity: str = Field(
@@ -266,6 +266,22 @@ class AuditTrailSchema(BaseModel):
     tool_calls_made: List[str] = Field(
         default_factory=list,
         description="Names of deterministic tools invoked (Step 14)",
+    )
+    tool_errors: List[str] = Field(
+        default_factory=list,
+        description="Names of deterministic tools that errored (logged + skipped, Step 14)",
+    )
+    docs_summarized_count: int = Field(
+        default=0,
+        description="Number of secondary documents compressed by ContextSummarizer (Step 15)",
+    )
+    tokens_saved: int = Field(
+        default=0,
+        description="Approximate tokens saved by secondary doc summarisation (Step 15)",
+    )
+    litm_applied: bool = Field(
+        default=False,
+        description="True when Lost-in-the-Middle context reordering was applied (Step 15)",
     )
     grounding_ratio: float = Field(
         ..., ge=0.0, le=1.0,
@@ -498,6 +514,14 @@ class SourceDocumentSchema(BaseModel):
             "None = standard (non-lehe) retrieval."
         ),
     )
+    # ── Step 12: Lex Specialis / Lex Posterior çatışma notları ───────────────
+    conflict_notes: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Step 12: Lex Specialis veya Lex Posterior kuralının uygulandığı "
+            "durumlarda hangi belgenin öncelikli olduğunu açıklayan notlar."
+        ),
+    )
     # ── Relevance score ───────────────────────────────────────────────────────
     final_score: float = Field(..., ge=0.0, le=1.0, description="Hybrid relevance score [0–1]")
 
@@ -548,6 +572,18 @@ class RAGQueryRequest(BaseModel):
             "In production, extracted from TenantMiddleware request.state.tenant."
         ),
     )
+    seniority_years: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=50.0,
+        description=(
+            "Step 14: İşçinin kıdem yılı (ondalık). "
+            "Belirtildiğinde ToolDispatcher, İş K. md. 17 ihbar süresi hesabında "
+            "doğru tier'ı (14/28/42/56 gün) otomatik seçer. "
+            "Ör: 2.5 → kıdem 2.5 yıl → IS_AKDI_IHBAR_18AY (42 gün). "
+            "Belirtilmezse keyword eşleşmesiyle varsayılan tier kullanılır."
+        ),
+    )
 
 
 # ============================================================================
@@ -557,6 +593,7 @@ class RAGQueryRequest(BaseModel):
 def _auto_disclaimer(
     has_aym: bool = False,
     has_lehe: bool = False,
+    grounding_hard_fail: bool = False,
 ) -> "LegalDisclaimerSchema":
     """
     Generates a minimal LegalDisclaimerSchema without importing disclaimer_engine.
@@ -565,30 +602,44 @@ def _auto_disclaimer(
     absent (e.g. tests that construct RAGResponse directly without calling
     RAGService).  Production code always provides a full disclaimer from
     LegalDisclaimerEngine.generate().
+
+    Note: In the schema-level validator, grounding_ratio is not available on
+    RAGResponse; callers that need DUSUK_GROUNDING in the fallback must pass
+    grounding_hard_fail=True explicitly.  In production, RAGService always
+    provides a pre-built disclaimer that already includes DUSUK_GROUNDING.
     """
     types: List[str] = ["GENEL_HUKUKI"]
     severity = "INFO"
     text = (
-        "\u2696\ufe0f HUKUKİ UYARI: Bu sistem yapay zeka destekli bir hukuki bilgi "
-        "aracıdır. Sunulan bilgiler hukuki tavsiye niteliği taşımaz ve bir "
-        "avukat görüşünün yerini tutamaz. Avukatlık Kanunu md. 35 gereği "
-        "hukuki danışmanlık yalnızca avukatlar tarafından verilebilir."
+        "\u2696\ufe0f HUKUK\u0130 UYARI: Bu sistem yapay zeka destekli bir hukuki bilgi "
+        "arac\u0131d\u0131r. Sunulan bilgiler hukuki tavsiye niteli\u011fi ta\u015f\u0131maz ve bir "
+        "avukat g\u00f6r\u00fc\u015f\u00fcn\u00fcn yerini tutamaz. Avukatl\u0131k Kanunu md. 35 gere\u011fi "
+        "hukuki dan\u0131\u015fmanl\u0131k yaln\u0131zca avukatlar taraf\u0131ndan verilebilir."
     )
     if has_aym:
         types.append("AYM_IPTAL_UYARISI")
         severity = "CRITICAL"
         text += (
-            "\n\n\U0001f6a8 AYM İPTAL UYARISI: Yanıtta atıfta bulunulan kaynaklardan "
-            "bir veya birkaçı Anayasa Mahkemesi tarafından iptal edilmiş veya "
-            "kısıtlanmıştır. Güncel mevzuatı bizzat inceleyiniz."
+            "\n\n\U0001f6a8 AYM \u0130PTAL UYARISI: Yan\u0131tta at\u0131fta bulunulan kaynaklardan "
+            "bir veya birka\u00e7\u0131 Anayasa Mahkemesi taraf\u0131ndan iptal edilmi\u015f veya "
+            "k\u0131s\u0131tlanm\u0131\u015ft\u0131r. G\u00fcncel mevzuat\u0131 bizzat inceleyiniz."
         )
     if has_lehe:
         types.append("LEHE_KANUN")
         if severity == "INFO":
             severity = "WARNING"
         text += (
-            "\n\n\u26a0\ufe0f LEHE KANUN (TCK md. 7/2): Lehe kanun değerlendirmesi "
-            "yalnızca yetkili hukuk uzmanınca gerçekleştirilebilir."
+            "\n\n\u26a0\ufe0f LEHE KANUN (TCK md. 7/2): Lehe kanun de\u011ferlendirmesi "
+            "yaln\u0131zca yetkili hukuk uzman\u0131nca ger\u00e7ekle\u015ftirilebilir."
+        )
+    if grounding_hard_fail:
+        types.append("DUSUK_GROUNDING")
+        severity = "CRITICAL"
+        text += (
+            "\n\n\U0001f6ab D\u00dc\u015e\u00dcK GROUNDING UYARISI: Bu yan\u0131ttaki ifadelerin "
+            "\u00f6nemli bir k\u0131sm\u0131 kaynak belgelerde yeterince desteklenmemektedir. "
+            "Bu bilgilere dayanarak herhangi bir hukuki i\u015flem yapmadan \u00f6nce "
+            "mutlaka alan\u0131nda uzman bir avukata dan\u0131\u015f\u0131n\u0131z."
         )
     return LegalDisclaimerSchema(
         disclaimer_text=text,
@@ -596,7 +647,7 @@ def _auto_disclaimer(
         severity=severity,
         requires_expert_review=False,
         generated_at=datetime.now(tz=timezone.utc),
-        legal_basis="Avukatlık Kanunu md. 35 | TBB Meslek Kuralları md. 3",
+        legal_basis="Avukatl\u0131k Kanunu md. 35 | TBB Meslek Kurallar\u0131 md. 3",
     )
 
 

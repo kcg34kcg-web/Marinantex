@@ -16,7 +16,9 @@ Coverage:
                                must-cite injection, RPC failure (503)
 """
 
+
 from __future__ import annotations
+from typing import Optional
 
 import pytest
 from datetime import datetime, date
@@ -25,6 +27,7 @@ from fastapi import HTTPException
 
 from infrastructure.retrieval.retrieval_client import (
     RetrieverClient,
+    _filter_by_bureau,
     merge_must_cites,
     normalise_keyword_score,
     recompute_final_score,
@@ -75,7 +78,17 @@ def _make_row(
         "file_path": "docs/doc.pdf",
         "citation": "Yargıtay 9 HD, E.2022/1",
         "court_level": "YARGITAY_DAIRE",
+        "chamber": "Yargıtay 9. Hukuk Dairesi",
+        "majority_type": "OY_BIRLIGI",
+        "dissent_present": False,
+        "norm_hierarchy": "KANUN",
         "ruling_date": date(2022, 6, 1),
+        "effective_date": date(2020, 1, 1),
+        "expiry_date": None,
+        "aym_iptal_durumu": None,
+        "iptal_yururluk_tarihi": None,
+        "aym_karar_no": None,
+        "aym_karar_tarihi": None,
         "source_url": "https://example.com/doc",
         "version": "2022",
         "collected_at": datetime(2023, 1, 1),
@@ -197,6 +210,37 @@ class TestRecomputeFinalScore:
         score = recompute_final_score(1.0, 1.0, 1.0, 1.0, 0.45, 0.30, 0.10, 0.15)
         assert score == pytest.approx(1.0)
 
+    def test_binding_boost_added_on_top(self) -> None:
+        """Step 3: binding_boost bağlayıcı belgelere ağırlıklı toplamın üstüne eklenir."""
+        base = recompute_final_score(
+            semantic_score=0.8, keyword_score=0.5,
+            recency_score=0.9, hierarchy_score=0.8,
+            w_sem=0.45, w_kw=0.30, w_rec=0.10, w_hier=0.15,
+            binding_boost=0.0,
+        )
+        boosted = recompute_final_score(
+            semantic_score=0.8, keyword_score=0.5,
+            recency_score=0.9, hierarchy_score=0.8,
+            w_sem=0.45, w_kw=0.30, w_rec=0.10, w_hier=0.15,
+            binding_boost=0.20,
+        )
+        assert boosted == pytest.approx(min(1.0, base + 0.20), abs=1e-6)
+
+    def test_binding_boost_default_is_zero(self) -> None:
+        """Step 3: binding_boost varsayılanı sıfır — mevcut testleri etkilemez."""
+        score_default = recompute_final_score(
+            semantic_score=0.6, keyword_score=0.4,
+            recency_score=0.7, hierarchy_score=0.5,
+            w_sem=0.45, w_kw=0.30, w_rec=0.10, w_hier=0.15,
+        )
+        score_explicit_zero = recompute_final_score(
+            semantic_score=0.6, keyword_score=0.4,
+            recency_score=0.7, hierarchy_score=0.5,
+            w_sem=0.45, w_kw=0.30, w_rec=0.10, w_hier=0.15,
+            binding_boost=0.0,
+        )
+        assert score_default == pytest.approx(score_explicit_zero, abs=1e-6)
+
 
 # ============================================================================
 # row_to_legal_document
@@ -235,6 +279,31 @@ class TestRowToLegalDocument:
         row = _make_row(final_score=0.99)
         doc = row_to_legal_document(row, final_score=0.42)
         assert doc.final_score == pytest.approx(0.42)
+
+    def test_step3_authority_fields_mapped(self) -> None:
+        """Step 3: chamber, majority_type, dissent_present, norm_hierarchy map edilmeli."""
+        row = _make_row()
+        doc = row_to_legal_document(row, final_score=0.75)
+        assert doc.chamber == "Yargıtay 9. Hukuk Dairesi"
+        assert doc.majority_type == "OY_BIRLIGI"
+        assert doc.dissent_present is False
+        assert doc.norm_hierarchy == "KANUN"
+
+    def test_step4_versioning_fields_mapped(self) -> None:
+        """Step 4: AYM iptal ve versioning alanları row_to_legal_document tarafından map edilmeli."""
+        row = _make_row(
+            aym_iptal_durumu="IPTAL_EDILDI",
+            iptal_yururluk_tarihi=date(2025, 6, 1),
+            aym_karar_no="2023/45 E., 2024/78 K.",
+            aym_karar_tarihi=date(2024, 3, 15),
+        )
+        doc = row_to_legal_document(row, final_score=0.75)
+        assert doc.effective_date == date(2020, 1, 1)          # _make_row default
+        assert doc.aym_iptal_durumu == "IPTAL_EDILDI"
+        assert doc.iptal_yururluk_tarihi == date(2025, 6, 1)
+        assert doc.aym_karar_no == "2023/45 E., 2024/78 K."
+        assert doc.aym_karar_tarihi == date(2024, 3, 15)
+        assert doc.requires_aym_warning is True
 
 
 # ============================================================================
@@ -368,3 +437,165 @@ class TestRetrieverClientSearch:
         with pytest.raises(HTTPException) as exc_info:
             await retriever.search(EMBEDDING_512, "q", None, 5, 0.25)
         assert exc_info.value.status_code == 503
+
+    @pytest.mark.asyncio
+    async def test_event_date_forwarded_to_rpc(self) -> None:
+        """Step 4: search() içindeki event_date _call_search_rpc'ye iletilmeli."""
+        retriever = _make_retriever()
+        retriever._call_search_rpc = MagicMock(return_value=[])
+        retriever._call_must_cite_rpc = MagicMock(return_value=[])
+
+        event = date(2020, 6, 15)
+        await retriever.search(EMBEDDING_512, "q", None, 5, 0.0, event_date=event)
+
+        call_kwargs = retriever._call_search_rpc.call_args.kwargs
+        assert call_kwargs.get("event_date") == event
+
+
+# ============================================================================
+# RetrieverClient.lehe_kanun_search — Step 4/10
+# ============================================================================
+
+class TestLehekKanunSearch:
+    """Step 4/10: lehe_kanun_search iki ayrı zaman noktasında arama yapar."""
+
+    _EVENT    = date(2020, 6, 1)
+    _DECISION = date(2026, 2, 1)
+
+    @pytest.mark.asyncio
+    async def test_returns_two_separate_doc_lists(self) -> None:
+        """event_date ve decision_date için ayrı (event_docs, decision_docs) tuple döner."""
+        retriever = _make_retriever()
+        event_row    = _make_row("doc-event",    semantic_score=0.9, keyword_score=0.8,
+                                  recency_score=0.9, hierarchy_score=0.8)
+        decision_row = _make_row("doc-decision", semantic_score=0.8, keyword_score=0.7,
+                                  recency_score=0.8, hierarchy_score=0.7)
+        # İlk çağrı → event belgeleri, ikinci çağrı → decision belgeleri
+        retriever._call_search_rpc = MagicMock(side_effect=[[event_row], [decision_row]])
+        retriever._call_must_cite_rpc = MagicMock(return_value=[])
+
+        event_docs, decision_docs = await retriever.lehe_kanun_search(
+            embedding=EMBEDDING_512,
+            query_text="hırsızlık cezası",
+            case_id=None,
+            max_sources=5,
+            min_score=0.0,
+            event_date=self._EVENT,
+            decision_date=self._DECISION,
+        )
+
+        assert len(event_docs) == 1
+        assert event_docs[0].id == "doc-event"
+        assert len(decision_docs) == 1
+        assert decision_docs[0].id == "doc-decision"
+
+    @pytest.mark.asyncio
+    async def test_both_dates_forwarded_to_rpc_separately(self) -> None:
+        """event_date ve decision_date _call_search_rpc'ye ayrı ayrı iletilmeli."""
+        retriever = _make_retriever()
+        retriever._call_search_rpc = MagicMock(return_value=[])
+        retriever._call_must_cite_rpc = MagicMock(return_value=[])
+
+        await retriever.lehe_kanun_search(
+            embedding=EMBEDDING_512,
+            query_text="hırsızlık cezası",
+            case_id=None,
+            max_sources=5,
+            min_score=0.0,
+            event_date=self._EVENT,
+            decision_date=self._DECISION,
+        )
+
+        assert retriever._call_search_rpc.call_count == 2
+        forwarded_dates = [
+            c.kwargs.get("event_date")
+            for c in retriever._call_search_rpc.call_args_list
+        ]
+        assert self._EVENT    in forwarded_dates
+        assert self._DECISION in forwarded_dates
+
+
+# ============================================================================
+# Gap 5 — Tenant isolation: _filter_by_bureau + client-side guard
+# ============================================================================
+
+from typing import Optional
+
+class TestFilterByBureau:
+    """Pure unit tests for the _filter_by_bureau() helper."""
+
+    def _doc(self, bureau_id: Optional[str] = None) -> LegalDocument:
+        return LegalDocument(
+            id="doc-1",
+            content="içerik",
+            collected_at=datetime(2025, 1, 1),
+            final_score=0.8,
+            bureau_id=bureau_id,
+        )
+
+    def test_cross_bureau_doc_removed(self) -> None:
+        """bureau_id='A' isteğinde bureau_id='B' dokümanı elenmeli."""
+        docs = [self._doc("B")]
+        result = _filter_by_bureau(docs, "A")
+        assert result == []
+
+    def test_matching_bureau_doc_kept(self) -> None:
+        """Aynı bureau_id'li doküman korunmalı."""
+        docs = [self._doc("A")]
+        result = _filter_by_bureau(docs, "A")
+        assert len(result) == 1
+
+    def test_public_doc_allowed_for_any_bureau(self) -> None:
+        """bureau_id=None doküman herkese açık; herhangi bir kiracıya döner."""
+        docs = [self._doc(None)]
+        result = _filter_by_bureau(docs, "A")
+        assert len(result) == 1
+
+    def test_none_bureau_id_no_op(self) -> None:
+        """Kiracı kapsamı verilmemişse hiçbir şey filtrelenmez."""
+        docs = [self._doc("A"), self._doc("B"), self._doc(None)]
+        result = _filter_by_bureau(docs, None)
+        assert len(result) == 3
+
+    @pytest.mark.asyncio
+    async def test_cross_bureau_doc_filtered_in_search(self) -> None:
+        """search() sonrası cross-tenant dokümanlar Python katmanında elenmeli."""
+        retriever = _make_retriever()
+        # RPC 2 doküman döndürüyor: biri doğru büro, biri yabancı büro
+        own_row   = _make_row("own",   bureau_id="bureau-A")
+        cross_row = _make_row("cross", bureau_id="bureau-B")
+        retriever._call_search_rpc = MagicMock(return_value=[own_row, cross_row])
+        retriever._call_must_cite_rpc = MagicMock(return_value=[])
+
+        result = await retriever.search(
+            EMBEDDING_512, "q", None, 5, 0.0, bureau_id="bureau-A"
+        )
+        ids = {d.id for d in result}
+        assert "own"   in ids
+        assert "cross" not in ids
+
+    def test_tenant_warning_logged_when_no_bureau_in_production(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """multi_tenancy_enabled=True + bureau_id=None + production → WARNING yayınlanmalı."""
+        import logging
+        retriever = _make_retriever()
+
+        mock_supabase = MagicMock()
+        mock_supabase.rpc.return_value.execute.return_value.data = []
+
+        with patch("infrastructure.retrieval.retrieval_client.settings") as s, \
+             patch("infrastructure.retrieval.retrieval_client.get_supabase_client",
+                   return_value=mock_supabase):
+            s.multi_tenancy_enabled = True
+            s.environment = "production"
+            s.tenant_enforce_in_dev = False
+            with caplog.at_level(logging.WARNING, logger="babylexit.retrieval"):
+                retriever._call_search_rpc(
+                    embedding=EMBEDDING_512,
+                    query_text="q",
+                    case_id=None,
+                    max_sources=5,
+                    bureau_id=None,
+                )
+        assert any("TENANT_ISOLATION_BYPASS" in r.message for r in caplog.records)

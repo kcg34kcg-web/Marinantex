@@ -250,6 +250,33 @@ def merge_must_cites(
     return merged
 
 
+def _filter_by_bureau(
+    documents: list,
+    bureau_id: Optional[str],
+) -> list:
+    """
+    Defense-in-depth: removes documents whose ``bureau_id`` doesn’t
+    match the requester’s bureau.
+
+    Documents with ``bureau_id=None`` are public (shared across tenants)
+    and are always included.
+    This function is a NO-OP when ``bureau_id is None`` (no tenant scope).
+
+    Args:
+        documents: LegalDocument instances returned by Supabase.
+        bureau_id: The caller’s bureau UUID.  None → no filtering.
+
+    Returns:
+        Filtered list — cross-tenant documents removed.
+    """
+    if bureau_id is None:
+        return documents
+    return [
+        d for d in documents
+        if d.bureau_id is None or d.bureau_id == bureau_id
+    ]
+
+
 # ============================================================================
 # RetrieverClient
 # ============================================================================
@@ -351,6 +378,11 @@ class RetrieverClient:
             documents.append(row_to_legal_document(row, final_score))
 
         documents.sort(key=lambda d: d.final_score, reverse=True)
+
+        # ── Gap 5: Defense-in-depth tenant filter ───────────────────────────
+        # SQL zaten p_bureau_id filtresini uyguluyor; Python katmanı bunu
+        # derinlemesine doğrular — yanlış yapılandırılmış RPC yanıtlarına karşı.
+        documents = _filter_by_bureau(documents, bureau_id)
 
         # ── 3. Must-cite injection (only when a case is scoped) ───────────────
         if case_id:
@@ -476,9 +508,26 @@ class RetrieverClient:
         Step 4: when ``event_date`` is provided, passes ``p_event_date`` to the
         RPC so the SQL function can filter to the law version in force on that date.
 
+        Gap 5: when ``multi_tenancy_enabled=True`` and ``bureau_id`` is not
+        supplied outside of development mode, emits a SECURITY WARNING so ops
+        can catch misconfigured callers before cross-tenant data is served.
+
         Raises:
             HTTPException 503 on any Supabase error.
         """
+        # Gap 5: warn on missing tenant scope in production
+        if (
+            settings.multi_tenancy_enabled
+            and bureau_id is None
+            and (
+                settings.environment != "development"
+                or settings.tenant_enforce_in_dev
+            )
+        ):
+            logger.warning(
+                "TENANT_ISOLATION_BYPASS | multi_tenancy_enabled=True but "
+                "bureau_id not provided — RPC may return cross-tenant documents."
+            )
         supabase = get_supabase_client()
         params: dict = {
             "query_embedding": embedding,

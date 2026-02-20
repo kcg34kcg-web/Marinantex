@@ -1,5 +1,5 @@
 """
-Semantic Cache  —  Step 3
+Semantic Cache  —  Step 8
 ==========================
 Redis-backed two-level cache for RAG query results.
 
@@ -55,16 +55,20 @@ def normalize_query(query: str) -> str:
     return " ".join(query.lower().split())
 
 
-def build_l1_key(query: str, case_id: Optional[str]) -> str:
+def build_l1_key(
+    query: str,
+    case_id: Optional[str],
+    bureau_id: Optional[str] = None,
+) -> str:
     """
     Deterministic L1 cache key.
 
-    Formula: SHA-256( normalize(query) + "|" + (case_id or "") )
+    Formula: SHA-256( normalize(query) + "|" + (case_id or "") + "|" + (bureau_id or "") )
 
-    Including case_id ensures a query scoped to case-A never hits a
-    cached response from case-B.
+    Both case_id and bureau_id are included so that a query from bureau-A
+    never hits a cached response belonging to bureau-B (multi-tenant isolation).
     """
-    raw = normalize_query(query) + "|" + (case_id or "")
+    raw = normalize_query(query) + "|" + (case_id or "") + "|" + (bureau_id or "")
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     return _L1_PREFIX + digest
 
@@ -75,13 +79,19 @@ def cosine_similarity(a: List[float], b: List[float]) -> float:
 
     Pure Python — no NumPy dependency.  Safe for:
       - Zero vectors         → returns 0.0 (no ZeroDivisionError)
-      - Unequal-length vecs  → uses zip (stops at shorter)
+      - Unequal-length vecs  → logs WARNING and uses zip (stops at shorter)
       - 1536-dim vectors     → ~1.5 ms per pair in CPython (acceptable for
                                ≤200 L2 entries)
 
     Returns:
         float in [-1.0, 1.0], typically [0.0, 1.0] for normalised embeddings.
     """
+    if len(a) != len(b):
+        logger.warning(
+            "cosine_similarity: dimension mismatch (%d vs %d) — zip will truncate to shorter",
+            len(a),
+            len(b),
+        )
     dot = sum(x * y for x, y in zip(a, b))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(y * y for y in b))
@@ -135,18 +145,21 @@ class SemanticCache:
     # ── L1: Exact match ───────────────────────────────────────────────────────
 
     async def l1_lookup(
-        self, query: str, case_id: Optional[str]
+        self,
+        query: str,
+        case_id: Optional[str],
+        bureau_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Exact query lookup.
 
-        Returns the cached RAGResponse dict if the (query, case_id) pair was
-        previously stored, else None.
+        Returns the cached RAGResponse dict if the (query, case_id, bureau_id)
+        triplet was previously stored, else None.
 
         Cost: 1 Redis GET  →  $0.
         Latency: ~0.2 ms (Redis local) / ~1 ms (Redis cloud).
         """
-        key = build_l1_key(query, case_id)
+        key = build_l1_key(query, case_id, bureau_id)
         try:
             value = await self._redis.get(key)
             if value:
@@ -162,6 +175,7 @@ class SemanticCache:
         self,
         embedding: List[float],
         case_id: Optional[str],
+        bureau_id: Optional[str] = None,
     ) -> Tuple[Optional[Dict[str, Any]], float]:
         """
         Semantic similarity lookup.
@@ -172,6 +186,7 @@ class SemanticCache:
         Args:
             embedding:  Query embedding vector (must be non-zero for L2 to fire).
             case_id:    Scope guard — only matches entries from the same case.
+            bureau_id:  Scope guard — only matches entries from the same bureau.
 
         Returns:
             (response_dict, best_score) on hit, (None, 0.0) on miss or error.
@@ -203,8 +218,10 @@ class SemanticCache:
                 if not entry:
                     continue
 
-                # Scope guard: don't mix case-scoped and global queries
+                # Scope guard: don't mix case-scoped and global queries, or bureaus
                 if entry.get("case_id") != case_id:
+                    continue
+                if entry.get("bureau_id") != bureau_id:
                     continue
 
                 stored_emb: List[float] = entry.get("embedding", [])
@@ -244,12 +261,13 @@ class SemanticCache:
         embedding: List[float],
         case_id: Optional[str],
         response: Dict[str, Any],
+        bureau_id: Optional[str] = None,
     ) -> None:
         """
         Persists a query+response pair in both L1 and L2.
 
         L1: exact-match key → response dict
-        L2: uuid key → {embedding, response, query, case_id, cached_at}
+        L2: uuid key → {embedding, response, query, case_id, bureau_id, cached_at}
             + prepend key to L2 index list (capped at max_l2_entries)
 
         Non-fatal: failures are logged but never raised so the caller
@@ -257,7 +275,7 @@ class SemanticCache:
         """
         # ── L1 ────────────────────────────────────────────────────────────────
         try:
-            l1_key = build_l1_key(query, case_id)
+            l1_key = build_l1_key(query, case_id, bureau_id)
             await self._redis.set(l1_key, response, ttl=self._ttl)
             logger.debug("CACHE_STORE L1 | key_suffix=…%s", l1_key[-8:])
         except Exception as exc:
@@ -278,6 +296,7 @@ class SemanticCache:
                 "response": response,
                 "query": query,
                 "case_id": case_id,
+                "bureau_id": bureau_id,
                 "cached_at": datetime.now(tz=timezone.utc).isoformat(),
             }
             await self._redis.set(l2_key, entry, ttl=self._ttl)
@@ -313,6 +332,8 @@ class SemanticCache:
                 entry = await self._redis.get(key)
                 if entry and entry.get("case_id") == case_id:
                     await self._redis.delete(key)
+                    # Remove from index list so future scans skip this key
+                    await self._redis.client.lrem(_L2_INDEX, 0, key)
                     removed += 1
 
             logger.info(

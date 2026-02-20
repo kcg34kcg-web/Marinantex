@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 
 from infrastructure.ingest.ocr_cleaner import OCRCleaner, ocr_cleaner
@@ -83,6 +84,11 @@ class IngestResult:
     warnings: list[str]                   # Non-fatal quality notes
     errors: list[str]                     # Empty → full success
 
+    # ── Step 2: Source Provenance (echoed from run() params) ──────────────────
+    source_url: Optional[str] = None
+    version: Optional[str] = None
+    collected_at: Optional[datetime] = None
+
     @property
     def success(self) -> bool:
         """True when all pipeline stages completed without errors."""
@@ -127,6 +133,9 @@ class IngestPipeline:
         raw_text: str,
         document_id: str,
         doc_type_hint: Optional[DocumentType] = None,
+        source_url: Optional[str] = None,
+        version: Optional[str] = None,
+        collected_at: Optional[datetime] = None,
     ) -> IngestResult:
         """
         Process ``raw_text`` for document ``document_id``.
@@ -136,6 +145,10 @@ class IngestPipeline:
             document_id:   UUID of the document (for logging + IngestResult).
             doc_type_hint: Override auto-detection when type is already known
                            (e.g. the ingest worker already knows it's a kanun).
+            source_url:    Canonical URL of the original legal source.  Stored
+                           on every ParsedSegment and echoed in IngestResult.
+            version:       Version/revision identifier (e.g. effective date).
+            collected_at:  Ingestion timestamp; set by the caller (use-case layer).
 
         Returns:
             IngestResult — always returned even on partial failures.
@@ -183,7 +196,11 @@ class IngestPipeline:
             logger.error("PARSE_ERROR | doc=%s | %s", document_id, exc, exc_info=True)
             errors.append(f"PARSE_ERROR: {exc}")
             warnings.append("Structural parsing failed — no segments produced.")
-
+        # ── Stage 3b: Provenance propagation ─────────────────────────────────────
+        for seg in segments:
+            seg.source_url = source_url
+            seg.version = version
+            seg.collected_at = collected_at
         # ── Stage 4: Citation extraction ──────────────────────────────────────
         all_citations: list[ExtractedCitation] = []
         try:
@@ -215,6 +232,9 @@ class IngestPipeline:
             metadata=metadata,
             warnings=warnings,
             errors=errors,
+            source_url=source_url,
+            version=version,
+            collected_at=collected_at,
         )
 
         logger.info(

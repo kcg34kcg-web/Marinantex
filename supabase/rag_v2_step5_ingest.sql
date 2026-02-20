@@ -144,6 +144,9 @@ ALTER TABLE public.document_citations ENABLE ROW LEVEL SECURITY;
 -- 4. Update hybrid_legal_search to surface Step 5 ingest columns
 -- ---------------------------------------------------------------------------
 
+-- Drop the existing 5-arg signature so the expanded return type can be applied.
+DROP FUNCTION IF EXISTS public.hybrid_legal_search(vector, text, uuid, integer, date);
+
 CREATE OR REPLACE FUNCTION public.hybrid_legal_search(
     query_embedding  vector(1536),
     query_text       text,

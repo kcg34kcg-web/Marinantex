@@ -140,10 +140,15 @@ class LeheKanunResult:
     legal_basis: str = field(default="TCK Madde 7/2 — Lehe kanun ilkesi")
 
     def __post_init__(self) -> None:
-        """Invariant: both_versions_needed implies lehe_applicable."""
+        """Invariants: both_versions_needed implies lehe_applicable; event_date <= decision_date."""
         if self.both_versions_needed and not self.lehe_applicable:
             raise ValueError(
                 "both_versions_needed can only be True when lehe_applicable is True"
+            )
+        if self.event_date > self.decision_date:
+            raise ValueError(
+                f"event_date ({self.event_date}) karar tarihinden "
+                f"({self.decision_date}) sonra olamaz."
             )
 
     @classmethod
