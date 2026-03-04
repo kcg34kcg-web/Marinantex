@@ -47,6 +47,7 @@ def _make_router(
     openai_key: str = "sk-test",
     groq_key: str = "gsk_test",
     anthropic_key: str = "",
+    google_key: str = "",
 ) -> LLMTieredRouter:
     """
     Builds a LLMTieredRouter with patched settings so no real env vars needed.
@@ -55,6 +56,7 @@ def _make_router(
         mock_settings.openai_api_key = openai_key
         mock_settings.groq_api_key = groq_key
         mock_settings.anthropic_api_key = anthropic_key
+        mock_settings.google_api_key = google_key
         mock_settings.llm_tier1_model = "llama-3.3-70b-versatile"
         mock_settings.llm_tier2_model = "gpt-4o-mini"
         mock_settings.llm_tier3_model = "gpt-4o"
@@ -357,3 +359,139 @@ def test_build_messages_contains_system_prompt_and_user_query() -> None:
     assert "HUKUK KAYNAKLARI" in user_content
     assert "Tapu devir işlemi nasıl yapılır?" in user_content
     assert "TMK 706" in user_content
+
+
+# ============================================================================
+# Step 21. requested_tier explicit mapping tests
+# ============================================================================
+
+def test_decide_requested_tier_uses_step21_primary_mapping() -> None:
+    router = _make_router(openai_key="sk-test", groq_key="gsk_test", anthropic_key="anthro-key")
+
+    with patch("infrastructure.llm.tiered_router.settings") as mock:
+        mock.google_api_key = ""
+        mock.openai_api_key = "sk-test"
+        mock.groq_api_key = "gsk_test"
+        mock.anthropic_api_key = "anthro-key"
+        mock.ai_tier_muazzam_provider = "anthropic"
+        mock.ai_tier_muazzam_model = "claude-3-5-sonnet-20241022"
+        mock.ai_tier_muazzam_fallback_provider = "openai"
+        mock.ai_tier_muazzam_fallback_model = "gpt-4o"
+
+        decision = router.decide(
+            query="test",
+            context="kisa baglam",
+            source_count=1,
+            requested_tier=4,
+        )
+
+    assert decision.tier == QueryTier.TIER4
+    assert decision.provider == "anthropic"
+    assert decision.model_id == "claude-3-5-sonnet-20241022"
+    assert decision.fallback_used is False
+
+
+def test_decide_requested_tier_hazir_defaults_to_google_flash() -> None:
+    router = _make_router(
+        openai_key="sk-test",
+        groq_key="gsk_test",
+        anthropic_key="anthro-key",
+        google_key="google-key",
+    )
+
+    with patch("infrastructure.llm.tiered_router.settings") as mock:
+        mock.google_api_key = "google-key"
+        mock.openai_api_key = "sk-test"
+        mock.groq_api_key = "gsk_test"
+        mock.anthropic_api_key = "anthro-key"
+        mock.ai_tier_hazir_provider = "google"
+        mock.ai_tier_hazir_model = "gemini-2.0-flash"
+        mock.ai_tier_hazir_fallback_provider = "groq"
+        mock.ai_tier_hazir_fallback_model = "llama-3.3-70b-versatile"
+
+        decision = router.decide(
+            query="test",
+            context="kisa baglam",
+            source_count=1,
+            requested_tier=1,
+        )
+
+    assert decision.tier == QueryTier.TIER1
+    assert decision.provider == "google"
+    assert decision.model_id == "gemini-2.0-flash"
+    assert decision.fallback_used is False
+
+
+def test_decide_requested_tier_blocks_cross_provider_fallback_for_gemini_lanes() -> None:
+    router = _make_router(openai_key="sk-test", groq_key="gsk_test", anthropic_key="")
+
+    with patch("infrastructure.llm.tiered_router.settings") as mock:
+        mock.google_api_key = ""  # primary provider unavailable
+        mock.openai_api_key = "sk-test"
+        mock.groq_api_key = "gsk_test"
+        mock.anthropic_api_key = ""
+        mock.ai_tier_dusunceli_provider = "google"
+        mock.ai_tier_dusunceli_model = "gemini-2.5-pro"
+        mock.ai_tier_dusunceli_fallback_provider = "openai"
+        mock.ai_tier_dusunceli_fallback_model = "gpt-4o-mini"
+
+        with pytest.raises(RuntimeError, match="REQUESTED_TIER_UNAVAILABLE_NO_DOWNGRADE"):
+            router.decide(
+                query="test",
+                context="kisa baglam",
+                source_count=1,
+                requested_tier=2,
+            )
+
+
+@pytest.mark.asyncio
+async def test_generate_requested_tier_returns_step21_model_label() -> None:
+    router = _make_router(openai_key="sk-test", groq_key="gsk_test", anthropic_key="anthro-key")
+    router._invoke = AsyncMock(return_value="step21 mocked answer")
+
+    with patch("infrastructure.llm.tiered_router.settings") as mock:
+        mock.google_api_key = ""
+        mock.openai_api_key = "sk-test"
+        mock.groq_api_key = "gsk_test"
+        mock.anthropic_api_key = "anthro-key"
+        mock.ai_tier_muazzam_provider = "anthropic"
+        mock.ai_tier_muazzam_model = "claude-3-5-sonnet-20241022"
+        mock.ai_tier_muazzam_fallback_provider = "openai"
+        mock.ai_tier_muazzam_fallback_model = "gpt-4o"
+        mock.llm_tier4_multi_agent_enabled = False
+
+        answer, model_label = await router.generate(
+            query="test",
+            context="kisa baglam",
+            source_count=1,
+            requested_tier=4,
+        )
+
+    assert answer == "step21 mocked answer"
+    assert model_label == "anthropic/claude-3-5-sonnet-20241022"
+
+
+def test_decide_requested_tier_no_downgrade_when_primary_and_fallback_unavailable() -> None:
+    """
+    Step 22: requested tier cannot walk down to lower tiers.
+    If same-tier primary+fallback are unavailable, router must fail fast.
+    """
+    router = _make_router(openai_key="", groq_key="", anthropic_key="", google_key="")
+
+    with patch("infrastructure.llm.tiered_router.settings") as mock:
+        mock.google_api_key = ""
+        mock.openai_api_key = ""
+        mock.groq_api_key = ""
+        mock.anthropic_api_key = ""
+        mock.ai_tier_uzman_provider = "openai"
+        mock.ai_tier_uzman_model = "gpt-4o"
+        mock.ai_tier_uzman_fallback_provider = "groq"
+        mock.ai_tier_uzman_fallback_model = "llama-3.3-70b-versatile"
+
+        with pytest.raises(RuntimeError, match="REQUESTED_TIER_UNAVAILABLE_NO_DOWNGRADE"):
+            router.decide(
+                query="test",
+                context="kisa baglam",
+                source_count=1,
+                requested_tier=3,
+            )

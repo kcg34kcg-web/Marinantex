@@ -159,13 +159,28 @@ class IngestDocumentUseCase:
         # 4: Generate embeddings
         # ------------------------------------------------------------------
         embedding_generated = False
-        for seg in segments:
-            try:
-                embedding = await query_embedder.embed(seg.content)
+        try:
+            segment_texts = [seg.content for seg in segments]
+            embeddings = await query_embedder.embed_texts(segment_texts)
+
+            for seg, embedding in zip(segments, embeddings):
                 seg.embedding = embedding
-                embedding_generated = True
-            except Exception as exc:  # noqa: BLE001
-                warnings.append(f"Embedding failed for segment {seg.id}: {exc}")
+
+            if len(embeddings) != len(segments):
+                warnings.append(
+                    "Embedding count mismatch: "
+                    f"expected {len(segments)}, got {len(embeddings)}."
+                )
+            embedding_generated = len(embeddings) > 0
+
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"Batch embedding failed: {exc}")
+            for seg in segments:
+                try:
+                    seg.embedding = await query_embedder.embed_query(seg.content)
+                    embedding_generated = True
+                except Exception as seg_exc:  # noqa: BLE001
+                    warnings.append(f"Embedding failed for segment {seg.id}: {seg_exc}")
 
         # ------------------------------------------------------------------
         # 5: Persist documents

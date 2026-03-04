@@ -67,6 +67,7 @@ def _make_rrf_retriever(
     mock_retriever = MagicMock()
     # İlk çağrı semantik, ikinci çağrı keyword döndürür
     mock_retriever.search = AsyncMock(side_effect=[semantic_docs, keyword_docs])
+    mock_retriever.global_legal_search = AsyncMock(side_effect=[semantic_docs, keyword_docs])
 
     mock_store = MagicMock()
     mock_store.expand_query = MagicMock(return_value=frozenset({"test", "sorgu"}))
@@ -251,6 +252,24 @@ class TestRRFRetriever:
             )
         assert rrf._retriever.search.await_count == 2
         assert result.fusion_applied is True
+
+    async def test_global_legal_only_uses_global_search_fn(self) -> None:
+        """Step 13: global_legal_only=True iken RetrieverClient.global_legal_search kullanilmali."""
+        rrf = _make_rrf_retriever()
+        with patch("infrastructure.search.rrf_retriever.settings") as mock_settings:
+            mock_settings.rrf_enabled = True
+            mock_settings.synonym_expansion_enabled = False
+            mock_settings.rrf_k = 60
+            await rrf.search(
+                embedding=[0.1] * 8,
+                query_text="isci alacagi faizi",
+                case_id=None,
+                max_sources=5,
+                min_score=0.0,
+                global_legal_only=True,
+            )
+        assert rrf._retriever.global_legal_search.await_count == 2
+        assert rrf._retriever.search.await_count == 0
 
     async def test_rrf_disabled_calls_search_once(self) -> None:
         rrf = _make_rrf_retriever()
@@ -537,3 +556,42 @@ class TestIndexingTaskStubs:
             )
         assert result.status == IndexTaskStatus.FAILED
         assert mock_idx.call_count == 1  # yalnızca bir kez çağrıldı
+
+
+class TestRrfRpcExpandedRetry:
+    pytestmark = pytest.mark.asyncio
+
+    async def test_rpc_expanded_query_empty_retries_with_original_query(self) -> None:
+        from infrastructure.retrieval.retrieval_client import RetrieverClient
+
+        retriever = RetrieverClient()
+        retriever.search_rrf = AsyncMock(
+            side_effect=[
+                [],
+                [_doc("fallback-hit", 0.91)],
+            ]
+        )
+        store = MagicMock()
+        store.expand_query = MagicMock(return_value=frozenset({"is", "kanunu", "fesih"}))
+        rrf = RRFRetriever(retriever=retriever, store=store)
+
+        with patch("infrastructure.search.rrf_retriever.settings") as mock_settings:
+            mock_settings.rrf_enabled = True
+            mock_settings.synonym_expansion_enabled = True
+            mock_settings.rrf_k = 60
+            mock_settings.rrf_semantic_weight = 1.0
+            mock_settings.rrf_keyword_weight = 1.0
+            result = await rrf.search(
+                embedding=[0.1] * 8,
+                query_text="is kanunu",
+                case_id=None,
+                max_sources=5,
+                min_score=0.0,
+            )
+
+        assert retriever.search_rrf.await_count == 2
+        first_q = retriever.search_rrf.await_args_list[0].kwargs["query_text"]
+        second_q = retriever.search_rrf.await_args_list[1].kwargs["query_text"]
+        assert first_q != "is kanunu"
+        assert second_q == "is kanunu"
+        assert [d.id for d in result.documents] == ["fallback-hit"]

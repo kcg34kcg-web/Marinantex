@@ -34,9 +34,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from infrastructure.config import settings
 
@@ -92,7 +92,7 @@ class TierDecision:
     Attributes:
         tier:           Final tier used (after fallback resolution).
         model_id:       LLM model identifier string.
-        provider:       "groq" | "openai" | "anthropic".
+        provider:       "google" | "groq" | "openai" | "anthropic".
         reason:         Human-readable explanation of the routing decision.
         fallback_used:  True when the originally classified tier was unavailable
                         and a different tier was selected automatically.
@@ -300,6 +300,35 @@ _TIER_META = {
     QueryTier.TIER4: {"provider": "anthropic", "model_key": "llm_tier4_model"},
 }
 
+# Step 21: explicit user-facing tier -> final model map.
+# Values point to settings field names for primary/fallback provider+model pairs.
+_REQUESTED_TIER_MODEL_MAP: Dict[QueryTier, Dict[str, str]] = {
+    QueryTier.TIER1: {
+        "provider_key": "ai_tier_hazir_provider",
+        "model_key": "ai_tier_hazir_model",
+        "fallback_provider_key": "ai_tier_hazir_fallback_provider",
+        "fallback_model_key": "ai_tier_hazir_fallback_model",
+    },
+    QueryTier.TIER2: {
+        "provider_key": "ai_tier_dusunceli_provider",
+        "model_key": "ai_tier_dusunceli_model",
+        "fallback_provider_key": "ai_tier_dusunceli_fallback_provider",
+        "fallback_model_key": "ai_tier_dusunceli_fallback_model",
+    },
+    QueryTier.TIER3: {
+        "provider_key": "ai_tier_uzman_provider",
+        "model_key": "ai_tier_uzman_model",
+        "fallback_provider_key": "ai_tier_uzman_fallback_provider",
+        "fallback_model_key": "ai_tier_uzman_fallback_model",
+    },
+    QueryTier.TIER4: {
+        "provider_key": "ai_tier_muazzam_provider",
+        "model_key": "ai_tier_muazzam_model",
+        "fallback_provider_key": "ai_tier_muazzam_fallback_provider",
+        "fallback_model_key": "ai_tier_muazzam_fallback_model",
+    },
+}
+
 _FALLBACK_ORDER: List[Tuple[QueryTier, QueryTier]] = [
     # (unavailable tier, fallback to)
     (QueryTier.TIER4, QueryTier.TIER3),  # Anthropic missing → GPT-4o
@@ -345,9 +374,12 @@ class LLMTieredRouter:
             available.add(QueryTier.TIER1)
             logger.info("Tier 1 (Groq / %s): AVAILABLE", settings.llm_tier1_model)
         else:
-            logger.warning("Tier 1 (Groq): UNAVAILABLE — GROQ_API_KEY not set")
+            logger.info(
+                "Tier 1 (Groq): UNAVAILABLE — GROQ_API_KEY not set "
+                "(optional if requested tiers use another provider)"
+            )
 
-        if settings.openai_api_key:
+        if self._has_openai_channel():
             available.add(QueryTier.TIER2)
             available.add(QueryTier.TIER3)
             logger.info(
@@ -356,11 +388,14 @@ class LLMTieredRouter:
                 settings.llm_tier3_model,
             )
         else:
-            logger.warning("Tier 2/3 (OpenAI): UNAVAILABLE — OPENAI_API_KEY not set")
+            logger.info(
+                "Tier 2/3 (OpenAI): UNAVAILABLE — OPENAI_API_KEY not set "
+                "(optional if requested tiers map to another provider)"
+            )
 
         if settings.llm_tier4_use_reasoning:
             # Reasoning mode: Tier 4 uses OpenAI o1/o3-mini — requires openai_api_key
-            if settings.openai_api_key:
+            if self._has_openai_channel():
                 available.add(QueryTier.TIER4)
                 logger.info(
                     "Tier 4 (OpenAI Reasoning / %s, effort=%s): AVAILABLE",
@@ -379,7 +414,7 @@ class LLMTieredRouter:
         else:
             logger.info("Tier 4 (Anthropic): UNAVAILABLE — will fallback to Tier 3")
 
-        if not available:
+        if not available and not settings.google_api_key:
             # API anahtarları henüz yüklenmemiş olabilir (test ortamı, CI, lazy env).
             # Import-time RuntimeError yerine uyarı logu basıyoruz; gerçek hata
             # `_resolve()` içinde call-time'da fırlatılır, böylece modülü import
@@ -387,10 +422,146 @@ class LLMTieredRouter:
             # API anahtarı olmadan da güvenle import edebilir.
             logger.warning(
                 "LLMTieredRouter: no LLM provider keys configured at init time. "
-                "Set OPENAI_API_KEY or GROQ_API_KEY before calling generate()."
+                "Set OPENAI_API_KEY, GROQ_API_KEY or GOOGLE_API_KEY "
+                "(GOOGLE_GENERATIVE_AI_API_KEY also supported)."
+            )
+        elif not available and settings.google_api_key:
+            logger.info(
+                "LLMTieredRouter: running in Google-only requested-tier mode "
+                "(auto-classifier lanes that depend on groq/openai remain disabled)."
             )
 
         return available
+
+    @staticmethod
+    def _has_openai_channel() -> bool:
+        """
+        Returns True when OpenAI-compatible channel is configured.
+        Either OPENAI_API_KEY (cloud) or OPENAI_BASE_URL (self-host) is enough.
+        """
+        api_key = settings.openai_api_key
+        if isinstance(api_key, str) and api_key.strip():
+            return True
+        base_url = getattr(settings, "openai_base_url", None)
+        if isinstance(base_url, str) and base_url.strip():
+            return True
+        return False
+
+    @staticmethod
+    def _resolve_openai_api_key() -> str:
+        """
+        Returns API key for OpenAI-compatible clients.
+        Self-hosted gateways may ignore API key, so a local placeholder is used.
+        """
+        key = settings.openai_api_key
+        if isinstance(key, str) and key.strip():
+            return key.strip()
+        base_url = getattr(settings, "openai_base_url", None)
+        if isinstance(base_url, str) and base_url.strip():
+            return "local-openai-compatible"
+        return ""
+
+    @staticmethod
+    def _provider_has_key(provider: str) -> bool:
+        """
+        Returns True when the provider has a configured API key.
+        """
+        p = (provider or "").strip().lower()
+        if p == "google":
+            return bool(settings.google_api_key)
+        if p == "groq":
+            return bool(settings.groq_api_key)
+        if p == "openai":
+            return LLMTieredRouter._has_openai_channel()
+        if p == "anthropic":
+            return bool(settings.anthropic_api_key)
+        return False
+
+    @staticmethod
+    def _normalise_requested_tier(requested_tier: Optional[int]) -> Optional[QueryTier]:
+        if requested_tier is None:
+            return None
+        try:
+            return QueryTier(int(requested_tier))
+        except Exception:
+            logger.warning("Invalid requested_tier=%r; falling back to classifier.", requested_tier)
+            return None
+
+    def _resolve_requested_model(
+        self,
+        desired: QueryTier,
+        context: str,
+        source_count: int,
+    ) -> TierDecision:
+        """
+        Resolves explicit user-selected tier to configured primary/fallback model.
+        """
+        conf = _REQUESTED_TIER_MODEL_MAP[desired]
+        primary_provider = str(getattr(settings, conf["provider_key"], "") or "").strip().lower()
+        primary_model = str(getattr(settings, conf["model_key"], "") or "").strip()
+        fallback_provider = str(getattr(settings, conf["fallback_provider_key"], "") or "").strip().lower()
+        fallback_model = str(getattr(settings, conf["fallback_model_key"], "") or "").strip()
+        ctx_tokens = estimate_tokens(context)
+
+        # Product contract:
+        # - Hazir Cevap (Tier 1) and Dusunceli (Tier 2) are Gemini lanes.
+        # - Do not silently route these tiers to non-google providers.
+        if desired in {QueryTier.TIER1, QueryTier.TIER2} and primary_provider == "google":
+            if fallback_provider and fallback_provider != "google":
+                logger.warning(
+                    "REQUESTED_TIER_CROSS_PROVIDER_FALLBACK_BLOCKED | tier=%d | "
+                    "primary=%s/%s | fallback=%s/%s",
+                    desired,
+                    primary_provider,
+                    primary_model,
+                    fallback_provider,
+                    fallback_model,
+                )
+                fallback_provider = ""
+                fallback_model = ""
+
+        if primary_provider and primary_model and self._provider_has_key(primary_provider):
+            return TierDecision(
+                tier=desired,
+                model_id=primary_model,
+                provider=primary_provider,
+                reason=(
+                    f"requested_tier={desired} | primary={primary_provider}/{primary_model} | "
+                    f"ctx_tokens≈{ctx_tokens} | sources={source_count}"
+                ),
+            )
+
+        if fallback_provider and fallback_model and self._provider_has_key(fallback_provider):
+            logger.warning(
+                "REQUESTED_TIER_FALLBACK_MODEL | tier=%d | primary=%s/%s unavailable | fallback=%s/%s",
+                desired,
+                primary_provider,
+                primary_model,
+                fallback_provider,
+                fallback_model,
+            )
+            return TierDecision(
+                tier=desired,
+                model_id=fallback_model,
+                provider=fallback_provider,
+                reason=(
+                    f"requested_tier={desired} | fallback={fallback_provider}/{fallback_model} | "
+                    f"primary_unavailable={primary_provider}/{primary_model}"
+                ),
+                fallback_used=True,
+                original_tier=desired,
+            )
+
+        # Step 22 contract: final generation tier can NEVER be downgraded
+        # below user-requested tier. If same-tier primary/fallback are both
+        # unavailable, fail fast instead of walking down to lower tiers.
+        raise RuntimeError(
+            "REQUESTED_TIER_UNAVAILABLE_NO_DOWNGRADE | "
+            f"tier={int(desired)} | "
+            f"primary={primary_provider}/{primary_model} | "
+            f"fallback={fallback_provider}/{fallback_model} | "
+            "Configure provider keys or same-tier fallback mapping."
+        )
 
     # ── Decision logic ────────────────────────────────────────────────────────
 
@@ -399,6 +570,7 @@ class LLMTieredRouter:
         query: str,
         context: str,
         source_count: int,
+        requested_tier: Optional[int] = None,
     ) -> TierDecision:
         """
         Classifies the query and applies fallback to produce a TierDecision.
@@ -407,10 +579,21 @@ class LLMTieredRouter:
             query:        User query (PII-masked).
             context:      Assembled context block from retrieved documents.
             source_count: Number of retrieved documents.
+            requested_tier: Optional explicit user-selected tier (1-4).
+                            When provided, classifier is bypassed and the
+                            Step 21 model mapping is used.
 
         Returns:
             TierDecision with final tier, model_id, provider, reason.
         """
+        requested = self._normalise_requested_tier(requested_tier)
+        if requested is not None:
+            return self._resolve_requested_model(
+                desired=requested,
+                context=context,
+                source_count=source_count,
+            )
+
         classified = classify_query_tier(query, context, source_count)
         return self._resolve(classified, query, context, source_count)
 
@@ -527,7 +710,12 @@ class LLMTieredRouter:
 
     # ── LLM invocation ────────────────────────────────────────────────────────
 
-    def _build_messages(self, query: str, context: str) -> List[BaseMessage]:
+    def _build_messages(
+        self,
+        query: str,
+        context: str,
+        history: Optional[List[Dict[str, str]]] = None,
+    ) -> List[BaseMessage]:
         """Constructs the message list for any LangChain chat model.
 
         Step 16: Uses ZeroTrustPromptBuilder to obtain the immutable zero-trust
@@ -540,16 +728,26 @@ class LLMTieredRouter:
             f"HUKUK KAYNAKLARI:\n\n{context}\n\n"
             f"---\n\nSORU: {query}"
         )
-        return [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_content),
-        ]
+        messages: List[BaseMessage] = [SystemMessage(content=system_prompt)]
+        for item in list(history or []):
+            role = str(item.get("role", "")).strip().lower()
+            content = str(item.get("content", "")).strip()
+            if not content:
+                continue
+            if role == "assistant":
+                messages.append(AIMessage(content=content))
+            elif role == "user":
+                messages.append(HumanMessage(content=content))
+        messages.append(HumanMessage(content=user_content))
+        return messages
 
     async def generate(
         self,
         query: str,
         context: str,
         source_count: int,
+        history: Optional[List[Dict[str, str]]] = None,
+        requested_tier: Optional[int] = None,
     ) -> Tuple[str, str]:
         """
         Full pipeline: classify → decide (with fallback) → invoke LLM.
@@ -558,6 +756,8 @@ class LLMTieredRouter:
             query:        User query (PII-masked).
             context:      Context block assembled from retrieved documents.
             source_count: Number of retrieved documents (for tier classification).
+            requested_tier: Optional explicit tier from UI (1-4). If set,
+                final model is selected from Step 21 tier map.
 
         Returns:
             (answer: str, model_label: str)
@@ -567,7 +767,19 @@ class LLMTieredRouter:
             RuntimeError: If no LLM tier is available.
             Exception:    Re-raises any LLM provider error after logging.
         """
-        decision = self.decide(query, context, source_count)
+        decision = self.decide(
+            query=query,
+            context=context,
+            source_count=source_count,
+            requested_tier=requested_tier,
+        )
+        requested = self._normalise_requested_tier(requested_tier)
+        if requested is not None and int(decision.tier) < int(requested):
+            raise RuntimeError(
+                "FINAL_TIER_DOWNGRADE_BLOCKED | "
+                f"requested_tier={int(requested)} | "
+                f"final_generation_tier={int(decision.tier)}"
+            )
 
         logger.info(
             "LLM call | tier=%d | model=%s | provider=%s | fallback=%s",
@@ -586,7 +798,7 @@ class LLMTieredRouter:
                 f"{fallback_suffix}+multi-agent"
             )
         else:
-            messages = self._build_messages(query, context)
+            messages = self._build_messages(query, context, history=history)
             answer = await self._invoke(decision, messages)
             model_label = f"{decision.provider}/{decision.model_id}{fallback_suffix}"
 
@@ -601,6 +813,7 @@ class LLMTieredRouter:
         Calls the appropriate LangChain provider and returns the text answer.
 
         Provider dispatch:
+            google    → ChatGoogleGenerativeAI
             groq      → ChatGroq
             openai    → ChatOpenAI (standard; temperature=0.0)
             anthropic → ChatAnthropic
@@ -614,7 +827,32 @@ class LLMTieredRouter:
             return await self._invoke_reasoning(decision, reasoning_msgs)
 
         try:
-            if decision.provider == "groq":
+            _provider_max_retries = max(
+                0,
+                int(getattr(settings, "llm_provider_max_retries", 1) or 1),
+            )
+        except Exception:
+            _provider_max_retries = 1
+
+        try:
+            if decision.provider == "google":
+                try:
+                    from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore[import-untyped]
+                except Exception as exc:
+                    raise RuntimeError(
+                        "Provider 'google' requires langchain-google-genai. "
+                        "Install it and set GOOGLE_API_KEY."
+                    ) from exc
+
+                llm = ChatGoogleGenerativeAI(
+                    model=decision.model_id,
+                    google_api_key=settings.google_api_key,  # type: ignore[arg-type]
+                    max_output_tokens=settings.llm_max_response_tokens,
+                    temperature=0.0,
+                    max_retries=_provider_max_retries,
+                )
+
+            elif decision.provider == "groq":
                 from langchain_groq import ChatGroq
 
                 llm = ChatGroq(
@@ -622,16 +860,25 @@ class LLMTieredRouter:
                     api_key=settings.groq_api_key,  # type: ignore[arg-type]
                     max_tokens=settings.llm_max_response_tokens,
                     temperature=0.0,
+                    max_retries=_provider_max_retries,
                 )
 
             elif decision.provider == "openai":
                 from langchain_openai import ChatOpenAI
 
+                openai_kwargs: dict[str, object] = {
+                    "model": decision.model_id,
+                    "api_key": self._resolve_openai_api_key(),
+                    "max_tokens": settings.llm_max_response_tokens,
+                    "temperature": 0.0,
+                    "max_retries": _provider_max_retries,
+                }
+                openai_base_url = str(getattr(settings, "openai_base_url", "") or "").strip()
+                if openai_base_url:
+                    openai_kwargs["base_url"] = openai_base_url
+
                 llm = ChatOpenAI(
-                    model=decision.model_id,
-                    api_key=settings.openai_api_key,  # type: ignore[arg-type]
-                    max_tokens=settings.llm_max_response_tokens,
-                    temperature=0.0,
+                    **openai_kwargs,
                 )
 
             elif decision.provider == "anthropic":
@@ -642,6 +889,7 @@ class LLMTieredRouter:
                     api_key=settings.anthropic_api_key,  # type: ignore[arg-type]
                     max_tokens=settings.llm_max_response_tokens,
                     temperature=0.0,
+                    max_retries=_provider_max_retries,
                 )
 
             else:
@@ -687,6 +935,14 @@ class LLMTieredRouter:
         try:
             from langchain_openai import ChatOpenAI
 
+            try:
+                _provider_max_retries = max(
+                    0,
+                    int(getattr(settings, "llm_provider_max_retries", 1) or 1),
+                )
+            except Exception:
+                _provider_max_retries = 1
+
             model_kwargs: dict = {
                 "max_completion_tokens": settings.llm_max_response_tokens,
             }
@@ -694,11 +950,17 @@ class LLMTieredRouter:
             if "o3" in decision.model_id:
                 model_kwargs["reasoning_effort"] = settings.llm_tier4_reasoning_effort
 
-            llm = ChatOpenAI(
-                model=decision.model_id,
-                api_key=settings.openai_api_key,  # type: ignore[arg-type]
-                model_kwargs=model_kwargs,
-            )
+            openai_kwargs: dict[str, object] = {
+                "model": decision.model_id,
+                "api_key": self._resolve_openai_api_key(),
+                "model_kwargs": model_kwargs,
+                "max_retries": _provider_max_retries,
+            }
+            openai_base_url = str(getattr(settings, "openai_base_url", "") or "").strip()
+            if openai_base_url:
+                openai_kwargs["base_url"] = openai_base_url
+
+            llm = ChatOpenAI(**openai_kwargs)
 
             logger.info(
                 "REASONING_LLM | model=%s | effort=%s | msg_chars=%d",

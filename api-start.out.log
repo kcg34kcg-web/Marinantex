@@ -1,0 +1,61 @@
+
+> @marinantex/api@0.1.0 start
+> node dist/main.js
+
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[NestFactory] [39m[32mStarting Nest application...[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mPrismaModule dependencies initialized[39m[38;5;3m +29ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mThrottlerModule dependencies initialized[39m[38;5;3m +4ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mJwtModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAuditModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mSecurityModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAppModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAuthModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mLibraryModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mShareLinksModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mDocumentsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mExportsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAppController {/}:[39m[38;5;3m +8ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/, GET} route[39m[38;5;3m +2ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/health, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAuthController {/auth}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/login, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/me, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mDocumentsController {/documents}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/versions, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/locks/current, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/locks/acquire, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/locks/refresh, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/locks/release, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/title, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/content, PATCH} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/autosave, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/status, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/snapshots, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/finalize, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/fork-draft, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mDocumentExportController {/documents}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/print-preview, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/exports/pdf, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/exports/docx, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/exports, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/exports/:exportId/signed-url, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:id/exports/:exportId/downloaded, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mTemplateController {/templates}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/templates, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/templates/:id, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/templates, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/templates/:id, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mClauseController {/clauses}:[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clauses, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clauses, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clauses/:id, PATCH} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mDocumentShareLinksController {/documents/:documentId/share-links}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:documentId/share-links, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:documentId/share-links, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/documents/:documentId/share-links/:shareLinkId/revoke, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mPublicShareLinksController {/share-links/public}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/share-links/public/:token, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 23828  - [39m28.02.2026 22:28:48 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/share-links/public/:token/comments, POST} route[39m[38;5;3m +0ms[39m

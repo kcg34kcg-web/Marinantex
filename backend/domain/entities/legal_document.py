@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, date
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 
 
 # ============================================================================
@@ -263,6 +263,40 @@ class LegalDocument:
     aym_karar_tarihi: Optional[date] = field(default=None)
     """Date of the AYM decision (not to be confused with the date the
     cancellation takes effect, which is iptal_yururluk_tarihi)."""
+
+    # ── Step 5/15: Segment + Anchor metadata ────────────────────────────────
+    segment_type: Optional[str] = field(default=None)
+    """Segment type for parent/child retrieval context: MADDE | FIKRA | BENT | ..."""
+
+    madde_no: Optional[str] = field(default=None)
+    """Article number extracted by ingest parser (e.g. '17', '17/A')."""
+
+    fikra_no: Optional[int] = field(default=None)
+    """Paragraph number within article (if available)."""
+
+    bent_no: Optional[str] = field(default=None)
+    """Sub-item letter within article/paragraph (if available)."""
+
+    citation_refs: List[str] = field(default_factory=list)
+    """Raw citation mentions found in this segment."""
+
+    source_anchor: Optional[str] = field(default=None)
+    """Human-readable source anchor for split-view navigation."""
+
+    page_no: Optional[int] = field(default=None)
+    """1-based page number for PDF/text renderers when available."""
+
+    char_start: Optional[int] = field(default=None)
+    """Character start offset in source document (0-based)."""
+
+    char_end: Optional[int] = field(default=None)
+    """Character end offset in source document (0-based, inclusive/exclusive by renderer)."""
+
+    injection_flag: bool = field(default=False)
+    """True when document text contained prompt-injection-like instructions."""
+
+    injection_notes: List[str] = field(default_factory=list)
+    """Matched injection/sanitization pattern labels used for audit evidence."""
 
     # ── Scoring (populated by hybrid_legal_search) ────────────────────────────
     semantic_score: float = field(default=0.0)

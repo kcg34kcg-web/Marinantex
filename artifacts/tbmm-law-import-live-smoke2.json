@@ -1,0 +1,32 @@
+{
+  "imported": {
+    "7538": {
+      "status": "ok",
+      "detailUrl": "https://www.tbmm.gov.tr/Yasama/Kanun/EF878609-056D-4758-A275-019363660385",
+      "kanunMetniUrl": "https://cdn.tbmm.gov.tr/KKBSPublicFile/D28/Y3/KanunMetni/7b38d86e-42ce-43e7-8e07-5dbe62d1cee7.htm",
+      "docId": "f89116c2-d17f-4b46-b2fb-465b3b14e797",
+      "segmentsCreated": 1,
+      "persistMode": "direct-existing",
+      "at": "2026-03-01T15:43:19.266Z"
+    },
+    "7539": {
+      "status": "ok",
+      "detailUrl": "https://www.tbmm.gov.tr/Yasama/Kanun/F1D6CC87-06F7-4BBB-BCE3-01945043D1AA",
+      "kanunMetniUrl": "https://cdn.tbmm.gov.tr/KKBSPublicFile/D28/Y3/KanunMetni/95cfd12a-af46-4c6e-a7fe-9f80c4d6a428.htm",
+      "docId": "528d0ddd-97df-46fc-9552-db9254f06b90",
+      "segmentsCreated": 1,
+      "persistMode": "direct-existing",
+      "at": "2026-03-01T15:43:20.105Z"
+    },
+    "7540": {
+      "status": "ok",
+      "detailUrl": "https://www.tbmm.gov.tr/Yasama/Kanun/D6A14FA8-BF9E-4E9B-BE58-0193DEE6C99A",
+      "kanunMetniUrl": "https://cdn.tbmm.gov.tr/KKBSPublicFile/D28/Y3/KanunMetni/7d52a54c-0b7b-402a-a70c-c3fb94f14293.htm",
+      "docId": "380afca8-6f9f-47fe-9c6b-47cb161347f3",
+      "segmentsCreated": 1,
+      "persistMode": "direct-existing",
+      "at": "2026-03-01T15:43:20.933Z"
+    }
+  },
+  "failed": {}
+}

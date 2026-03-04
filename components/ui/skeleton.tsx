@@ -1,7 +1,8 @@
+import type { CSSProperties } from 'react';
 import { cn } from '@/lib/utils';
 
 // ── Temel Skeleton: spinner yerine iskelet (bekleme psikolojisi yönetimi) ────────────────────────
-export function Skeleton({ className }: { className?: string }) {
+export function Skeleton({ className, style }: { className?: string; style?: CSSProperties }) {
   return (
     <div
       className={cn(
@@ -9,6 +10,7 @@ export function Skeleton({ className }: { className?: string }) {
         'bg-slate-200 dark:bg-slate-700 sepia:bg-[#E8D5B5]',
         className,
       )}
+      style={style}
     >
       <div className="absolute inset-0 animate-shimmer" />
     </div>

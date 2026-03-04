@@ -18,14 +18,16 @@ export function Tabs({ items }: TabsProps) {
 
   return (
     <div>
-      <div className="mb-4 flex gap-2 border-b border-border pb-2">
+      <div className="mb-4 flex gap-2 border-b border-[var(--border)] pb-2">
         {items.map((item) => (
           <button
             key={item.value}
             type="button"
             className={cn(
               'rounded-md px-3 py-2 text-sm font-medium',
-              active === item.value ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-100'
+              active === item.value
+                ? 'bg-[var(--primary)] text-white'
+                : 'text-[var(--secondary)] hover:bg-[color-mix(in_srgb,var(--surface),var(--primary)_8%)]'
             )}
             onClick={() => setActive(item.value)}
           >

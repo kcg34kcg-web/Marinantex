@@ -27,7 +27,7 @@ export default async function OfficePage({ searchParams }: OfficePageProps) {
   }
 
   const initialTab =
-    params.tab === 'team' || params.tab === 'documents' || params.tab === 'hmk' || params.tab === 'notifications'
+    params.tab === 'team' || params.tab === 'documents' || params.tab === 'hmk' || params.tab === 'notifications' || params.tab === 'feed'
       ? params.tab
       : undefined;
 

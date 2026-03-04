@@ -80,14 +80,20 @@ class TenantMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
+        def _attach_tenant(ctx: TenantContext) -> None:
+            # Backward compatibility: older routes read tenant_context,
+            # newer code reads tenant.
+            request.state.tenant = ctx
+            request.state.tenant_context = ctx
+
         # 1. Skip enforcement for health / docs paths
         if request.url.path in SKIP_PATHS:
-            request.state.tenant = TenantContext.anonymous()
+            _attach_tenant(TenantContext.anonymous())
             return await call_next(request)
 
         # 2. Multi-tenancy disabled globally → anonymous context for all
         if not settings.multi_tenancy_enabled:
-            request.state.tenant = TenantContext.anonymous()
+            _attach_tenant(TenantContext.anonymous())
             return await call_next(request)
 
         # 3. Extract raw bureau_id from headers
@@ -112,7 +118,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
                     },
                 )
             # Development mode — allow without bureau_id
-            request.state.tenant = TenantContext.anonymous()
+            _attach_tenant(TenantContext.anonymous())
             logger.debug(
                 "TENANT_ANONYMOUS | path=%s | dev_mode=True",
                 request.url.path,
@@ -138,7 +144,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
 
         # 6. Build and attach TenantContext
         tenant = tenant_extractor.from_headers(dict(request.headers))
-        request.state.tenant = tenant
+        _attach_tenant(tenant)
         logger.debug(
             "TENANT_OK | bureau_id=%s | user_id=%s | isolated=%s | path=%s",
             tenant.bureau_id, tenant.user_id, tenant.is_isolated,

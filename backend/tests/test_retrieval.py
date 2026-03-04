@@ -26,8 +26,12 @@ from unittest.mock import MagicMock, patch, AsyncMock
 from fastapi import HTTPException
 
 from infrastructure.retrieval.retrieval_client import (
+    SOURCE_TYPE_ICTIHAT,
+    SOURCE_TYPE_MEVZUAT,
+    SOURCE_TYPE_PLATFORM_BILGI,
     RetrieverClient,
     _filter_by_bureau,
+    infer_source_type,
     merge_must_cites,
     normalise_keyword_score,
     recompute_final_score,
@@ -451,6 +455,41 @@ class TestRetrieverClientSearch:
         call_kwargs = retriever._call_search_rpc.call_args.kwargs
         assert call_kwargs.get("event_date") == event
 
+    @pytest.mark.asyncio
+    async def test_legacy_kwargs_query_embedding_and_match_count_supported(self) -> None:
+        retriever = _make_retriever()
+        retriever._call_search_rpc = MagicMock(return_value=[_make_row("legacy-doc")])
+        retriever._call_must_cite_rpc = MagicMock(return_value=[])
+
+        result = await retriever.search(
+            query_embedding=EMBEDDING_512,
+            query_text="q",
+            case_id=None,
+            match_count=3,
+        )
+
+        assert [doc.id for doc in result] == ["legacy-doc"]
+        call_kwargs = retriever._call_search_rpc.call_args.kwargs
+        assert call_kwargs["embedding"] == EMBEDDING_512
+        assert call_kwargs["max_sources"] == 3
+
+    @pytest.mark.asyncio
+    async def test_public_get_must_cite_documents_method(self) -> None:
+        retriever = _make_retriever()
+        retriever._call_must_cite_rpc = MagicMock(return_value=[_make_row("mc-1")])
+
+        result = await retriever.get_must_cite_documents(
+            case_id="case-uuid",
+            limit=1,
+        )
+
+        assert len(result) == 1
+        assert result[0].id == "mc-1"
+        retriever._call_must_cite_rpc.assert_called_once_with(
+            case_id="case-uuid",
+            bureau_id=None,
+        )
+
 
 # ============================================================================
 # RetrieverClient.lehe_kanun_search â€” Step 4/10
@@ -599,3 +638,277 @@ class TestFilterByBureau:
                     bureau_id=None,
                 )
         assert any("TENANT_ISOLATION_BYPASS" in r.message for r in caplog.records)
+
+# ============================================================================
+# Step 13 — Belgesiz modda global hukuk korpusu zorunlu
+# ============================================================================
+
+class TestStep13GlobalLegalCorpus:
+    def test_infer_source_type_mevzuat(self) -> None:
+        doc = LegalDocument(
+            id="m-1",
+            content="Kanun metni",
+            norm_hierarchy="KANUN",
+        )
+        assert infer_source_type(doc) == SOURCE_TYPE_MEVZUAT
+
+    def test_infer_source_type_ictihat(self) -> None:
+        doc = LegalDocument(
+            id="i-1",
+            content="Yargitay karari",
+            court_level="YARGITAY_DAIRE",
+        )
+        assert infer_source_type(doc) == SOURCE_TYPE_ICTIHAT
+
+    def test_infer_source_type_platform_bilgi_fallback(self) -> None:
+        doc = LegalDocument(
+            id="p-1",
+            content="Platform bilgi notu",
+        )
+        assert infer_source_type(doc) == SOURCE_TYPE_PLATFORM_BILGI
+
+    @pytest.mark.asyncio
+    async def test_global_legal_search_filters_private_docs(self) -> None:
+        retriever = _make_retriever()
+        rows = [
+            _make_row(
+                "pub-mevzuat",
+                bureau_id=None,
+                norm_hierarchy="KANUN",
+                court_level=None,
+            ),
+            _make_row(
+                "pub-ictihat",
+                bureau_id=None,
+                norm_hierarchy=None,
+                court_level="YARGITAY_DAIRE",
+            ),
+            _make_row(
+                "private-doc",
+                bureau_id="bureau-A",
+                norm_hierarchy="KANUN",
+            ),
+        ]
+        retriever._call_search_rpc = MagicMock(return_value=rows)
+        retriever._call_must_cite_rpc = MagicMock(return_value=[])
+
+        result = await retriever.global_legal_search(
+            embedding=EMBEDDING_512,
+            query_text="isci alacagi faizi",
+            case_id=None,
+            max_sources=10,
+            min_score=0.0,
+            bureau_id="bureau-A",
+        )
+
+        ids = {d.id for d in result}
+        assert "pub-mevzuat" in ids
+        assert "pub-ictihat" in ids
+        assert "private-doc" not in ids
+
+    @pytest.mark.asyncio
+    async def test_global_legal_search_ignores_case_scope(self) -> None:
+        retriever = _make_retriever()
+        retriever._call_search_rpc = MagicMock(return_value=[_make_row("pub-only", bureau_id=None)])
+        retriever._call_must_cite_rpc = MagicMock(return_value=[])
+
+        await retriever.global_legal_search(
+            embedding=EMBEDDING_512,
+            query_text="borclar kanunu",
+            case_id="case-should-be-ignored",
+            max_sources=5,
+            min_score=0.0,
+        )
+
+        assert retriever._call_must_cite_rpc.call_count == 0
+        call_kwargs = retriever._call_search_rpc.call_args.kwargs
+        assert call_kwargs["case_id"] is None
+
+class TestSearchRpcSchemaCompatibility:
+    def test_call_search_rpc_schema_mismatch_uses_legacy_fallback(self) -> None:
+        retriever = _make_retriever()
+        mock_supabase = MagicMock()
+        mock_supabase.rpc.return_value.execute.side_effect = Exception(
+            "{'code': '42703', 'message': 'column d.search_vector does not exist'}"
+        )
+        retriever._legacy_table_search_fallback = MagicMock(
+            return_value=[_make_row("legacy-doc")]
+        )
+
+        with patch(
+            "infrastructure.retrieval.retrieval_client.get_supabase_client",
+            return_value=mock_supabase,
+        ):
+            rows = retriever._call_search_rpc(
+                embedding=EMBEDDING_512,
+                query_text="q",
+                case_id=None,
+                max_sources=5,
+            )
+
+        assert len(rows) == 1
+        assert rows[0]["id"] == "legacy-doc"
+        retriever._legacy_table_search_fallback.assert_called_once()
+
+    def test_call_search_rpc_non_schema_error_raises_503(self) -> None:
+        retriever = _make_retriever()
+        mock_supabase = MagicMock()
+        mock_supabase.rpc.return_value.execute.side_effect = Exception(
+            "{'code': 'XX000', 'message': 'unexpected backend error'}"
+        )
+
+        with patch(
+            "infrastructure.retrieval.retrieval_client.get_supabase_client",
+            return_value=mock_supabase,
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                retriever._call_search_rpc(
+                    embedding=EMBEDDING_512,
+                    query_text="q",
+                    case_id=None,
+                    max_sources=5,
+                )
+
+        assert exc_info.value.status_code == 503
+
+
+class TestSearchRrfNormalization:
+    @pytest.mark.asyncio
+    async def test_search_rrf_normalizes_raw_scores_before_min_score(self) -> None:
+        retriever = _make_retriever()
+        rows = [
+            _make_row(
+                "rrf-1",
+                bureau_id="bureau-A",
+                rrf_score_value=0.01639,
+                final_score=0.01639,
+            ),
+            _make_row(
+                "rrf-2",
+                bureau_id="bureau-A",
+                rrf_score_value=0.01000,
+                final_score=0.01000,
+            ),
+        ]
+        retriever._call_rrf_search_rpc = MagicMock(return_value=rows)
+        retriever._call_must_cite_rpc = MagicMock(return_value=[])
+
+        result = await retriever.search_rrf(
+            embedding=EMBEDDING_512,
+            query_text="isci alacagi",
+            case_id=None,
+            max_sources=8,
+            min_score=0.25,
+            bureau_id="bureau-A",
+        )
+
+        # min_score [0,1] must be applied on normalized RRF (top hit => 1.0)
+        assert len(result) == 2
+        assert result[0].id == "rrf-1"
+        assert result[0].final_score == pytest.approx(1.0, abs=1e-6)
+        assert result[1].id == "rrf-2"
+        assert 0.0 <= result[1].final_score <= 1.0
+
+    @pytest.mark.asyncio
+    async def test_search_rrf_min_score_can_filter_after_normalization(self) -> None:
+        retriever = _make_retriever()
+        rows = [
+            _make_row(
+                "rrf-top",
+                bureau_id="bureau-A",
+                rrf_score_value=0.01639,
+                final_score=0.01639,
+            ),
+            _make_row(
+                "rrf-low",
+                bureau_id="bureau-A",
+                rrf_score_value=0.00400,
+                final_score=0.00400,
+            ),
+        ]
+        retriever._call_rrf_search_rpc = MagicMock(return_value=rows)
+        retriever._call_must_cite_rpc = MagicMock(return_value=[])
+
+        result = await retriever.search_rrf(
+            embedding=EMBEDDING_512,
+            query_text="isci alacagi",
+            case_id=None,
+            max_sources=8,
+            min_score=0.50,
+            bureau_id="bureau-A",
+        )
+
+        assert [doc.id for doc in result] == ["rrf-top"]
+        assert result[0].final_score == pytest.approx(1.0, abs=1e-6)
+
+
+class TestSearchRrfFallbacks:
+    @pytest.mark.asyncio
+    async def test_search_rrf_empty_uses_legacy_fallback(self) -> None:
+        retriever = _make_retriever()
+        retriever._call_rrf_search_rpc = MagicMock(return_value=[])
+        retriever._legacy_table_search_fallback = MagicMock(
+            return_value=[
+                _make_row(
+                    "legacy-rrf-1",
+                    bureau_id="bureau-A",
+                    semantic_score=0.9,
+                    keyword_score=0.8,
+                    recency_score=0.5,
+                    hierarchy_score=0.5,
+                    final_score=0.9,
+                )
+            ]
+        )
+        retriever._call_must_cite_rpc = MagicMock(return_value=[])
+
+        result = await retriever.search_rrf(
+            embedding=EMBEDDING_512,
+            query_text="is kanunu madde 25",
+            case_id=None,
+            max_sources=8,
+            min_score=0.25,
+            bureau_id="bureau-A",
+        )
+
+        assert [doc.id for doc in result] == ["legacy-rrf-1"]
+        retriever._legacy_table_search_fallback.assert_called_once()
+
+
+class TestTurkishLexicalFold:
+    def test_quick_lexical_score_matches_ascii_and_diacritic_forms(self) -> None:
+        from infrastructure.retrieval import retrieval_client as rc
+
+        score = rc._quick_lexical_score(
+            "is kanunu hakli fesih",
+            "Is Kanunu ve isverenin hakli fesih sebepleri aciklanmistir.",
+        )
+        assert score > 0.0
+
+        score_tr = rc._quick_lexical_score(
+            "i? kanunu hakl? fesih",
+            "?? Kanunu ve i?verenin hakl? fesih sebepleri a??klanm??t?r.",
+        )
+        assert score_tr > 0.0
+
+
+class TestRowToLegalDocumentDateCoercion:
+    def test_timestamps_as_iso_string_are_parsed(self) -> None:
+        row = _make_row(
+            created_at="2025-02-01T12:34:56+00:00",
+            collected_at="2025-02-02T09:10:11Z",
+        )
+        doc = row_to_legal_document(row, final_score=0.5)
+
+        assert isinstance(doc.created_at, datetime)
+        assert isinstance(doc.collected_at, datetime)
+
+    def test_invalid_timestamp_string_becomes_none(self) -> None:
+        row = _make_row(
+            created_at="not-a-date",
+            collected_at="",
+        )
+        doc = row_to_legal_document(row, final_score=0.5)
+
+        assert doc.created_at is None
+        assert doc.collected_at is None

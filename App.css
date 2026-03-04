@@ -1,0 +1,18 @@
+.app-layout {
+  display: flex;
+  height: 100vh;
+  background-color: var(--bg-primary);
+}
+
+.app-content {
+  flex-grow: 1;
+  overflow-y: auto;
+  height: 100vh;
+}
+
+.app-content__inner {
+  /* Provides padding within the main content area */
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}

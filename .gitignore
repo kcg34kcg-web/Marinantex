@@ -1,13 +1,16 @@
 # Next.js
 .next
 out
+.turbo
 
 # Node
 node_modules
+npm-debug.log*
 
 # Env
 .env
 .env.local
+.env.*.local
 
 # Python venv
 .venv*/
@@ -17,3 +20,6 @@ venv*/
 # Build
 dist
 build
+coverage
+apps/*/.next
+apps/*/dist

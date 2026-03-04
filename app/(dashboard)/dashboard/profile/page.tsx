@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { AppearanceSettingsPanel } from '@/components/settings/appearance-settings-panel';
 
 const USERNAME_PATTERN = /^[a-z0-9._]+$/;
 
@@ -41,7 +42,7 @@ export default function ProfilePage() {
         const payload = (await response.json()) as ProfilePayload & { error?: string };
 
         if (!response.ok || !payload.profile) {
-          setMessage(payload.error ?? 'Profil bilgisi yüklenemedi.');
+          setMessage(payload.error ?? 'Profil bilgisi yuklenemedi.');
           setIsLoading(false);
           return;
         }
@@ -51,14 +52,14 @@ export default function ProfilePage() {
         setEmail(payload.profile.email ?? '');
         setRole(payload.profile.role ?? '');
       } catch {
-        setMessage('Profil bilgisi yüklenemedi.');
+        setMessage('Profil bilgisi yuklenemedi.');
       } finally {
         setIsLoading(false);
       }
     }
 
     loadProfile().catch(() => {
-      setMessage('Profil bilgisi yüklenemedi.');
+      setMessage('Profil bilgisi yuklenemedi.');
       setIsLoading(false);
     });
   }, []);
@@ -67,12 +68,12 @@ export default function ProfilePage() {
     event.preventDefault();
 
     if (fullName.trim().length < 2) {
-      setMessage('Ad soyad en az 2 karakter olmalı.');
+      setMessage('Ad soyad en az 2 karakter olmali.');
       return;
     }
 
     if (!usernameValid) {
-      setMessage('Kullanıcı adı sadece a-z, 0-9, . ve _ içerebilir; minimum 3 karakter olmalıdır.');
+      setMessage('Kullanici adi sadece a-z, 0-9, . ve _ icerebilir; minimum 3 karakter olmalidir.');
       return;
     }
 
@@ -92,7 +93,7 @@ export default function ProfilePage() {
       const payload = (await response.json()) as ProfilePayload & { error?: string };
 
       if (!response.ok || !payload.profile) {
-        setMessage(payload.error ?? 'Profil güncellenemedi.');
+        setMessage(payload.error ?? 'Profil guncellenemedi.');
         return;
       }
 
@@ -100,9 +101,9 @@ export default function ProfilePage() {
       setUsername(payload.profile.username ?? '');
       setEmail(payload.profile.email ?? email);
       setRole(payload.profile.role ?? role);
-      setMessage('Profil başarıyla güncellendi.');
+      setMessage('Profil basariyla guncellendi.');
     } catch {
-      setMessage('Profil güncellenemedi.');
+      setMessage('Profil guncellenemedi.');
     } finally {
       setIsSubmitting(false);
     }
@@ -110,23 +111,33 @@ export default function ProfilePage() {
 
   return (
     <main className="space-y-4">
-      <Card className="border-slate-200 shadow-sm">
+      <Card className="border-[var(--border)] shadow-sm">
         <CardHeader>
-          <CardTitle>Profil Ayarları</CardTitle>
-          <p className="text-sm text-slate-500">Ad soyad ve kullanıcı adı bilgilerinizi güncelleyin.</p>
+          <CardTitle>Profil Ayarlari</CardTitle>
+          <p className="text-sm text-[var(--secondary)]">Ad soyad ve kullanici adi bilgilerinizi guncelleyin.</p>
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <p className="text-sm text-slate-600">Yükleniyor...</p>
+            <p className="text-sm text-[var(--secondary)]">Yukleniyor...</p>
           ) : (
             <form onSubmit={saveProfile} className="space-y-3">
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Ad Soyad</label>
-                <Input value={fullName} onChange={(event) => setFullName(event.target.value)} minLength={2} maxLength={120} required />
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-[var(--secondary)]">
+                  Ad Soyad
+                </label>
+                <Input
+                  value={fullName}
+                  onChange={(event) => setFullName(event.target.value)}
+                  minLength={2}
+                  maxLength={120}
+                  required
+                />
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Kullanıcı Adı</label>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-[var(--secondary)]">
+                  Kullanici Adi
+                </label>
                 <Input
                   value={username}
                   onChange={(event) => setUsername(event.target.value.toLowerCase())}
@@ -134,26 +145,32 @@ export default function ProfilePage() {
                   minLength={3}
                   maxLength={40}
                 />
-                <p className="mt-1 text-xs text-slate-500">Opsiyonel. Sadece a-z, 0-9, . ve _ kullanın.</p>
+                <p className="mt-1 text-xs text-[var(--secondary)]">
+                  Opsiyonel. Sadece a-z, 0-9, . ve _ kullanin.
+                </p>
                 {usernameProvided && !usernameValid ? (
-                  <p className="mt-1 text-xs text-orange-600">Kullanıcı adı formatı geçersiz.</p>
+                  <p className="mt-1 text-xs text-[var(--warning)]">Kullanici adi formati gecersiz.</p>
                 ) : null}
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">E-Posta</label>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-[var(--secondary)]">
+                  E-Posta
+                </label>
                 <Input value={email} readOnly />
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Rol</label>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-[var(--secondary)]">
+                  Rol
+                </label>
                 <Input
-                  value={role === 'lawyer' ? 'Avukat' : role === 'assistant' ? 'Asistan' : role === 'client' ? 'Müvekkil' : '-'}
+                  value={role === 'lawyer' ? 'Avukat' : role === 'assistant' ? 'Asistan' : role === 'client' ? 'Muvekkil' : '-'}
                   readOnly
                 />
               </div>
 
-              {message ? <p className="text-sm text-slate-700">{message}</p> : null}
+              {message ? <p className="text-sm text-[var(--secondary)]">{message}</p> : null}
 
               <div className="flex justify-end">
                 <Button type="submit" disabled={isSubmitting || !usernameValid}>
@@ -164,6 +181,8 @@ export default function ProfilePage() {
           )}
         </CardContent>
       </Card>
+
+      <AppearanceSettingsPanel />
     </main>
   );
 }

@@ -106,13 +106,85 @@ jobs:
           path: backend/quality-report.json
           retention-days: 30
 
+  retrieval-quality-gate:
+    name: "Retrieval Quality Gate"
+    runs-on: ubuntu-latest
+    needs: pytest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run retrieval quality gate
+        env:
+          ENVIRONMENT: "test"
+        run: |
+          python scripts/retrieval_quality_gate.py --output retrieval-quality-report.json
+
+      - name: Upload retrieval quality report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrieval-quality-report
+          path: backend/retrieval-quality-report.json
+          retention-days: 30
+
+  security-regression-gate:
+    name: "Prompt Injection Regression Gate"
+    runs-on: ubuntu-latest
+    needs: pytest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run prompt injection regression gate
+        env:
+          ENVIRONMENT: "test"
+        run: |
+          python scripts/prompt_injection_regression.py --output prompt-injection-regression-report.json
+
+      - name: Upload prompt injection report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompt-injection-regression-report
+          path: backend/prompt-injection-regression-report.json
+          retention-days: 30
+
   # ──────────────────────────────────────────────────────────────────────────
   # JOB 3 — Pre-release strict gate (only on pushes to main)
   # ──────────────────────────────────────────────────────────────────────────
   quality-gate-strict:
     name: "RAGAS Quality Gate (Strict — pre-release)"
     runs-on: ubuntu-latest
-    needs: quality-gate
+    needs: [quality-gate, retrieval-quality-gate, security-regression-gate]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     defaults:
       run:

@@ -218,6 +218,14 @@ class RRFRetriever:
             settings.synonym_expansion_enabled,
         )
 
+    @staticmethod
+    def _lane_weight(value: object, default: float = 1.0) -> float:
+        try:
+            casted = float(value)
+        except Exception:
+            casted = default
+        return casted if casted > 0.0 else default
+
     async def search(
         self,
         embedding: List[float],
@@ -228,6 +236,7 @@ class RRFRetriever:
         event_date: Optional[date] = None,
         bureau_id: Optional[str] = None,
         law_domain: Optional[str] = None,
+        global_legal_only: bool = False,
     ) -> RRFSearchResult:
         """
         Hibrit RRF araması.
@@ -245,13 +254,23 @@ class RRFRetriever:
             bureau_id:   Büro izolasyonu (Step 6).
             law_domain:  Hukuk alanı kodu (Gap 2: CEZA/IDARI_CEZA/VERGI_CEZA için
                          domain-specific k=rrf_k_ceza kullanılır).
+            global_legal_only:
+                         Step 13 global corpus enforcement flag.
+                         True -> retriever.global_legal_search()
+                         False -> retriever.search()
 
         Returns:
             RRFSearchResult
         """
+        _search_fn = (
+            self._retriever.global_legal_search
+            if global_legal_only
+            else self._retriever.search
+        )
+
         # ── Fallback: RRF devre dışıysa sadece semantik ──────────────────
         if not settings.rrf_enabled:
-            docs = await self._retriever.search(
+            docs = await _search_fn(
                 embedding=embedding,
                 query_text=query_text,
                 case_id=case_id,
@@ -275,6 +294,68 @@ class RRFRetriever:
             if settings.synonym_expansion_enabled
             else query_text
         )
+        semantic_weight = self._lane_weight(
+            getattr(settings, "rrf_semantic_weight", 1.0),
+            default=1.0,
+        )
+        keyword_weight = self._lane_weight(
+            getattr(settings, "rrf_keyword_weight", 1.0),
+            default=1.0,
+        )
+
+        # Preferred path: DB-side weighted RRF fusion (single RPC).
+        if isinstance(self._retriever, RetrieverClient):
+            try:
+                rpc_query_text = expanded_query
+                rpc_docs = await self._retriever.search_rrf(
+                    embedding=embedding,
+                    query_text=rpc_query_text,
+                    case_id=case_id,
+                    max_sources=max_sources,
+                    min_score=min_score,
+                    event_date=event_date,
+                    bureau_id=bureau_id,
+                    law_domain=law_domain,
+                    semantic_weight=semantic_weight,
+                    keyword_weight=keyword_weight,
+                    global_legal_only=global_legal_only,
+                )
+                # Guardrail: synonym-expanded plain text can over-constrain
+                # plainto_tsquery() in some corpora. If expanded query yields
+                # no hits, retry once with the original query text.
+                if not rpc_docs and expanded_query != query_text:
+                    logger.warning(
+                        "RRF_RPC_EXPANDED_EMPTY_RETRY_ORIGINAL | query_len=%d | expanded_len=%d",
+                        len(query_text),
+                        len(expanded_query),
+                    )
+                    rpc_query_text = query_text
+                    rpc_docs = await self._retriever.search_rrf(
+                        embedding=embedding,
+                        query_text=rpc_query_text,
+                        case_id=case_id,
+                        max_sources=max_sources,
+                        min_score=min_score,
+                        event_date=event_date,
+                        bureau_id=bureau_id,
+                        law_domain=law_domain,
+                        semantic_weight=semantic_weight,
+                        keyword_weight=keyword_weight,
+                        global_legal_only=global_legal_only,
+                    )
+                return RRFSearchResult(
+                    documents=rpc_docs,
+                    rrf_scores={d.id: d.final_score for d in rpc_docs},
+                    semantic_count=len(rpc_docs),
+                    keyword_count=len(rpc_docs),
+                    expanded_query=rpc_query_text,
+                    fusion_applied=True,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "RRF_RPC_FALLBACK_TO_DUAL_SEARCH | reason=%s",
+                    exc,
+                )
 
         # ── Paralel arama ─────────────────────────────────────────────────
         # İstek 1: semantik vektör araması (tam embedding, orijinal sorgu)
@@ -282,7 +363,7 @@ class RRFRetriever:
         zero_vector = [0.0] * len(embedding)
 
         try:
-            semantic_task = self._retriever.search(
+            semantic_task = _search_fn(
                 embedding=embedding,
                 query_text=query_text,
                 case_id=case_id,
@@ -291,7 +372,7 @@ class RRFRetriever:
                 event_date=event_date,
                 bureau_id=bureau_id,
             )
-            keyword_task = self._retriever.search(
+            keyword_task = _search_fn(
                 embedding=zero_vector,
                 query_text=expanded_query,
                 case_id=case_id,
@@ -310,7 +391,7 @@ class RRFRetriever:
                 exc,
                 exc_info=True,
             )
-            docs = await self._retriever.search(
+            docs = await _search_fn(
                 embedding=embedding,
                 query_text=query_text,
                 case_id=case_id,
@@ -332,50 +413,23 @@ class RRFRetriever:
         # Gap 2: domain'e göre k sabiti — CEZA/IDARI_CEZA/VERGI_CEZA için
         # rrf_k_ceza (varsayılan 40) kullanılır; diğer domain'ler settings.rrf_k
         # (varsayılan 60) kullanır.  Düşük k → sıralama farkı daha belirgin.
-        k = (
-            settings.rrf_k_ceza
-            if law_domain in ("CEZA", "IDARI_CEZA", "VERGI_CEZA")
-            else self._k
-        )
-        fused = reciprocal_rank_fusion(
+        result_docs, rrf_score_map = self.fuse_ranked_lists(
             ranked_lists=[semantic_docs, keyword_docs],
-            k=k,
-            max_results=max_sources,
+            max_sources=max_sources,
+            min_score=min_score,
+            law_domain=law_domain,
+            lane_weights=[semantic_weight, keyword_weight],
         )
-
-        # Gap 1: Min-Score Filtresi (pre-RRF-overwrite) ──────────────────────
-        # Pre-fusion final_score (cosine ~[0,1] veya BM25 ~[0,∞]) min_score
-        # eşiğini karşılamayan belgeler elenir.  Bu adım, ölçek uyumsuzluğunu
-        # giderir: BM25 skoru cosine eşiğiyle doğrudan karşılaştırılmaz.
-        if min_score > 0.0:
-            fused = [
-                (doc, rrf) for doc, rrf in fused
-                if doc.final_score >= min_score
-            ]
-
-        # Gap 1: RRF Skor Normalizasyonu [0, 1] ─────────────────────────────
-        # Ham RRF değerleri ~[0, 1/k] aralığındadır (k=60 → max ≈ 0.016).
-        # Max-normalizasyon ile [0, 1]'e taşınır — downstream scoring ve UI
-        # ile ölçek tutarlılığı sağlanır.
-        _max_rrf = max((rrf for _, rrf in fused), default=1.0)
-        if _max_rrf > 0 and fused:
-            fused = [(doc, rrf / _max_rrf) for doc, rrf in fused]
-
-        # Normalize edilmiş RRF skoru belgeye yaz
-        for doc, rrf in fused:
-            doc.final_score = rrf
-
-        result_docs = [doc for doc, _ in fused]
-        rrf_score_map = {doc.id: rrf for doc, rrf in fused}
 
         logger.info(
             "RRF_SEARCH_COMPLETE | semantic=%d | keyword=%d | fused=%d | "
-            "query_len=%d | case_id=%s",
+            "query_len=%d | case_id=%s | global_only=%s",
             len(semantic_docs),
             len(keyword_docs),
-            len(fused),
+            len(result_docs),
             len(query_text),
             case_id,
+            global_legal_only,
         )
 
         return RRFSearchResult(
@@ -387,9 +441,71 @@ class RRFRetriever:
             fusion_applied=True,
         )
 
+    def fuse_ranked_lists(
+        self,
+        ranked_lists: List[List[LegalDocument]],
+        max_sources: int,
+        min_score: float = 0.0,
+        law_domain: Optional[str] = None,
+        lane_weights: Optional[List[float]] = None,
+    ) -> Tuple[List[LegalDocument], Dict[str, float]]:
+        """
+        Step 14 helper: fuse multiple ranked pools into a single ranked output.
+        """
+        weighted_lists: List[Tuple[List[LegalDocument], float]] = []
+        for idx, ranked in enumerate(ranked_lists):
+            if not ranked:
+                continue
+            weight = 1.0
+            if lane_weights and idx < len(lane_weights):
+                weight = self._lane_weight(lane_weights[idx], default=1.0)
+            weighted_lists.append((ranked, weight))
+
+        if not weighted_lists:
+            return [], {}
+
+        k = (
+            settings.rrf_k_ceza
+            if law_domain in ("CEZA", "IDARI_CEZA", "VERGI_CEZA")
+            else self._k
+        )
+        score_map: Dict[str, float] = {}
+        best_doc_map: Dict[str, LegalDocument] = {}
+        for ranked, lane_weight in weighted_lists:
+            for rank_idx, doc in enumerate(ranked, start=1):
+                contribution = lane_weight * rrf_score(rank_idx, k)
+                score_map[doc.id] = score_map.get(doc.id, 0.0) + contribution
+                existing = best_doc_map.get(doc.id)
+                if existing is None or doc.final_score >= existing.final_score:
+                    best_doc_map[doc.id] = doc
+
+        fused = sorted(
+            ((best_doc_map[doc_id], score) for doc_id, score in score_map.items()),
+            key=lambda x: x[1],
+            reverse=True,
+        )[:max_sources]
+
+        if min_score > 0.0:
+            fused = [(doc, rrf) for doc, rrf in fused if doc.final_score >= min_score]
+
+        max_rrf = max((rrf for _, rrf in fused), default=1.0)
+        if max_rrf > 0 and fused:
+            fused = [(doc, rrf / max_rrf) for doc, rrf in fused]
+
+        result_docs: List[LegalDocument] = []
+        rrf_score_map: Dict[str, float] = {}
+        for doc, rrf in fused:
+            doc.final_score = rrf
+            result_docs.append(doc)
+            rrf_score_map[doc.id] = rrf
+
+        return result_docs, rrf_score_map
+
 
 # ============================================================================
 # Module-level singleton
 # ============================================================================
 
 rrf_retriever = RRFRetriever()
+
+

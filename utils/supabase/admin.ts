@@ -10,7 +10,7 @@ export function createAdminClient() {
   }
 
   if (!serviceKey) {
-    throw new Error('Missing environment variable: SUPABASE_SERVICE_ROLE_KEY');
+    throw new Error('Missing environment variable: SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SERVICE_KEY');
   }
 
   return createClient(supabaseUrl, serviceKey, {

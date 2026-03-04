@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { logDashboardAudit } from '@/lib/dashboard/audit';
 
 const createBulkCaseTaskSchema = z.object({
   caseIds: z.array(z.string().uuid()).min(1).max(100),
@@ -57,6 +58,34 @@ export async function POST(request: Request) {
   if (error) {
     return Response.json({ error: 'Toplu görev oluşturulamadı.' }, { status: 500 });
   }
+
+  await admin.from('case_timeline_events').insert(
+    cases.map((item) => ({
+      case_id: item.id,
+      event_type: 'reminder',
+      title: 'Toplu görev oluşturuldu',
+      description: payload.title,
+      metadata: {
+        priority: payload.priority,
+        dueAt: payload.dueAt ?? null,
+        assignedTo: payload.assignedTo ?? access.userId,
+      },
+      created_by: access.userId,
+    }))
+  );
+
+  await logDashboardAudit(admin, {
+    actorUserId: access.userId,
+    action: 'case_task_bulk_created',
+    entityType: 'office_task',
+    entityId: null,
+    metadata: {
+      caseIds: payload.caseIds,
+      count: inserts.length,
+      priority: payload.priority,
+      dueAt: payload.dueAt ?? null,
+    },
+  });
 
   return Response.json({ createdCount: inserts.length });
 }

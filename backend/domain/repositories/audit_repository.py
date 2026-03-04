@@ -16,8 +16,8 @@ is persisted to the DB (not just logged to stdout).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from infrastructure.audit.audit_trail import LegalAuditEntry
@@ -50,6 +50,22 @@ class RAGASRecord:
     tier:               int
     source_count:       int
     bureau_id:          Optional[str]
+
+
+@dataclass(frozen=True)
+class ToolCallRecord:
+    """Matches the public.tool_call_log schema subset used by Step 10."""
+    request_id:      str
+    tool_name:       str
+    success:         bool
+    bureau_id:       Optional[str]
+    case_id:         Optional[str]
+    thread_id:       Optional[str]
+    error_message:   Optional[str] = None
+    query_text:      Optional[str] = None
+    input_params:    Dict[str, Any] = field(default_factory=dict)
+    result_json:     Dict[str, Any] = field(default_factory=dict)
+    latency_ms:      Optional[int] = None
 
 
 class IAuditRepository(ABC):
@@ -86,6 +102,15 @@ class IAuditRepository(ABC):
 
         The ragas_metrics_log row is linked to audit_log via request_id FK.
         Always called after save_audit_entry() to honour the FK constraint.
+        """
+
+    @abstractmethod
+    async def save_tool_call_records(self, records: List[ToolCallRecord]) -> None:
+        """
+        Persist one-or-more tool call records to public.tool_call_log.
+
+        request_id links each row back to audit_log so the full answer trace
+        can be reconstructed by audit_trail_id.
         """
 
     @abstractmethod

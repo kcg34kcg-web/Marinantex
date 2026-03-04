@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -40,6 +40,8 @@ type ClientDirectoryItem = {
   email: string | null;
   status: 'registered' | 'invited' | 'accepted';
   clientId: string | null;
+  fileNo?: string | null;
+  publicRefCode?: string | null;
 };
 
 type TaskTemplate = {
@@ -118,7 +120,7 @@ export default function CasesPage() {
   const [createCaseStep, setCreateCaseStep] = useState<1 | 2 | 3>(1);
   const [newCaseTitle, setNewCaseTitle] = useState('');
   const [newCaseStatus, setNewCaseStatus] = useState<CaseStatus>('open');
-  const [newCaseClientId, setNewCaseClientId] = useState('');
+  const [newCaseClientIds, setNewCaseClientIds] = useState<string[]>([]);
   const [newCaseClientDisplay, setNewCaseClientDisplay] = useState('');
   const [clientSearch, setClientSearch] = useState('');
   const [clientInviteFormOpen, setClientInviteFormOpen] = useState(false);
@@ -130,6 +132,7 @@ export default function CasesPage() {
   const [clientDetailContactName, setClientDetailContactName] = useState('');
   const [clientDetailEmail, setClientDetailEmail] = useState('');
   const [clientDetailPhone, setClientDetailPhone] = useState('');
+  const [clientDetailFileNo, setClientDetailFileNo] = useState('');
   const [clientDetailPartyType, setClientDetailPartyType] = useState<'' | 'plaintiff' | 'defendant' | 'consultant'>('');
   const [newCaseLawyerId, setNewCaseLawyerId] = useState('');
   const [newCaseTag, setNewCaseTag] = useState('');
@@ -153,6 +156,7 @@ export default function CasesPage() {
       clientDetailContactName.trim() ||
       clientDetailEmail.trim() ||
       clientDetailPhone.trim() ||
+      clientDetailFileNo.trim() ||
       clientDetailPartyType
   );
 
@@ -300,7 +304,7 @@ export default function CasesPage() {
 
   async function submitTask() {
     if (!taskModal || taskTitle.trim().length < 3) {
-      setActionMessage('Görev başlığı en az 3 karakter olmalı.');
+      setActionMessage('Görev başlangıcı en az 3 karakter olmalı.');
       return;
     }
 
@@ -363,7 +367,7 @@ export default function CasesPage() {
     }
 
     if (createInitialTask && initialTaskTitle.trim().length < 3) {
-      setActionMessage('İlk görev başlığı en az 3 karakter olmalı.');
+      setActionMessage('İlk görev başlığı en az 3 karakter olmalı. ');
       return;
     }
 
@@ -380,7 +384,8 @@ export default function CasesPage() {
         body: JSON.stringify({
           title: computedTitle,
           status: newCaseStatus,
-          clientId: newCaseClientId || undefined,
+          clientId: newCaseClientIds[0] || undefined,
+          clientIds: newCaseClientIds.length > 0 ? newCaseClientIds : undefined,
           lawyerId: newCaseLawyerId || undefined,
           autoCode: newCaseIncludeAutoCode,
           caseCode: !newCaseIncludeAutoCode ? undefined : null,
@@ -391,6 +396,7 @@ export default function CasesPage() {
             contactName: clientDetailContactName.trim() || undefined,
             email: clientDetailEmail.trim() || undefined,
             phone: clientDetailPhone.trim() || undefined,
+            fileNo: clientDetailFileNo.trim() || undefined,
             partyType: clientDetailPartyType || undefined,
           },
         }),
@@ -438,7 +444,7 @@ export default function CasesPage() {
       setCreateCaseStep(1);
       setNewCaseTitle('');
       setNewCaseStatus('open');
-      setNewCaseClientId('');
+      setNewCaseClientIds([]);
       setNewCaseClientDisplay('');
       setClientSearch('');
       setClientInviteFormOpen(false);
@@ -450,6 +456,7 @@ export default function CasesPage() {
       setClientDetailContactName('');
       setClientDetailEmail('');
       setClientDetailPhone('');
+      setClientDetailFileNo('');
       setClientDetailPartyType('');
       setNewCaseLawyerId('');
       setNewCaseTag('');
@@ -475,14 +482,14 @@ export default function CasesPage() {
     const label = item.fullName || item.email || 'İsimsiz müvekkil';
 
     if (item.type !== 'client' || !item.clientId) {
-      setActionMessage('Seçilen kayıt davet adayı. Dosyaya atama için kayıt tamamlandıktan sonra müvekkil profilini seçin.');
-      setNewCaseClientId('');
+      setActionMessage('Seçilen kayıt davet adayı. Dosyaya atama için kayıt tamamlandığında sonra müvekkil profilini seçin. ');
+      setNewCaseClientIds([]);
       setNewCaseClientDisplay(label);
       setClientSearch(label);
       return;
     }
 
-    setNewCaseClientId(item.clientId ?? '');
+    setNewCaseClientIds((previous) => (previous.includes(item.clientId as string) ? previous : [...previous, item.clientId as string]));
     setActionMessage(null);
     setNewCaseClientDisplay(label);
     setClientSearch(label);
@@ -527,7 +534,7 @@ export default function CasesPage() {
       }
 
       setActionMessage('Müvekkil daveti oluşturuldu. Kayıt tamamlanınca dosyaya atanabilir.');
-      setNewCaseClientId('');
+      setNewCaseClientIds([]);
       setNewCaseClientDisplay(clientInviteFullName.trim());
       setClientSearch(clientInviteFullName.trim());
       setClientInviteFormOpen(false);
@@ -646,16 +653,15 @@ export default function CasesPage() {
     }
   }, [initialTaskAssignedTo, newCaseLawyerId]);
 
-  const selectedClientName =
-    (newCaseClientId &&
-      (caseFormMeta?.clients.find((item) => item.id === newCaseClientId)?.fullName ??
-        clientDirectory.find((item) => item.type === 'client' && item.clientId === newCaseClientId)?.fullName ??
-        newCaseClientDisplay)) ||
-    null;
-  const selectedClientSummaryName = selectedClientName ?? clientDetailFullName.trim();
+  const selectedClientNames = newCaseClientIds.map((selectedId) => {
+    const fromMeta = caseFormMeta?.clients.find((item) => item.id === selectedId)?.fullName;
+    const fromDirectory = clientDirectory.find((item) => item.type === 'client' && item.clientId === selectedId)?.fullName;
+    return fromMeta ?? fromDirectory ?? selectedId;
+  });
+  const selectedClientSummaryName = selectedClientNames.length > 0 ? selectedClientNames.join(', ') : clientDetailFullName.trim();
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 text-[var(--text)] font-sans" style={{ fontFamily: 'Inter, system-ui, Avenir, Helvetica, Arial, sans-serif' }}>
       <Card className="border-slate-200 shadow-sm">
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -668,7 +674,7 @@ export default function CasesPage() {
               onClick={() => {
                 setCreateCaseModalOpen(true);
                 setCreateCaseStep(1);
-                setNewCaseClientId('');
+                setNewCaseClientIds([]);
                 setNewCaseClientDisplay('');
                 setClientSearch('');
                 setClientInviteFormOpen(false);
@@ -680,6 +686,7 @@ export default function CasesPage() {
                 setClientDetailContactName('');
                 setClientDetailEmail('');
                 setClientDetailPhone('');
+                setClientDetailFileNo('');
                 setClientDetailPartyType('');
                 if (!newCaseLawyerId) {
                   const currentLawyer = caseFormMeta?.lawyers.find((lawyer) =>
@@ -928,7 +935,23 @@ export default function CasesPage() {
                               ) : null}
                             </div>
                           </td>
-                          <td className="px-4 py-3">{item.clientName}</td>
+                          <td className="px-4 py-3">
+                            {item.clients && item.clients.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {item.clients.map((client) => (
+                                  <Link
+                                    key={`${item.id}-${client.id}`}
+                                    href={`/dashboard/clients/${client.id}` as Route}
+                                    className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:underline"
+                                  >
+                                    {client.fullName}
+                                  </Link>
+                                ))}
+                              </div>
+                            ) : (
+                              item.clientName
+                            )}
+                          </td>
                           <td className="px-4 py-3">
                             <Badge variant={getStatusVariant(item.status)}>{getStatusLabel(item.status)}</Badge>
                           </td>
@@ -965,7 +988,7 @@ export default function CasesPage() {
                                 disabled={isApplyingAction || isFetching}
                                 onClick={() => {
                                   handleCreateCaseTask(item.id, item.title).catch(() => {
-                                    setActionMessage('Görev formu açılamadı.');
+                                    setActionMessage('Görev formu oluşturulamadı.');
                                   });
                                 }}
                               >
@@ -1101,7 +1124,7 @@ export default function CasesPage() {
 
       {createCaseModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-xl flex flex-col">
             <h3 className="text-base font-semibold text-slate-900">Gelişmiş Dosya Ekle</h3>
             <p className="mt-1 text-sm text-slate-600">Başlık, durum, atama ve onay adımlarıyla yeni dosya oluşturun.</p>
 
@@ -1253,9 +1276,12 @@ export default function CasesPage() {
                     </div>
                   </div>
 
-                  {newCaseClientDisplay ? (
+                  {newCaseClientIds.length > 0 || newCaseClientDisplay ? (
                     <p className="text-xs text-slate-600">
-                      Seçili müvekkil: <span className="font-medium text-slate-800">{newCaseClientDisplay}</span>
+                      Seçili müvekkil(ler):{' '}
+                      <span className="font-medium text-slate-800">
+                        {selectedClientNames.length > 0 ? selectedClientNames.join(', ') : newCaseClientDisplay}
+                      </span>
                     </p>
                   ) : null}
 
@@ -1295,14 +1321,14 @@ export default function CasesPage() {
                     )}
                   </div>
 
-                  {newCaseClientId ? (
+                  {newCaseClientIds.length > 0 ? (
                     <div className="flex justify-end">
                       <Button
                         type="button"
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          setNewCaseClientId('');
+                          setNewCaseClientIds([]);
                           setNewCaseClientDisplay('');
                           setClientSearch('');
                         }}
@@ -1381,6 +1407,10 @@ export default function CasesPage() {
                       <div>
                         <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Telefon</label>
                         <Input value={clientDetailPhone} onChange={(event) => setClientDetailPhone(event.target.value)} placeholder="Örn: 05xx xxx xx xx" />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Dosya No</label>
+                        <Input value={clientDetailFileNo} onChange={(event) => setClientDetailFileNo(event.target.value)} placeholder="Örn: 2026/145" />
                       </div>
                       <div>
                         <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Taraf Tipi</label>
@@ -1506,7 +1536,7 @@ export default function CasesPage() {
                     setCreateCaseStep(1);
                     setNewCaseTitle('');
                     setNewCaseStatus('open');
-                    setNewCaseClientId('');
+                    setNewCaseClientIds([]);
                     setNewCaseClientDisplay('');
                     setClientSearch('');
                     setClientInviteFormOpen(false);
@@ -1518,12 +1548,13 @@ export default function CasesPage() {
                     setClientDetailContactName('');
                     setClientDetailEmail('');
                     setClientDetailPhone('');
+                    setClientDetailFileNo('');
                     setClientDetailPartyType('');
                     setNewCaseLawyerId('');
                     setNewCaseTag('');
                     setNewCaseIncludeAutoCode(true);
                     setCreateInitialTask(false);
-                    setInitialTaskTitle('İlk Dosya Takip Görevi');
+                    setInitialTaskTitle('ilk Dosya Takip Görevi');
                     setInitialTaskPriority('normal');
                     setInitialTaskDueAt('');
                     setInitialTaskAssignedTo('');
@@ -1571,7 +1602,7 @@ export default function CasesPage() {
 
             <div className="mt-3 space-y-3">
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Hızlı Şablon</label>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Hızlı şablon</label>
                 <div className="flex flex-wrap gap-2">
                   {TASK_TEMPLATES.map((template) => (
                     <button
@@ -1591,8 +1622,8 @@ export default function CasesPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Görev Başlığı</label>
-                <Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Görev başlığı" />
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Görev Başlangıcı</label>
+                <Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Görev başlangıcı" />
               </div>
 
               <div className="grid grid-cols-1 gap-2 md:grid-cols-3">

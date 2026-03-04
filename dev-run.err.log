@@ -1,0 +1,4 @@
+time="2026-03-01T03:19:18+03:00" level=warning msg="No services to build"
+ Container marinantex-postgres Running 
+ Container marinantex-redis Running 
+ Container marinantex-minio Running 

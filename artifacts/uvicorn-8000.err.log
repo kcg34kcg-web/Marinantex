@@ -1,0 +1,1004 @@
+C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_id" in CostEstimateSchema has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_used" in AuditTrailSchema has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_used" in AuditTraceResponseSchema has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_used" in RAGResponse has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+INFO:     Started server process [35264]
+INFO:     Waiting for application startup.
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f680' in position 42: character maps to <undefined>
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\__main__.py", line 4, in <module>
+    uvicorn.main()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1406, in main
+    rv = self.invoke(ctx)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 412, in main
+    run(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 579, in run
+    server.run()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 678, in run_until_complete
+    self.run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 645, in run_forever
+    self._run_once()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1999, in _run_once
+    handle._run()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 86, in main
+    await app(scope, self.receive, self.send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 29, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\errors.py", line 152, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\cors.py", line 77, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 48, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 724, in app
+    await self.lifespan(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\api\main.py", line 56, in lifespan
+    logger.info("\U0001f680 Babylexit v3.0 - 'Sovereign' Legal Engine Starting...")
+Message: "\U0001f680 Babylexit v3.0 - 'Sovereign' Legal Engine Starting..."
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 51: character maps to <undefined>
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\__main__.py", line 4, in <module>
+    uvicorn.main()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1406, in main
+    rv = self.invoke(ctx)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 412, in main
+    run(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 579, in run
+    server.run()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 678, in run_until_complete
+    self.run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 645, in run_forever
+    self._run_once()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1999, in _run_once
+    handle._run()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 86, in main
+    await app(scope, self.receive, self.send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 29, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\errors.py", line 152, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\cors.py", line 77, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 48, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 724, in app
+    await self.lifespan(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\api\main.py", line 65, in lifespan
+    postgres_pool = await init_postgres_pool()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\infrastructure\database\connection.py", line 75, in init_postgres_pool
+    logger.info("\u2705 Postgres pool created (min: 5, max: 20 connections)")
+Message: '\u2705 Postgres pool created (min: 5, max: 20 connections)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 42: character maps to <undefined>
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\__main__.py", line 4, in <module>
+    uvicorn.main()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1406, in main
+    rv = self.invoke(ctx)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 412, in main
+    run(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 579, in run
+    server.run()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 678, in run_until_complete
+    self.run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 645, in run_forever
+    self._run_once()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1999, in _run_once
+    handle._run()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 86, in main
+    await app(scope, self.receive, self.send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 29, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\errors.py", line 152, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\cors.py", line 77, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 48, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 724, in app
+    await self.lifespan(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\api\main.py", line 67, in lifespan
+    logger.info("\u2705 Postgres connection pool initialized (LangGraph checkpointer ready)")
+Message: '\u2705 Postgres connection pool initialized (LangGraph checkpointer ready)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 48: character maps to <undefined>
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\__main__.py", line 4, in <module>
+    uvicorn.main()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1406, in main
+    rv = self.invoke(ctx)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 412, in main
+    run(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 579, in run
+    server.run()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 678, in run_until_complete
+    self.run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 645, in run_forever
+    self._run_once()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1999, in _run_once
+    handle._run()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 86, in main
+    await app(scope, self.receive, self.send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 29, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\errors.py", line 152, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\cors.py", line 77, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 48, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 724, in app
+    await self.lifespan(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\api\main.py", line 76, in lifespan
+    await redis_client.connect()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\infrastructure\cache\redis_client.py", line 47, in connect
+    logger.info("\u2705 Redis connected successfully")
+Message: '\u2705 Redis connected successfully'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 42: character maps to <undefined>
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\__main__.py", line 4, in <module>
+    uvicorn.main()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1406, in main
+    rv = self.invoke(ctx)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 412, in main
+    run(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 579, in run
+    server.run()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 678, in run_until_complete
+    self.run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 645, in run_forever
+    self._run_once()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1999, in _run_once
+    handle._run()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 86, in main
+    await app(scope, self.receive, self.send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 29, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\errors.py", line 152, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\cors.py", line 77, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 48, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 724, in app
+    await self.lifespan(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\api\main.py", line 78, in lifespan
+    logger.info("\u2705 Redis client connected (cache layer ready)")
+Message: '\u2705 Redis client connected (cache layer ready)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 51: character maps to <undefined>
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\__main__.py", line 4, in <module>
+    uvicorn.main()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1406, in main
+    rv = self.invoke(ctx)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 412, in main
+    run(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 579, in run
+    server.run()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 678, in run_until_complete
+    self.run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 645, in run_forever
+    self._run_once()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1999, in _run_once
+    handle._run()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 86, in main
+    await app(scope, self.receive, self.send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 29, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\errors.py", line 152, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\cors.py", line 77, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 48, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 724, in app
+    await self.lifespan(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\api\main.py", line 85, in lifespan
+    supabase_client = get_supabase_client()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\infrastructure\database\connection.py", line 40, in get_supabase_client
+    logger.info("\u2705 Supabase client initialized")
+Message: '\u2705 Supabase client initialized'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 42: character maps to <undefined>
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\__main__.py", line 4, in <module>
+    uvicorn.main()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1406, in main
+    rv = self.invoke(ctx)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 412, in main
+    run(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 579, in run
+    server.run()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 678, in run_until_complete
+    self.run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 645, in run_forever
+    self._run_once()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1999, in _run_once
+    handle._run()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 86, in main
+    await app(scope, self.receive, self.send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 29, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\errors.py", line 152, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\cors.py", line 77, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 48, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 724, in app
+    await self.lifespan(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\api\main.py", line 87, in lifespan
+    logger.info("\u2705 Supabase client initialized (knowledge base ready)")
+Message: '\u2705 Supabase client initialized (knowledge base ready)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 42: character maps to <undefined>
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\__main__.py", line 4, in <module>
+    uvicorn.main()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1406, in main
+    rv = self.invoke(ctx)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 412, in main
+    run(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 579, in run
+    server.run()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 678, in run_until_complete
+    self.run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 645, in run_forever
+    self._run_once()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1999, in _run_once
+    handle._run()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 86, in main
+    await app(scope, self.receive, self.send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 29, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\errors.py", line 152, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\cors.py", line 77, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 48, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 724, in app
+    await self.lifespan(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\api\main.py", line 96, in lifespan
+    logger.info("\u2705 Audit trail DB persistence enabled (SupabaseAuditRepository wired)")
+Message: '\u2705 Audit trail DB persistence enabled (SupabaseAuditRepository wired)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 55: character maps to <undefined>
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\__main__.py", line 4, in <module>
+    uvicorn.main()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1406, in main
+    rv = self.invoke(ctx)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 412, in main
+    run(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 579, in run
+    server.run()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 678, in run_until_complete
+    self.run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 645, in run_forever
+    self._run_once()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1999, in _run_once
+    handle._run()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 86, in main
+    await app(scope, self.receive, self.send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 29, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\errors.py", line 152, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\cors.py", line 77, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 48, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 724, in app
+    await self.lifespan(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\api\main.py", line 104, in lifespan
+    await checkpointer.setup()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\infrastructure\agents\checkpoint.py", line 104, in setup
+    logger.info("\u2705 Checkpoint table '%s' ready", self.table_name)
+Message: "\u2705 Checkpoint table '%s' ready"
+Arguments: ('langgraph_checkpoints',)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 42: character maps to <undefined>
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\__main__.py", line 4, in <module>
+    uvicorn.main()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1406, in main
+    rv = self.invoke(ctx)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 412, in main
+    run(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 579, in run
+    server.run()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 678, in run_until_complete
+    self.run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 645, in run_forever
+    self._run_once()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1999, in _run_once
+    handle._run()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 86, in main
+    await app(scope, self.receive, self.send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 29, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\errors.py", line 152, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\cors.py", line 77, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 48, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 724, in app
+    await self.lifespan(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\api\main.py", line 106, in lifespan
+    logger.info("\u2705 LangGraph checkpointer initialized (audit trail ready)")
+Message: '\u2705 LangGraph checkpointer initialized (audit trail ready)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f3af' in position 42: character maps to <undefined>
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\__main__.py", line 4, in <module>
+    uvicorn.main()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1406, in main
+    rv = self.invoke(ctx)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 412, in main
+    run(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 579, in run
+    server.run()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 678, in run_until_complete
+    self.run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 645, in run_forever
+    self._run_once()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1999, in _run_once
+    handle._run()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 86, in main
+    await app(scope, self.receive, self.send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 29, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\errors.py", line 152, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 101, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\cors.py", line 77, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 48, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 724, in app
+    await self.lifespan(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\api\main.py", line 112, in lifespan
+    logger.info("\U0001f3af API started. Privacy-first gateway active.")
+Message: '\U0001f3af API started. Privacy-first gateway active.'
+Arguments: ()
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\infrastructure\retrieval\retrieval_client.py", line 1150, in _call_search_rpc
+    ).execute()
+      ^^^^^^^^^
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\postgrest\_sync\request_builder.py", line 127, in execute
+    raise APIError(r.json())
+postgrest.exceptions.APIError: {'code': '42804', 'details': 'Returned type real does not match expected type double precision in column 28.', 'hint': None, 'message': 'structure of query does not match function result type'}
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\infrastructure\search\rrf_retriever.py", line 360, in search
+    semantic_docs, keyword_docs = await asyncio.gather(
+                                  ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\infrastructure\retrieval\retrieval_client.py", line 759, in global_legal_search
+    documents = await self.search(
+                ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\infrastructure\retrieval\retrieval_client.py", line 702, in search
+    raw_rows = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\infrastructure\retrieval\retrieval_client.py", line 1167, in _call_search_rpc
+    raise HTTPException(
+fastapi.exceptions.HTTPException: 503: {'error': 'RETRIEVAL_FAILED', 'message': "Veritaban\u0131 eri\u015fimi ba\u015far\u0131s\u0131z: {'code': '42804', 'details': 'Returned type real does not match expected type double precision in column 28.', 'hint': None, 'message': 'structure of query does not match function result type'}"}
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u0131' in position 165: character maps to <undefined>
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\__main__.py", line 4, in <module>
+    uvicorn.main()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1406, in main
+    rv = self.invoke(ctx)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\click\core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 412, in main
+    run(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\main.py", line 579, in run
+    server.run()
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 678, in run_until_complete
+    self.run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 645, in run_forever
+    self._run_once()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1999, in _run_once
+    handle._run()
+  File "C:\Users\kcg34\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\_exception_handler.py", line 51, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 735, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\_exception_handler.py", line 51, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\starlette\routing.py", line 73, in app
+    response = await f(request)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 301, in app
+    raw_response = await run_endpoint_function(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\.venv\Lib\site-packages\fastapi\routing.py", line 212, in run_endpoint_function
+    return await dependant.call(**values)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\api\routes\rag.py", line 212, in rag_query
+    return await _rag_use_case.execute_for_api(dto)
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\application\use_cases\query_legal_rag.py", line 427, in execute_for_api
+    rag_response = await _service.query(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\application\services\rag_service.py", line 750, in query
+    rrf_result = await self._rrf.search(
+  File "C:\Users\kcg34\OneDrive\Masaüstü\Marinantex\backend\infrastructure\search\rrf_retriever.py", line 365, in search
+    logger.error(
+Message: 'RRF dual-search failed, falling back to semantic-only: %s'
+Arguments: (HTTPException(status_code=503, detail={'error': 'RETRIEVAL_FAILED', 'message': "Veritaban\u0131 eri\u015fimi ba\u015far\u0131s\u0131z: {'code': '42804', 'details': 'Returned type real does not match expected type double precision in column 28.', 'hint': None, 'message': 'structure of query does not match function result type'}"}),)

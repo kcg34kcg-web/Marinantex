@@ -1,4 +1,4 @@
-import { requireInternalOfficeUser } from '@/lib/office/team-access';
+﻿import { requireInternalOfficeUser } from '@/lib/office/team-access';
 
 export async function GET() {
   const access = await requireInternalOfficeUser();
@@ -19,12 +19,17 @@ export async function GET() {
       .in('status', ['open', 'in_progress'])
       .gte('due_at', startOfDay)
       .lt('due_at', endOfDay),
-    supabase.from('documents').select('id', { count: 'exact', head: true }).gte('created_at', startOfDay),
+    supabase.from('case_documents').select('id', { count: 'exact', head: true }).gte('created_at', startOfDay).is('deleted_at', null),
     supabase.from('office_thread_members').select('thread_id, last_read_at').eq('user_id', access.userId),
   ]);
 
-  if (pendingTasksResult.error || dueTodayTasksResult.error || documentsTodayResult.error || membershipsResult.error) {
-    return Response.json({ error: 'Office özet verileri alınamadı.' }, { status: 500 });
+  const fallbackDocumentsTodayResult =
+    documentsTodayResult.error?.code === '42P01'
+      ? await supabase.from('documents').select('id', { count: 'exact', head: true }).gte('created_at', startOfDay)
+      : documentsTodayResult;
+
+  if (pendingTasksResult.error || dueTodayTasksResult.error || fallbackDocumentsTodayResult.error || membershipsResult.error) {
+    return Response.json({ error: 'Office ozet verileri alinamadi.' }, { status: 500 });
   }
 
   const memberships = membershipsResult.data ?? [];
@@ -54,7 +59,7 @@ export async function GET() {
       dueTodayTasks: dueTodayTasksResult.count ?? 0,
       unreadMessages,
       unreadThreads,
-      documentsToday: documentsTodayResult.count ?? 0,
+      documentsToday: fallbackDocumentsTodayResult.count ?? 0,
     },
   });
 }

@@ -60,6 +60,7 @@ def _make_embedder(
         mock_settings.embedding_batch_size = batch_size
         mock_settings.embedding_max_retries = max_retries
         mock_settings.embedding_retry_base_delay_s = retry_base_delay
+        mock_settings.embedding_quota_cooldown_s = 120
         return QueryEmbedder()
 
 
@@ -274,6 +275,53 @@ class TestEmbedRetry:
         assert mock_create.call_count == 1
         assert exc_info.value.status_code == 503
         assert exc_info.value.detail["error"] == "EMBEDDING_CLIENT_ERROR"
+
+    @pytest.mark.asyncio
+    async def test_insufficient_quota_fails_fast_without_retry(self) -> None:
+        from openai import RateLimitError
+
+        embedder = _make_embedder(max_retries=3, retry_base_delay=0.0)
+
+        quota_err = RateLimitError(
+            "insufficient_quota",
+            response=MagicMock(status_code=429),
+            body={"error": {"code": "insufficient_quota", "type": "insufficient_quota"}},
+        )
+        always_fail = AsyncMock(side_effect=quota_err)
+
+        with patch.object(embedder._client.embeddings, "create", new=always_fail):
+            with pytest.raises(HTTPException) as exc_info:
+                await embedder._embed_with_retry(["query"])
+
+        assert exc_info.value.status_code == 503
+        assert exc_info.value.detail["error"] == "EMBEDDING_QUOTA_EXHAUSTED"
+        # No exponential retry loop on hard quota exhaustion.
+        assert always_fail.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_quota_cooldown_short_circuits_followup_calls(self) -> None:
+        from openai import RateLimitError
+
+        embedder = _make_embedder(max_retries=3, retry_base_delay=0.0)
+
+        quota_err = RateLimitError(
+            "insufficient_quota",
+            response=MagicMock(status_code=429),
+            body={"error": {"code": "insufficient_quota"}},
+        )
+        mock_create = AsyncMock(side_effect=quota_err)
+
+        with patch.object(embedder._client.embeddings, "create", new=mock_create):
+            # First call marks cooldown.
+            with pytest.raises(HTTPException) as first_exc:
+                await embedder._embed_with_retry(["query"])
+            assert first_exc.value.detail["error"] == "EMBEDDING_QUOTA_EXHAUSTED"
+
+            # Second call must fail before touching SDK.
+            with pytest.raises(HTTPException) as second_exc:
+                await embedder._embed_with_retry(["query"])
+            assert second_exc.value.detail["error"] == "EMBEDDING_QUOTA_COOLDOWN"
+            assert mock_create.call_count == 1
 
 
 # ============================================================================

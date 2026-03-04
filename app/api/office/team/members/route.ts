@@ -18,12 +18,25 @@ export async function GET() {
     return Response.json({ error: 'Ekip üyeleri alınamadı.' }, { status: 500 });
   }
 
+  const memberIds = (data ?? []).map((item) => item.id);
+  const recentThreshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const recentMessagesResult = memberIds.length
+    ? await admin
+        .from('office_messages')
+        .select('sender_id, created_at')
+        .in('sender_id', memberIds)
+        .gte('created_at', recentThreshold)
+    : { data: [], error: null };
+
+  const onlineMemberIdSet = new Set((recentMessagesResult.data ?? []).map((item) => item.sender_id));
+
   return Response.json({
     members: (data ?? []).map((item) => ({
       id: item.id,
-      fullName: item.full_name,
+      fullName: item.full_name ?? 'Isimsiz Kullanici',
       role: item.role,
       isCurrentUser: item.id === access.userId,
+      isOnline: onlineMemberIdSet.has(item.id),
     })),
   });
 }

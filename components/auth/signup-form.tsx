@@ -69,7 +69,7 @@ export function SignupForm({ inviteToken, prefilledEmail, prefilledFullName, pre
 
       {state.error ? <p className="text-sm text-orange-600">{state.error}</p> : null}
 
-      <Button variant="accent" className="w-full" disabled={isPending}>
+      <Button type="submit" variant="accent" className="w-full" disabled={isPending}>
         {isPending ? 'Kayıt oluşturuluyor...' : 'Kayıt Ol'}
       </Button>
     </form>

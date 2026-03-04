@@ -437,6 +437,33 @@ class TestAuditTrailRecorder:
         entry = _record_entry()
         assert verify_entry(entry) is True
 
+    def test_step22_hybrid_fields_are_recorded(self):
+        entry = audit_recorder.record(
+            query="test",
+            bureau_id=None,
+            tier=3,
+            tier_reason="step22",
+            model_used="openai/gpt-4o",
+            final_model="openai/gpt-4o",
+            final_generation_tier=3,
+            subtask_models=[
+                "intent_classifier/local-rules",
+                "query_rewriter/openai/gpt-4o-mini",
+            ],
+            source_docs=[_make_mock_doc()],
+            tool_calls=[],
+            grounding_ratio=1.0,
+            disclaimer_severity="INFO",
+            latency_ms=10,
+            cost_estimate_usd=0.001,
+        )
+        assert entry.final_model == "openai/gpt-4o"
+        assert entry.final_generation_tier == 3
+        assert entry.subtask_models == [
+            "intent_classifier/local-rules",
+            "query_rewriter/openai/gpt-4o-mini",
+        ]
+
 
 # ============================================================================
 # F — Schema validation
@@ -493,8 +520,11 @@ class TestSchemaValidation:
             request_id=str(uuid.uuid4()),
             timestamp_utc=datetime.now(tz=timezone.utc),
             query_hash=sha256_hex("query"),
+            final_generation_tier=1,
             tier=1,
+            final_model="groq/llama-3.3-70b-versatile",
             model_used="groq/llama-3.3-70b-versatile",
+            subtask_models=["intent_classifier/local-rules"],
             source_count=2,
             grounding_ratio=1.0,
             disclaimer_severity="INFO",

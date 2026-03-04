@@ -108,6 +108,9 @@ class TenantContext:
     bureau_id: Optional[str]
     user_id: Optional[str]
     access_level: AccessLevel
+    plan_tier: str = "FREE"
+    messages_today: Optional[int] = None
+    tokens_used_month: Optional[int] = None
     is_service_account: bool = False
 
     @classmethod
@@ -123,6 +126,7 @@ class TenantContext:
             bureau_id=None,
             user_id=None,
             access_level=AccessLevel.READ_ONLY,
+            plan_tier="FREE",
         )
 
     @classmethod
@@ -138,6 +142,7 @@ class TenantContext:
             bureau_id=None,
             user_id=None,
             access_level=AccessLevel.OWNER,
+            plan_tier="ENTERPRISE",
             is_service_account=True,
         )
 

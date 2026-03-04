@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
 import { publishOfficeNotification } from '@/lib/office/notifications';
+import { createAdminClient } from '@/utils/supabase/admin';
+import { logDashboardAudit } from '@/lib/dashboard/audit';
 
 const sendMessageSchema = z.object({
   threadId: z.string().uuid(),
@@ -54,20 +56,44 @@ export async function POST(request: Request) {
 
   const payload = parsed.data;
 
-  const { data, error } = await access.supabase
-    .from('office_messages')
-    .insert({
-      thread_id: payload.threadId,
-      sender_id: access.userId,
-      body: payload.body,
-      metadata: payload.metadata ?? {},
-    })
-    .select('id, thread_id, sender_id, body, metadata, is_deleted, edited_at, created_at')
-    .single();
+  let insertResponse: { data: { id: string } | null; error: { message?: string } | null } | null = null;
+  let lastErrorMessage: string | null = null;
 
-  if (error || !data) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const response = await access.supabase
+      .from('office_messages')
+      .insert({
+        thread_id: payload.threadId,
+        sender_id: access.userId,
+        body: payload.body,
+        metadata: { ...(payload.metadata ?? {}), retryAttempt: attempt },
+      })
+      .select('id, thread_id, sender_id, body, metadata, is_deleted, edited_at, created_at')
+      .single();
+
+    insertResponse = response;
+    if (!response.error && response.data) {
+      break;
+    }
+
+    lastErrorMessage = response.error?.message ?? 'Mesaj insert hatası';
+  }
+
+  if (!insertResponse || insertResponse.error || !insertResponse.data) {
+    const admin = createAdminClient();
+    await logDashboardAudit(admin, {
+      actorUserId: access.userId,
+      action: 'office_message_send_failed',
+      entityType: 'office_thread',
+      entityId: payload.threadId,
+      metadata: {
+        reason: lastErrorMessage,
+      },
+    });
     return Response.json({ error: 'Mesaj gönderilemedi.' }, { status: 500 });
   }
+
+  const data = insertResponse.data;
 
   const now = new Date().toISOString();
   await access.supabase.from('office_threads').update({ last_message_at: now }).eq('id', payload.threadId);
@@ -79,6 +105,18 @@ export async function POST(request: Request) {
     detail: payload.body.length > 100 ? `${payload.body.slice(0, 97)}...` : payload.body,
     actionUrl: '/office',
     actionLabel: 'Ekibi Aç',
+  });
+
+  const admin = createAdminClient();
+  await logDashboardAudit(admin, {
+    actorUserId: access.userId,
+    action: 'office_message_sent',
+    entityType: 'office_message',
+    entityId: data.id,
+    metadata: {
+      threadId: payload.threadId,
+      length: payload.body.length,
+    },
   });
 
   return Response.json({ message: data });

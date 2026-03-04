@@ -20,9 +20,38 @@ import logging
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from api import (
+    AITier,
+    ChatMode,
+    ClientAction,
+    ResponseDepth,
+    ResponseType,
+    SaveMode,
+    SaveTarget,
+)
 from pydantic import BaseModel, Field, computed_field, model_validator
 
 logger = logging.getLogger("babylexit.schemas")
+
+
+class TemporalFieldsSchema(BaseModel):
+    """
+    Temporal context fields used by retrieval and surfaced to UI/audit.
+
+    as_of_date   : Reference date for general legal analysis.
+    event_date   : Date of legal event/offence.
+    decision_date: Date of judgment/decision comparison.
+    """
+
+    as_of_date: Optional[date] = Field(
+        None, description="Analiz tarihi / referans hukuk tarihi"
+    )
+    event_date: Optional[date] = Field(
+        None, description="Olay tarihi"
+    )
+    decision_date: Optional[date] = Field(
+        None, description="Karar tarihi"
+    )
 
 
 # ============================================================================
@@ -74,6 +103,53 @@ class InlineCitation(BaseModel):
     )
     source_ids: List[str] = Field(
         ..., description="UUID of each cited SourceDocumentSchema (for deep-linking)"
+    )
+
+
+# ============================================================================
+# Step 18: Citation Quality Schema
+# ============================================================================
+
+class CitationQualitySchema(BaseModel):
+    """
+    Structured citation quality diagnostics for legal_grounded responses.
+
+    UI should surface:
+        - source_strength (Yuksek / Orta / Dusuk)
+        - source_count
+        - source_type_distribution
+    """
+
+    source_strength: str = Field(
+        ...,
+        description="Kaynak gucu seviyesi: Yuksek | Orta | Dusuk",
+    )
+    source_count: int = Field(
+        ...,
+        ge=0,
+        description="Total number of sources used in final answer context",
+    )
+    source_type_distribution: Dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Distribution by citation source class: "
+            "kanun | ictihat | ikincil_kaynak | kullanici_notu"
+        ),
+    )
+    recency_label: str = Field(
+        default="Karisik",
+        description="Recency signal summary: Guncel | Karisik | Arsiv | Bilinmiyor",
+    )
+    average_support_span: int = Field(
+        default=0,
+        ge=0,
+        description="Average source support span in characters (anchor range estimate).",
+    )
+    average_citation_confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Average citation confidence score across sources [0,1].",
     )
 
 
@@ -260,9 +336,53 @@ class AuditTrailSchema(BaseModel):
     bureau_id: Optional[str] = Field(
         None, description="Tenant bureau UUID or None for public access"
     )
+    requested_tier: Optional[str] = Field(
+        None,
+        description="User-selected tier label (hazir_cevap | dusunceli | uzman | muazzam).",
+    )
+    final_tier: Optional[int] = Field(
+        None,
+        ge=1,
+        le=4,
+        description="Final generation tier after router/provider resolution.",
+    )
+    final_generation_tier: Optional[int] = Field(
+        None,
+        ge=1,
+        le=4,
+        description="Step 22 explicit final generation tier (must not be below requested tier).",
+    )
     tier: int = Field(..., ge=1, le=4, description="LLM tier used (1–4)")
+    final_model: Optional[str] = Field(
+        None,
+        description="Step 22 explicit final model used to generate the final answer.",
+    )
     model_used: str = Field(..., description="Full model label")
+    subtask_models: List[str] = Field(
+        default_factory=list,
+        description="Step 22 hybrid router subtask model list.",
+    )
+    response_type: str = Field(
+        default="legal_grounded",
+        description="Response classification: legal_grounded | social_ungrounded.",
+    )
     source_count: int = Field(..., ge=0, description="Number of source documents")
+    case_id: Optional[str] = Field(
+        None,
+        description="Case context UUID used during answer generation.",
+    )
+    thread_id: Optional[str] = Field(
+        None,
+        description="Conversation thread UUID used during answer generation.",
+    )
+    intent_class: Optional[str] = Field(
+        None,
+        description="Intent class used by routing/grounding pipeline.",
+    )
+    strict_grounding: bool = Field(
+        default=True,
+        description="Whether strict grounding enforcement was active.",
+    )
     tool_calls_made: List[str] = Field(
         default_factory=list,
         description="Names of deterministic tools invoked (Step 14)",
@@ -297,12 +417,61 @@ class AuditTrailSchema(BaseModel):
     ragas_metrics: Optional[RAGASMetricsSchema] = Field(
         None, description="RAGAS-inspired quality metrics"
     )
+    temporal_fields: Optional[TemporalFieldsSchema] = Field(
+        None,
+        description=(
+            "Temporal context used while answering: as_of_date, event_date, decision_date."
+        ),
+    )
+    tenant_context: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "Resolved tenant context snapshot for auditability "
+            "(bureau_id, user_id, isolation/service flags)."
+        ),
+    )
     why_this_answer: str = Field(
         ..., description="Human-readable routing + source reasoning (KVKK-safe)"
     )
     audit_signature: str = Field(
         ..., description="HMAC-SHA256 hex covering core fields for tamper detection"
     )
+
+
+class ToolCallTraceSchema(BaseModel):
+    """Single tool invocation row linked to one audit request."""
+
+    tool_name: str
+    success: bool
+    error_message: Optional[str] = None
+    called_at: Optional[datetime] = None
+    latency_ms: Optional[int] = None
+
+
+class AuditTraceResponseSchema(BaseModel):
+    """Lookup payload returned by /rag/audit/{request_id}."""
+
+    request_id: str
+    timestamp_utc: datetime
+    bureau_id: Optional[str] = None
+    requested_tier: Optional[str] = None
+    final_tier: int = Field(..., ge=1, le=4)
+    final_generation_tier: Optional[int] = Field(None, ge=1, le=4)
+    final_model: Optional[str] = None
+    model_used: str
+    subtask_models: List[str] = Field(default_factory=list)
+    response_type: str = "legal_grounded"
+    source_count: int = Field(0, ge=0)
+    grounding_ratio: float = Field(0.0, ge=0.0, le=1.0)
+    estimated_cost_usd: float = Field(0.0, ge=0.0)
+    case_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    intent_class: Optional[str] = None
+    strict_grounding: bool = True
+    temporal_fields: Dict[str, Any] = Field(default_factory=dict)
+    tenant_context: Dict[str, Any] = Field(default_factory=dict)
+    cost_log: Optional[Dict[str, Any]] = None
+    tool_calls: List[ToolCallTraceSchema] = Field(default_factory=list)
 
 
 # ============================================================================
@@ -495,6 +664,41 @@ class SourceDocumentSchema(BaseModel):
     fikra_no: Optional[int] = Field(
         None, description="Paragraph number within article"
     )
+    source_type: Optional[str] = Field(
+        None,
+        description="Step 13 source type: MEVZUAT | ICTIHAT | PLATFORM_BILGI",
+    )
+    source_origin: Optional[str] = Field(
+        None,
+        description="Step 14 origin tag: case_doc | uploaded_doc | legal_corpus",
+    )
+    source_anchor: Optional[str] = Field(
+        None,
+        description="Step 15 anchor text for split-view jump (e.g. Madde/Fikra or citation anchor).",
+    )
+    page_no: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Step 15 page number for PDF/text renderer (1-based, optional).",
+    )
+    char_start: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Step 15 character-start offset in source content (0-based).",
+    )
+    char_end: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Step 15 character-end offset in source content (0-based).",
+    )
+    injection_flag: bool = Field(
+        False,
+        description="Step 16: True when document text had instruction-like patterns and was sanitized.",
+    )
+    injection_notes: List[str] = Field(
+        default_factory=list,
+        description="Step 16: matched injection/sanitization pattern labels for auditability.",
+    )
     document_type: Optional[str] = Field(
         None, description="DocumentType: MEVZUAT|ICTIHAT|UNKNOWN"
     )
@@ -523,6 +727,30 @@ class SourceDocumentSchema(BaseModel):
         ),
     )
     # ── Relevance score ───────────────────────────────────────────────────────
+    recency_score: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Step 18 citation quality signal: source recency score [0,1].",
+    )
+    support_span: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Step 18 citation quality signal: anchor support span (chars).",
+    )
+    citation_confidence: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Step 18 citation quality signal: per-source confidence [0,1].",
+    )
+    quality_source_class: Optional[str] = Field(
+        None,
+        description=(
+            "Step 18 source class used in quality layer: "
+            "kanun | ictihat | ikincil_kaynak | kullanici_notu"
+        ),
+    )
     final_score: float = Field(..., ge=0.0, le=1.0, description="Hybrid relevance score [0–1]")
 
     model_config = {"from_attributes": True}
@@ -538,6 +766,35 @@ class RAGQueryRequest(BaseModel):
     query: str = Field(
         ..., min_length=3, max_length=2000, description="User's legal question"
     )
+    thread_id: Optional[str] = Field(
+        None,
+        description="Optional thread UUID for continuing an existing conversation.",
+    )
+    history: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description=(
+            "Optional conversation turns for context continuity. "
+            "Each item should include role=user|assistant and content."
+        ),
+    )
+    chat_mode: ChatMode = Field(
+        default=ChatMode.GENERAL_CHAT,
+        description=(
+            "Product mode: general_chat (legal Q&A without uploaded documents) "
+            "or document_analysis (document-focused analysis). "
+            "case_id remains optional in both modes."
+        ),
+    )
+    ai_tier: AITier = Field(
+        default=AITier.HAZIR_CEVAP,
+        description=(
+            "Selected intelligence tier: hazir_cevap | dusunceli | uzman | muazzam."
+        ),
+    )
+    response_depth: ResponseDepth = Field(
+        default=ResponseDepth.STANDARD,
+        description="Requested answer depth: short | standard | detailed.",
+    )
     case_id: Optional[str] = Field(
         None, description="Scope retrieval to a specific case UUID"
     )
@@ -546,6 +803,13 @@ class RAGQueryRequest(BaseModel):
     )
     min_score: float = Field(
         default=0.25, ge=0.0, le=1.0, description="Minimum hybrid relevance score threshold"
+    )
+    as_of_date: Optional[date] = Field(
+        None,
+        description=(
+            "Temporal analysis anchor date (general legal analysis date). "
+            "When event_date is not provided, retrieval may use as_of_date as the temporal filter."
+        ),
     )
     event_date: Optional[date] = Field(
         None,
@@ -584,6 +848,218 @@ class RAGQueryRequest(BaseModel):
             "Belirtilmezse keyword eşleşmesiyle varsayılan tier kullanılır."
         ),
     )
+    strict_grounding: Optional[bool] = Field(
+        None,
+        description=(
+            "Step 3 (Plan): Per-request grounding policy override. "
+            "True  = hukuki içerikte kaynak zorunlu; retrieval boşsa LLM çağrılmaz, "
+            "grounding_ratio düşükse güvenli ret dönülür. "
+            "False = gevşek mod (basit sosyal sohbet). "
+            "None  = config.strict_grounding_default kullanılır (default: True)."
+        ),
+    )
+    active_document_ids: List[str] = Field(
+        default_factory=list,
+        description="Optional explicit document UUID allow-list from frontend.",
+    )
+    save_mode: Optional[SaveMode] = Field(
+        None,
+        description=(
+            "Save target mode: output_only | output_with_thread | "
+            "output_with_thread_and_sources."
+        ),
+    )
+    client_action: Optional[ClientAction] = Field(
+        None,
+        description=(
+            "Client action: none | translate_for_client_draft | save_client_draft."
+        ),
+    )
+
+
+# ============================================================================
+# Step 24: Save Request / Response Schemas
+# ============================================================================
+
+class CitationSnapshotItemSchema(BaseModel):
+    """Single citation row persisted as part of a saved output snapshot."""
+
+    source_id: Optional[str] = Field(
+        None,
+        description="Stable source identifier (document UUID or synthetic source key).",
+    )
+    source_type: Optional[str] = Field(
+        default="other",
+        description="Source class: kanun | ictihat | user_document | other.",
+    )
+    source_anchor: Optional[str] = Field(
+        default=None,
+        description="Split-view anchor (section, paragraph, xpath, etc.).",
+    )
+    page_no: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="1-based page number when available.",
+    )
+    char_start: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="0-based source char start offset.",
+    )
+    char_end: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="0-based source char end offset.",
+    )
+    source_hash: Optional[str] = Field(
+        default=None,
+        description="Optional source hash/version digest at save time.",
+    )
+    doc_version: Optional[str] = Field(
+        default=None,
+        description="Optional source document version label.",
+    )
+    citation_text: Optional[str] = Field(
+        default=None,
+        description="Rendered citation snippet shown to the user.",
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional citation metadata for audit/debug.",
+    )
+
+    @model_validator(mode="after")
+    def enforce_char_range(self) -> "CitationSnapshotItemSchema":
+        if (
+            self.char_start is not None
+            and self.char_end is not None
+            and self.char_end < self.char_start
+        ):
+            raise ValueError("char_end must be >= char_start")
+        return self
+
+
+class RAGSaveRequest(BaseModel):
+    """
+    Unified save payload for Step 24.
+
+    Covers:
+      - Dosyalarima Kaydet
+      - Mevcut Case'e Ekle
+      - Yeni Case Olustur ve Kaydet
+      - Muvekkile Anlat (draft only, no auto-send)
+    """
+
+    answer: str = Field(
+        ...,
+        min_length=1,
+        description="Assistant output text to persist as a work product.",
+    )
+    response_type: ResponseType = Field(
+        default=ResponseType.LEGAL_GROUNDED,
+        description="Response classification at save time for audit metadata.",
+    )
+    title: Optional[str] = Field(
+        default=None,
+        max_length=300,
+        description="Optional output title.",
+    )
+    output_type: str = Field(
+        default="analysis_note",
+        min_length=1,
+        max_length=64,
+        description="Legacy output type for backward compatibility.",
+    )
+    output_kind: str = Field(
+        default="analysis_note",
+        min_length=1,
+        max_length=64,
+        description="Work product kind (memo, dilekce, ihtarname, etc.).",
+    )
+    save_mode: SaveMode = Field(
+        default=SaveMode.OUTPUT_WITH_THREAD_AND_SOURCES,
+        description="Persistence mode: output_only | output_with_thread | output_with_thread_and_sources.",
+    )
+    save_target: SaveTarget = Field(
+        default=SaveTarget.MY_FILES,
+        description="Target: my_files | existing_case | new_case.",
+    )
+    thread_id: Optional[str] = Field(
+        default=None,
+        description="Optional ai_threads UUID link.",
+    )
+    source_message_id: Optional[str] = Field(
+        default=None,
+        description="Optional originating ai_messages UUID link.",
+    )
+    saved_from_message_id: Optional[str] = Field(
+        default=None,
+        description="Optional saved_from ai_messages UUID for version chains.",
+    )
+    parent_output_id: Optional[str] = Field(
+        default=None,
+        description="Optional parent saved_outputs UUID (versioning).",
+    )
+    is_final: bool = Field(
+        default=False,
+        description="Marks output version as final work product.",
+    )
+    case_id: Optional[str] = Field(
+        default=None,
+        description="Existing case UUID (required when save_target=existing_case).",
+    )
+    new_case_title: Optional[str] = Field(
+        default=None,
+        max_length=300,
+        description="Case title used when save_target=new_case.",
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Output metadata to persist alongside content.",
+    )
+    citations: List[CitationSnapshotItemSchema] = Field(
+        default_factory=list,
+        description="Citation snapshot rows persisted when save_mode includes sources.",
+    )
+    client_action: ClientAction = Field(
+        default=ClientAction.NONE,
+        description="Client action: none | translate_for_client_draft | save_client_draft.",
+    )
+    client_id: Optional[str] = Field(
+        default=None,
+        description="Optional client profile UUID for draft association.",
+    )
+    client_draft_text: Optional[str] = Field(
+        default=None,
+        description="Optional pre-computed client-safe draft text.",
+    )
+    client_draft_title: Optional[str] = Field(
+        default=None,
+        max_length=300,
+        description="Optional client draft title.",
+    )
+    client_metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Optional metadata for client_messages row.",
+    )
+
+    @model_validator(mode="after")
+    def enforce_save_target_rules(self) -> "RAGSaveRequest":
+        if self.save_target == SaveTarget.EXISTING_CASE and not self.case_id:
+            raise ValueError("case_id is required when save_target=existing_case")
+        return self
+
+
+class RAGSaveResponse(BaseModel):
+    """Save endpoint response payload (Step 24)."""
+
+    success: bool = True
+    saved_output_id: str
+    case_id: Optional[str] = None
+    case_created: bool = False
+    citation_count: int = 0
+    client_message_id: Optional[str] = None
+    client_draft_preview: Optional[str] = None
 
 
 # ============================================================================
@@ -660,10 +1136,8 @@ class RAGResponse(BaseModel):
     Final response returned to the client after a successful RAG query.
 
     STEP 1 ENFORCEMENT:
-        The @model_validator below makes it structurally IMPOSSIBLE to return
-        a RAGResponse without at least one source document.  If — despite the
-        primary guard in RAGService — an empty sources list somehow reaches
-        this validator, a ValueError is raised and the response is blocked.
+        legal_grounded responses MUST include >=1 source document.
+        social_ungrounded responses may return without sources.
 
     STEP 2 ENFORCEMENT:
         Each element in `sources` carries provenance metadata (source_url,
@@ -671,17 +1145,65 @@ class RAGResponse(BaseModel):
         in the server logs as PROVENANCE_WARN.
     """
 
+    response_type: ResponseType = Field(
+        default=ResponseType.LEGAL_GROUNDED,
+        description=(
+            "Step 2: Mandatory response classification. "
+            "LEGAL_GROUNDED = Kaynaklı Hukuki Yanıt (citation required). "
+            "SOCIAL_UNGROUNDED = Sosyal / Kaynaksız Yanıt (simple social chat only). "
+            "UI MUST display this as a badge on every answer card. "
+            "Null/missing is structurally impossible."
+        ),
+    )
     answer: str = Field(
         ..., description="LLM-generated answer grounded in retrieved sources"
     )
+    tier_used: int = Field(
+        default=1,
+        ge=1,
+        le=4,
+        description="Final generation tier used for this answer (V3).",
+    )
     sources: List[SourceDocumentSchema] = Field(
-        ...,
-        min_length=1,   # Pydantic v2 constraint — list MUST contain ≥ 1 element
-        description="Supporting legal documents. MUST be non-empty (Step 1 Hard-Fail).",
+        default_factory=list,
+        description=(
+            "Supporting legal documents. "
+            "MUST be non-empty when response_type=legal_grounded."
+        ),
     )
     query: str = Field(..., description="Echo of the original query (for audit trail)")
     model_used: str = Field(..., description="LLM tier + model ID that generated the answer")
-    retrieval_count: int = Field(..., ge=1, description="Number of documents retrieved")
+    grounding_ratio: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Sentence-level grounding ratio from Zero-Trust validation.",
+    )
+    citation_quality_summary: str = Field(
+        default="Kaynak kalitesi degerlendirmesi mevcut degil.",
+        description="V3 citation quality summary shown on answer cards.",
+    )
+    citation_quality: Optional[CitationQualitySchema] = Field(
+        default=None,
+        description=(
+            "Step 18 structured citation quality payload. Includes source strength, "
+            "source-type distribution, recency and support-span diagnostics."
+        ),
+    )
+    estimated_cost: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Estimated request cost in USD (V3 contract).",
+    )
+    audit_trail_id: str = Field(
+        default="",
+        description="Audit trail identifier for traceability (V3 contract).",
+    )
+    retrieval_count: int = Field(
+        ...,
+        ge=0,
+        description="Number of documents retrieved (0 allowed for social_ungrounded).",
+    )
     latency_ms: int = Field(..., ge=0, description="End-to-end request latency in milliseconds")
 
     # ── Step 4: AYM cancellation warnings ────────────────────────────────────
@@ -725,6 +1247,12 @@ class RAGResponse(BaseModel):
     )
 
     # ── Step 17: Audit Trail ───────────────────────────────────────────────
+    temporal_fields: Optional[TemporalFieldsSchema] = Field(
+        None,
+        description=(
+            "Temporal context echoed to UI badges: Analiz Tarihi / Olay Tarihi / Karar Tarihi."
+        ),
+    )
     audit_trail: Optional[AuditTrailSchema] = Field(
         None,
         description=(
@@ -740,6 +1268,12 @@ class RAGResponse(BaseModel):
         """True when at least one retrieved source carries a mandatory AYM warning."""
         return len(self.aym_warnings) > 0
 
+    @computed_field
+    @property
+    def tier(self) -> int:
+        """Backward-compat mirror for legacy frontend cards (`tier_used` is canonical)."""
+        return self.tier_used
+
     @model_validator(mode="after")
     def enforce_sources_present(self) -> "RAGResponse":
         """
@@ -749,9 +1283,9 @@ class RAGResponse(BaseModel):
             1. sources list is non-empty (belt-and-suspenders on top of min_length=1).
             2. Logs a WARNING for each source missing collected_at (provenance gap).
         """
-        # Guard 1: Non-empty list
-        if not self.sources:
-            logger.error("HARD_FAIL: RAGResponse constructed with empty sources list.")
+        # Guard 1: Legal responses must remain fully grounded.
+        if self.response_type == ResponseType.LEGAL_GROUNDED and not self.sources:
+            logger.error("HARD_FAIL: legal_grounded response has empty sources list.")
             raise ValueError(
                 "Kaynak yoksa cevap yok: "
                 "En az 1 hukuki kaynak belgelenmeden yanıt üretilemez. "
@@ -781,7 +1315,7 @@ class RAGResponse(BaseModel):
         # Guard 4: Step 16 — Auto-generate legal disclaimer if absent.
         #   In production, RAGService always provides a full disclaimer.
         #   This fallback ensures tests and schema-only usage still get one.
-        if self.legal_disclaimer is None:
+        if self.response_type == ResponseType.LEGAL_GROUNDED and self.legal_disclaimer is None:
             self.legal_disclaimer = _auto_disclaimer(
                 has_aym=bool(self.aym_warnings),
                 has_lehe=self.lehe_kanun_notice is not None,
@@ -792,7 +1326,32 @@ class RAGResponse(BaseModel):
                 self.legal_disclaimer.disclaimer_types,
             )
 
+        # V3 backfill: derive flat contract fields from nested audit/cost blocks
+        # when older cached payloads are missing direct values.
+        if self.audit_trail is not None:
+            if not self.audit_trail_id:
+                self.audit_trail_id = self.audit_trail.request_id
+            if self.tier_used <= 1 and self.audit_trail.tier > 1:
+                self.tier_used = self.audit_trail.tier
+            if self.grounding_ratio <= 0.0 and self.audit_trail.grounding_ratio > 0.0:
+                self.grounding_ratio = self.audit_trail.grounding_ratio
+            if (
+                self.estimated_cost <= 0.0
+                and self.audit_trail.cost_estimate is not None
+                and self.audit_trail.cost_estimate.total_cost_usd > 0.0
+            ):
+                self.estimated_cost = self.audit_trail.cost_estimate.total_cost_usd
+        if not self.audit_trail_id:
+            self.audit_trail_id = f"fallback-{int(datetime.now(tz=timezone.utc).timestamp() * 1000)}"
+
         return self
+
+
+# Step 5: canonical contract aliases
+RAGQueryRequestV3 = RAGQueryRequest
+RAGResponseV3 = RAGResponse
+RAGSaveRequestV3 = RAGSaveRequest
+RAGSaveResponseV3 = RAGSaveResponse
 
 
 # ============================================================================
@@ -813,12 +1372,31 @@ class NoSourceErrorDetail(BaseModel):
         )
     )
     query: str
+    intent_class: Optional[str] = Field(
+        default="legal_query",
+        description="Intent classifier sonucu (social_simple haric hukuki niyetler).",
+    )
+    strict_grounding: bool = Field(
+        default=True,
+        description="Bu istekte strict grounding politikasinin aktifligi.",
+    )
     llm_called: bool = Field(
         default=False,
         description="LLM was NOT invoked — cost for this request = $0",
     )
     suggestion: str = Field(
-        default="Lütfen sorunuzu daha spesifik hukuki terimlerle yeniden deneyin."
+        default=(
+            "Sorguyu daraltin, tarih ekleyin, case baglami secin veya belge yukleyin."
+        )
+    )
+    guidance_actions: List[str] = Field(
+        default_factory=lambda: [
+            "Sorguyu daralt",
+            "Tarih ekle (as_of_date / event_date / decision_date)",
+            "Case sec",
+            "Belge yukle",
+        ],
+        description="Hard-fail sonrasinda kullaniciya gosterilecek yonlendirici adimlar.",
     )
 
 
@@ -868,3 +1446,6 @@ class APIErrorResponse(BaseModel):
     success: bool = False
     detail: Dict[str, Any]
     request_id: Optional[str] = None
+
+
+

@@ -1,124 +1,79 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: marinantex-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-marinantex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-marinantex}
+      POSTGRES_DB: ${POSTGRES_DB:-marinantex}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-marinantex} -d ${POSTGRES_DB:-marinantex}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - marinantex-network
+
   redis:
     image: redis:7-alpine
-    container_name: babylexit-redis
+    container_name: marinantex-redis
+    restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
-      retries: 3
-    restart: unless-stopped
+      retries: 5
     networks:
-      - babylexit-network
+      - marinantex-network
 
-  api:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: babylexit-api
+  minio:
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+    container_name: marinantex-minio
+    restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     environment:
-      # Database (Supabase)
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
-      
-      # Redis
-      - REDIS_URL=redis://redis:6379
-
-      # Celery (Step 11 — Async Indexing / Zero-Downtime)
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
-
-      # LLM Providers
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      
-      # Privacy
-      - PII_ENCRYPTION_KEY=${PII_ENCRYPTION_KEY}
-      
-      # Environment
-      - ENVIRONMENT=development
-      - LOG_LEVEL=info
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    command: server /data --console-address ":9001"
     volumes:
-      - ./backend:/app
-      - /app/__pycache__
-    depends_on:
-      redis:
-        condition: service_healthy
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
+      - minio_data:/data
     networks:
-      - babylexit-network
+      - marinantex-network
 
-  # ── Step 11: Celery Worker — Async Indexing / Zero-Downtime ──────────────
-  celery_worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: babylexit-celery-worker
-    environment:
-      # Database (Supabase)
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
-
-      # Redis
-      - REDIS_URL=redis://redis:6379
-
-      # Celery
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
-
-      # LLM Providers
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - GROQ_API_KEY=${GROQ_API_KEY}
-
-      # Privacy
-      - PII_ENCRYPTION_KEY=${PII_ENCRYPTION_KEY}
-
-      # Environment
-      - ENVIRONMENT=development
-      - LOG_LEVEL=info
-    volumes:
-      - ./backend:/app
-      - /app/__pycache__
+  minio-init:
+    image: minio/mc:RELEASE.2025-01-17T23-25-50Z
+    container_name: marinantex-minio-init
     depends_on:
-      redis:
-        condition: service_healthy
-      api:
-        condition: service_healthy
-    command: >
-      celery -A infrastructure.async_indexing.celery_app worker
-      --loglevel=info
-      --concurrency=4
-      --queues=ingest,default
-      --hostname=worker@%h
-    healthcheck:
-      test: ["CMD", "celery", "-A", "infrastructure.async_indexing.celery_app", "inspect", "ping", "-d", "worker@%h"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-    restart: unless-stopped
+      - minio
+    restart: "no"
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin123};
+      mc mb --ignore-existing local/${MINIO_BUCKET:-documents};
+      mc anonymous set none local/${MINIO_BUCKET:-documents};
+      echo 'MinIO bucket is ready.';
+      "
     networks:
-      - babylexit-network
+      - marinantex-network
 
 volumes:
+  postgres_data:
   redis_data:
-    driver: local
+  minio_data:
 
 networks:
-  babylexit-network:
+  marinantex-network:
     driver: bridge

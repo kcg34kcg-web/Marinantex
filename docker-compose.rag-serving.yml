@@ -1,0 +1,157 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: marinantex-rag-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - rag-serving-network
+
+  tei-embed:
+    image: ghcr.io/huggingface/text-embeddings-inference:1.8
+    container_name: marinantex-tei-embed
+    restart: unless-stopped
+    environment:
+      HF_HOME: /data
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+    command:
+      - --model-id
+      - ${EMBEDDING_MODEL_ID:-BAAI/bge-m3}
+      - --port
+      - "8080"
+      - --max-client-batch-size
+      - "64"
+      - --api-key
+      - ${EMBEDDING_API_KEY:-tei-local}
+    ports:
+      - "${EMBEDDING_PORT:-8081}:8080"
+    volumes:
+      - tei_cache:/data
+    healthcheck:
+      test: ["CMD-SHELL", "(curl -fsS http://127.0.0.1:8080/health || wget -qO- http://127.0.0.1:8080/health) > /dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - rag-serving-network
+
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: marinantex-vllm
+    restart: unless-stopped
+    ipc: host
+    environment:
+      HF_HOME: /root/.cache/huggingface
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    command:
+      - --model
+      - ${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      - --served-model-name
+      - ${VLLM_SERVED_MODEL:-qwen2.5-7b-instruct}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --dtype
+      - ${VLLM_DTYPE:-bfloat16}
+      - --max-model-len
+      - ${VLLM_MAX_MODEL_LEN:-8192}
+    ports:
+      - "${VLLM_PORT:-8008}:8000"
+    volumes:
+      - vllm_cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/models', timeout=3).read()\""]
+      interval: 20s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks:
+      - rag-serving-network
+
+  backend-rag:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: marinantex-backend-rag
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      tei-embed:
+        condition: service_healthy
+      vllm:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      REDIS_URL: redis://redis:6379
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-}
+      DATABASE_URL: ${DATABASE_URL:-}
+      PII_ENCRYPTION_KEY: ${PII_ENCRYPTION_KEY:-dev-key-change}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret-change}
+      OPENAI_BASE_URL: http://vllm:8000/v1
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-local-openai-compatible}
+      EMBEDDING_BASE_URL: http://tei-embed:8080/v1
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-tei-local}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL_ID:-BAAI/bge-m3}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
+      EMBEDDING_SEND_DIMENSIONS_PARAM: ${EMBEDDING_SEND_DIMENSIONS_PARAM:-false}
+      AI_TIER_HAZIR_PROVIDER: openai
+      AI_TIER_HAZIR_MODEL: ${VLLM_SERVED_MODEL:-qwen2.5-7b-instruct}
+      AI_TIER_HAZIR_FALLBACK_PROVIDER: openai
+      AI_TIER_HAZIR_FALLBACK_MODEL: ${VLLM_SERVED_MODEL:-qwen2.5-7b-instruct}
+      AI_TIER_DUSUNCELI_PROVIDER: openai
+      AI_TIER_DUSUNCELI_MODEL: ${VLLM_SERVED_MODEL:-qwen2.5-7b-instruct}
+      AI_TIER_DUSUNCELI_FALLBACK_PROVIDER: openai
+      AI_TIER_DUSUNCELI_FALLBACK_MODEL: ${VLLM_SERVED_MODEL:-qwen2.5-7b-instruct}
+      AI_TIER_UZMAN_PROVIDER: openai
+      AI_TIER_UZMAN_MODEL: ${VLLM_SERVED_MODEL:-qwen2.5-7b-instruct}
+      AI_TIER_UZMAN_FALLBACK_PROVIDER: openai
+      AI_TIER_UZMAN_FALLBACK_MODEL: ${VLLM_SERVED_MODEL:-qwen2.5-7b-instruct}
+      AI_TIER_MUAZZAM_PROVIDER: openai
+      AI_TIER_MUAZZAM_MODEL: ${VLLM_SERVED_MODEL:-qwen2.5-7b-instruct}
+      AI_TIER_MUAZZAM_FALLBACK_PROVIDER: openai
+      AI_TIER_MUAZZAM_FALLBACK_MODEL: ${VLLM_SERVED_MODEL:-qwen2.5-7b-instruct}
+      LLM_TIER1_MODEL: ${VLLM_SERVED_MODEL:-qwen2.5-7b-instruct}
+      LLM_TIER2_MODEL: ${VLLM_SERVED_MODEL:-qwen2.5-7b-instruct}
+      LLM_TIER3_MODEL: ${VLLM_SERVED_MODEL:-qwen2.5-7b-instruct}
+      LLM_TIER4_MODEL: ${VLLM_SERVED_MODEL:-qwen2.5-7b-instruct}
+      LLM_TIER4_USE_REASONING: ${LLM_TIER4_USE_REASONING:-false}
+      RAG_V3_TENANT_HARD_FAIL_MISSING_BUREAU: ${RAG_V3_TENANT_HARD_FAIL_MISSING_BUREAU:-true}
+    ports:
+      - "${RAG_API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health > /dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    networks:
+      - rag-serving-network
+
+volumes:
+  vllm_cache:
+  tei_cache:
+
+networks:
+  rag-serving-network:
+    driver: bridge

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
+import { createAdminClient } from '@/utils/supabase/admin';
+import { logDashboardAudit } from '@/lib/dashboard/audit';
 
 const createCaseNoteSchema = z.object({
   caseId: z.string().uuid(),
@@ -46,8 +48,9 @@ export async function POST(request: Request) {
   }
 
   const payload = parsed.data;
+  const admin = createAdminClient();
 
-  const { data: caseRow } = await access.supabase
+  const { data: caseRow } = await admin
     .from('cases')
     .select('id')
     .eq('id', payload.caseId)
@@ -57,7 +60,7 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Dosya bulunamadı.' }, { status: 404 });
   }
 
-  const { data, error } = await access.supabase
+  const { data, error } = await admin
     .from('case_updates')
     .insert({
       case_id: payload.caseId,
@@ -72,6 +75,29 @@ export async function POST(request: Request) {
   if (error || !data) {
     return Response.json({ error: 'Not kaydı oluşturulamadı.' }, { status: 500 });
   }
+
+  await admin.from('case_timeline_events').insert({
+    case_id: payload.caseId,
+    event_type: 'note',
+    title: payload.isPublicToClient ? 'Müvekkile açık not eklendi' : 'İç not eklendi',
+    description: payload.message.length > 220 ? `${payload.message.slice(0, 217)}...` : payload.message,
+    metadata: {
+      isPublicToClient: payload.isPublicToClient,
+      noteId: data.id,
+    },
+    created_by: access.userId,
+  });
+
+  await logDashboardAudit(admin, {
+    actorUserId: access.userId,
+    action: 'case_note_created',
+    entityType: 'case_note',
+    entityId: data.id,
+    metadata: {
+      caseId: payload.caseId,
+      isPublicToClient: payload.isPublicToClient,
+    },
+  });
 
   return Response.json({ note: data });
 }

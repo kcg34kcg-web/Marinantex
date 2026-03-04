@@ -232,6 +232,22 @@ class PromptGuardResult:
     location: str = "query"
 
 
+@dataclass
+class SanitizationResult:
+    """
+    Sanitization output for a single document/context fragment.
+
+    Attributes:
+        sanitized_text:    Safe text that can be passed to the LLM.
+        injection_flag:    True when suspicious instruction-like patterns exist.
+        matched_patterns:  Human-readable pattern descriptions that matched.
+    """
+
+    sanitized_text: str
+    injection_flag: bool = False
+    matched_patterns: List[str] = field(default_factory=list)
+
+
 # ============================================================================
 # Pure scan functions — no side effects, fully unit-testable
 # ============================================================================
@@ -292,6 +308,85 @@ def scan_context(context: str) -> PromptGuardResult:
     return PromptGuardResult(safe=True, location="context")
 
 
+# Sanitization replacements used for document-level instruction stripping.
+_SANITIZE_REPLACEMENTS: List[tuple[re.Pattern[str], str, str]] = [
+    (
+        re.compile(r"\[/?INST\]|<<SYS>>|<</SYS>>|<\|im_start\|>|<\|im_end\|>",
+                   re.IGNORECASE),
+        "[BELGE_TOKEN_REDACTED]",
+        "instruction-token",
+    ),
+    (
+        re.compile(r"<prompt>|</prompt>|<system>|</system>", re.IGNORECASE),
+        "[BELGE_WRAPPER_REDACTED]",
+        "xml-wrapper",
+    ),
+    (
+        re.compile(r"^(SYSTEM|HUMAN|ASSISTANT|USER)\s*:\s*", re.IGNORECASE | re.MULTILINE),
+        "[BELGE_ROL_BASLIGI_REDACTED]: ",
+        "role-header",
+    ),
+    (
+        re.compile(
+            r"ignore\s+(the\s+)?(above|previous|following|all)\s+"
+            r"(context|documents?|instructions?|rules?)",
+            re.IGNORECASE,
+        ),
+        "[BELGE_ICI_TALIMAT_REDACTED]",
+        "ignore-directive",
+    ),
+    (
+        re.compile(
+            r"(yukarıdaki|önceki|aşağıdaki)\s+(talimatları|kuralları|metni)\s+"
+            r"(unut|görmezden\s+gel|yoksay)",
+            re.IGNORECASE,
+        ),
+        "[BELGE_ICI_TALIMAT_REDACTED]",
+        "ignore-directive-tr",
+    ),
+    (
+        re.compile(
+            r"(print|output|reveal|repeat|echo)\s+(the\s+)?(system\s+prompt|instructions?)",
+            re.IGNORECASE,
+        ),
+        "[BELGE_EXFILTRATION_REDACTED]",
+        "exfiltration-directive",
+    ),
+]
+
+
+def sanitize_context_fragment(context: str) -> SanitizationResult:
+    """
+    Sanitizes instruction-like patterns inside retrieved document text.
+
+    Step 16 policy:
+        - Document text is evidence, not executable instruction.
+        - Suspicious instruction markers are redacted before LLM call.
+        - A flag is returned so caller can persist audit evidence.
+    """
+    if not context:
+        return SanitizationResult(sanitized_text=context, injection_flag=False)
+
+    matched_patterns: List[str] = []
+    for pattern in _CONTEXT_PATTERNS:
+        if pattern.regex.search(context):
+            matched_patterns.append(pattern.description)
+
+    sanitized = context
+    for regex, replacement, label in _SANITIZE_REPLACEMENTS:
+        if regex.search(sanitized):
+            matched_patterns.append(label)
+            sanitized = regex.sub(replacement, sanitized)
+
+    # deduplicate while preserving order
+    unique_patterns = list(dict.fromkeys(matched_patterns))
+    return SanitizationResult(
+        sanitized_text=sanitized,
+        injection_flag=bool(unique_patterns),
+        matched_patterns=unique_patterns,
+    )
+
+
 # ============================================================================
 # PromptGuard — stateless service class
 # ============================================================================
@@ -334,6 +429,14 @@ class PromptGuard:
         """
         result = scan_context(context)
         self._handle(result, context[:80])
+
+    def sanitize_document_text(self, text: str) -> SanitizationResult:
+        """
+        Sanitizes instruction-like payloads found in retrieved document text.
+
+        Returns sanitized text plus injection flag metadata; never raises.
+        """
+        return sanitize_context_fragment(text)
 
     def _handle(self, result: PromptGuardResult, preview: str) -> None:
         """

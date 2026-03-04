@@ -1,0 +1,7 @@
+# Varsayılan: repo içinde LF tut
+* text=auto eol=lf
+
+# Windows scriptleri (gerekirse)
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf

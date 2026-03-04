@@ -35,7 +35,7 @@ backend/
 - **Middleware Enforcement**: All outbound requests pass through privacy layer.
 
 ### 2. Cost-Efficient Intelligence
-- **Semantic Router**: Local HuggingFace embeddings route queries without LLM calls.
+- **Semantic Retrieval**: `text-embedding-3-small` is the default embedding model (configurable via env).
 - **Tiered Routing**: "Merhaba" → $0 | "İş sözleşmesi feshi" → Agent workflow.
 
 ### 3. Temporal Legal Knowledge (Time Machine)
@@ -57,7 +57,8 @@ backend/
 | Database | Supabase (Postgres) + pgvector |
 | Cache | Redis (Docker) |
 | Privacy | Presidio + Regex Rules |
-| Embeddings | HuggingFace (local) |
+| Embeddings | OpenAI `text-embedding-3-small` (default, configurable) |
+| Reranker | `BAAI/bge-reranker-v2-m3` (RAG v3) |
 | LLMs | OpenAI, Anthropic, Groq (fallback) |
 
 ## Development
@@ -72,6 +73,22 @@ pip install -r requirements.txt
 # Run FastAPI server
 uvicorn api.main:app --reload --port 8000
 ```
+
+## Self-Host Serving (SaaS Prod Path)
+
+Use the repository-level compose for local production-like bring-up:
+
+```bash
+docker compose -f docker-compose.rag-serving.yml up -d --build
+```
+
+This stack includes:
+
+- vLLM (OpenAI-compatible LLM endpoint)
+- TEI (OpenAI-compatible embeddings endpoint for `bge-m3`)
+- FastAPI backend wired to those local endpoints
+
+Runbook: `docs/setup/step-11-self-host-rag-serving.md`
 
 ## Environment Variables
 

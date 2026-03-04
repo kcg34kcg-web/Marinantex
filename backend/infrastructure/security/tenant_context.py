@@ -98,10 +98,32 @@ def extract_user_id_from_headers(headers: dict) -> Optional[str]:
     return raw.strip() if raw and raw.strip() else None
 
 
+def extract_plan_tier_from_headers(headers: dict) -> str:
+    raw = headers.get("x-plan-tier") or headers.get("X-Plan-Tier")
+    value = raw.strip().upper() if isinstance(raw, str) and raw.strip() else "FREE"
+    if value not in {"FREE", "TRIAL", "PRO", "ENTERPRISE"}:
+        return "FREE"
+    return value
+
+
+def _extract_optional_int(headers: dict, lower_key: str, title_key: str) -> Optional[int]:
+    raw = headers.get(lower_key) or headers.get(title_key)
+    if raw is None:
+        return None
+    try:
+        value = int(str(raw).strip())
+    except Exception:
+        return None
+    return value if value >= 0 else None
+
+
 def build_tenant_context(
     bureau_id: Optional[str],
     user_id: Optional[str] = None,
     access_level: AccessLevel = AccessLevel.MEMBER,
+    plan_tier: str = "FREE",
+    messages_today: Optional[int] = None,
+    tokens_used_month: Optional[int] = None,
 ) -> TenantContext:
     """
     Creates a TenantContext from the extracted and validated identifiers.
@@ -118,6 +140,9 @@ def build_tenant_context(
         bureau_id=bureau_id,
         user_id=user_id,
         access_level=access_level,
+        plan_tier=plan_tier,
+        messages_today=messages_today,
+        tokens_used_month=tokens_used_month,
     )
     logger.debug(
         "TENANT_CTX | bureau_id=%s | user_id=%s | level=%s | isolated=%s",
@@ -159,6 +184,9 @@ class TenantContextExtractor:
         """
         bureau_id = extract_bureau_id_from_headers(headers)
         user_id   = extract_user_id_from_headers(headers)
+        plan_tier = extract_plan_tier_from_headers(headers)
+        messages_today = _extract_optional_int(headers, "x-messages-today", "X-Messages-Today")
+        tokens_used_month = _extract_optional_int(headers, "x-tokens-used-month", "X-Tokens-Used-Month")
 
         if bureau_id and not validate_bureau_id(bureau_id):
             logger.warning(
@@ -167,7 +195,13 @@ class TenantContextExtractor:
             )
             return TenantContext.anonymous()
 
-        return build_tenant_context(bureau_id=bureau_id, user_id=user_id)
+        return build_tenant_context(
+            bureau_id=bureau_id,
+            user_id=user_id,
+            plan_tier=plan_tier,
+            messages_today=messages_today,
+            tokens_used_month=tokens_used_month,
+        )
 
 
 # Module-level singleton

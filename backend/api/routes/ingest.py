@@ -186,8 +186,9 @@ async def ingest_document(
         HTTPException 503: Supabase veya embedding servisi erişilemez.
     """
     # Resolve bureau context from TenantMiddleware (X-Bureau-ID header wins)
-    tenant_context: Optional[TenantContext] = getattr(
-        request.state, "tenant_context", None
+    tenant_context: Optional[TenantContext] = (
+        getattr(request.state, "tenant", None)
+        or getattr(request.state, "tenant_context", None)
     )
 
     # Determine effective bureau_id: header > body

@@ -24,6 +24,7 @@ from infrastructure.database.supabase_audit_repository import SupabaseAuditRepos
 # API routes
 from api.routes import rag as rag_route       # Step 10 — RAG query endpoint
 from api.routes import ingest as ingest_route  # Step 5/11 — Document ingest endpoint
+from api.routes import rag_v3 as rag_v3_route  # RAG v3 documents/chunks
 # from api.routes import chat, search, admin  (future steps)
 from api.middleware.privacy_gateway import PrivacyMiddleware
 from api.middleware.tenant_middleware import TenantMiddleware
@@ -247,6 +248,8 @@ app.include_router(rag_route.router, prefix="/api/v1/rag", tags=["RAG"])
 # Step 5/11 — Document ingest (OCR → parse → embed → upsert → async index)
 app.include_router(ingest_route.router, prefix="/api/v1/ingest", tags=["Ingest"])
 
+# RAG v3 - canonical documents/chunks ingest + query
+app.include_router(rag_v3_route.router, prefix="/api/v1/rag-v3", tags=["RAG-V3"])
 # Future steps:
 # app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 # app.include_router(search.router, prefix="/api/v1/search", tags=["Search"])
@@ -266,3 +269,4 @@ if __name__ == "__main__":
         reload=True,
         log_level="info",
     )
+

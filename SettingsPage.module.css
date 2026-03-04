@@ -1,0 +1,73 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background-color: var(--bg-primary);
+}
+
+.header {
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.pageTitle {
+  font-size: 1.25rem; /* 20px */
+  font-weight: 700;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  flex-grow: 1;
+  overflow: hidden;
+}
+
+.sidebar {
+  padding: 1.5rem;
+  border-right: 1px solid var(--border-subtle);
+}
+
+.navButton {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  transition: background-color 0.1s, color 0.1s;
+}
+
+.navButton:hover {
+  background-color: var(--bg-subtle);
+  color: var(--text-primary);
+}
+
+.navButton.active {
+  background-color: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 500;
+}
+
+.content {
+  padding: 2rem;
+  overflow-y: auto;
+}
+
+.buttonGroup {
+  display: flex;
+  gap: 0.75rem; /* 12px */
+}
+
+/* Global class for sub-page titles */
+:global(.settings-page-title) {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+}

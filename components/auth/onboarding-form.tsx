@@ -40,7 +40,7 @@ export function OnboardingForm({ nextPath }: OnboardingFormProps) {
 
       {state.error ? <p className="text-sm text-orange-600">{state.error}</p> : null}
 
-      <Button className="w-full" disabled={isPending}>
+      <Button type="submit" className="w-full" disabled={isPending}>
         {isPending ? 'Kaydediliyor...' : 'Devam Et'}
       </Button>
       <p className="text-xs text-slate-500">

@@ -72,7 +72,7 @@ export function MagicLinkForm({ nextPath, expectedRole }: MagicLinkFormProps) {
         required
       />
       {message ? <p className="text-sm text-slate-700">{message}</p> : null}
-      <Button className="w-full" disabled={isPending}>
+      <Button type="submit" className="w-full" disabled={isPending}>
         {isPending ? 'Bağlantı gönderiliyor...' : 'Magic Link Gönder'}
       </Button>
       <p className="text-xs text-slate-500">

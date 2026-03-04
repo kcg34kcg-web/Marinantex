@@ -1,0 +1,20 @@
+{
+  "imported": {},
+  "failed": {
+    "7538": {
+      "detailUrl": "https://www.tbmm.gov.tr/Yasama/Kanun/EF878609-056D-4758-A275-019363660385",
+      "error": "Ingest HTTP 503: Ingest pipeline unavailable. Please try again later.",
+      "at": "2026-03-01T15:38:35.309Z"
+    },
+    "7539": {
+      "detailUrl": "https://www.tbmm.gov.tr/Yasama/Kanun/F1D6CC87-06F7-4BBB-BCE3-01945043D1AA",
+      "error": "Ingest HTTP 503: Ingest pipeline unavailable. Please try again later.",
+      "at": "2026-03-01T15:38:36.592Z"
+    },
+    "7540": {
+      "detailUrl": "https://www.tbmm.gov.tr/Yasama/Kanun/D6A14FA8-BF9E-4E9B-BE58-0193DEE6C99A",
+      "error": "Ingest HTTP 503: Ingest pipeline unavailable. Please try again later.",
+      "at": "2026-03-01T15:38:37.855Z"
+    }
+  }
+}

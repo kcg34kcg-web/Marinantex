@@ -1,0 +1,39 @@
+.card {
+  background-color: var(--bg-surface);
+  border-radius: 8px; /* Example: --radius-lg */
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); /* Example: --shadow-sm */
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem;
+}
+
+.title {
+  font-size: 1.25rem; /* 20px */
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}
+
+.description {
+  font-size: 0.875rem; /* 14px */
+  color: var(--text-muted);
+}
+
+.content {
+  padding: 1.5rem;
+}
+
+.header + .content,
+.content + .footer {
+  padding-top: 0;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  padding: 1.5rem;
+}

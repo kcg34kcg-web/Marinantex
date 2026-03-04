@@ -593,7 +593,10 @@ class TestRAGServiceStep16Integration:
     async def test_response_has_answer_sentences(self):
         from api.schemas import RAGQueryRequest
         svc = self._make_service()
-        req = RAGQueryRequest(query="İhbar süresi nedir?")
+        req = RAGQueryRequest(
+            query="İhbar süresi nedir?",
+            strict_grounding=False,
+        )
         resp = await svc.query(req)
         assert isinstance(resp.answer_sentences, list)
         # The mocked LLM returns two sentences with [K:1] and [K:2]
@@ -603,7 +606,10 @@ class TestRAGServiceStep16Integration:
     async def test_response_has_inline_citations(self):
         from api.schemas import RAGQueryRequest
         svc = self._make_service()
-        req = RAGQueryRequest(query="Kıdem tazminatı nasıl hesaplanır?")
+        req = RAGQueryRequest(
+            query="Kıdem tazminatı nasıl hesaplanır?",
+            strict_grounding=False,
+        )
         resp = await svc.query(req)
         assert isinstance(resp.inline_citations, list)
         # At least one sentence cited a source
@@ -623,8 +629,12 @@ class TestRAGServiceStep16Integration:
         """source_refs in AnswerSentence must be within [1, len(sources)] range."""
         from api.schemas import RAGQueryRequest
         svc = self._make_service()
-        req = RAGQueryRequest(query="Tazminat hesaplama?")
+        req = RAGQueryRequest(
+            query="Tazminat hesaplama?",
+            strict_grounding=False,
+        )
         resp = await svc.query(req)
+        assert len(resp.answer_sentences) >= 1
         source_count = len(resp.sources)
         for sentence in resp.answer_sentences:
             for ref in sentence.source_refs:
@@ -950,3 +960,26 @@ class TestPreLLMNoSourceHardFail:
         with pytest.raises(HTTPException) as exc_info:
             await svc.query(req)
         assert exc_info.value.detail["llm_called"] is False
+
+    @pytest.mark.asyncio
+    async def test_detail_includes_guidance_actions_and_intent(self):
+        """HTTP 422 detail should include user-facing recovery actions."""
+        from fastapi import HTTPException
+        from api.schemas import RAGQueryRequest
+
+        svc = self._make_empty_retrieval_service()
+        req = RAGQueryRequest(query="Borclar Kanunu kapsaminda cok spesifik bir durum")
+        with pytest.raises(HTTPException) as exc_info:
+            await svc.query(req)
+
+        detail = exc_info.value.detail
+        assert detail["intent_class"] in {
+            "legal_query",
+            "legal_drafting",
+            "legal_analysis",
+            "document_task",
+        }
+        assert isinstance(detail["strict_grounding"], bool)
+        assert isinstance(detail["guidance_actions"], list)
+        assert "Sorguyu daralt" in detail["guidance_actions"]
+        assert "Case sec" in detail["guidance_actions"]

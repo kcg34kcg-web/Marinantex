@@ -21,6 +21,10 @@ from infrastructure.database.supabase_citation_repository import (
     SupabaseCitationRepository,
     supabase_citation_repository,
 )
+from infrastructure.database.supabase_save_repository import (
+    SupabaseSaveRepository,
+    supabase_save_repository,
+)
 
 __all__ = [
     "SupabaseAuditRepository",
@@ -29,4 +33,6 @@ __all__ = [
     "supabase_document_repository",
     "SupabaseCitationRepository",
     "supabase_citation_repository",
+    "SupabaseSaveRepository",
+    "supabase_save_repository",
 ]

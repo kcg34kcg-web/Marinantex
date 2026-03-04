@@ -138,7 +138,7 @@ class LeheKanunCompareUseCase:
         embedding: List[float] = request.query_embedding or []
         if not embedding:
             from infrastructure.embeddings.embedder import query_embedder
-            embedding = await query_embedder.embed(request.query)
+            embedding = await query_embedder.embed_query(request.query)
 
         # ------------------------------------------------------------------
         # 3. Retrieval

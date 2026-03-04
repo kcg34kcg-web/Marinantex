@@ -14,13 +14,16 @@ interface LegalModelSelection {
   modelId: string;
 }
 
+const SUMMARY_PRIMARY_MODEL_ID = 'gemini-2.5-flash-lite';
+const SUMMARY_FALLBACK_MODEL_ID = 'gemini-2.0-flash-lite';
+
 export const getLegalModel = (tier: LegalModelTier = 'drafting'): SupportedModel => {
   if (!serverEnv.GOOGLE_GENERATIVE_AI_API_KEY) {
     return getFallbackDraftingModel();
   }
 
   if (tier === 'summary') {
-    return google('gemini-1.5-flash');
+    return google(SUMMARY_PRIMARY_MODEL_ID);
   }
 
   return google('gemini-1.5-pro');
@@ -70,11 +73,31 @@ export async function resolveLegalModelWithFallback(tier: LegalModelTier = 'draf
       };
     }
 
-    const summaryModel = getLegalModel('summary');
+    const summaryModel = google(SUMMARY_PRIMARY_MODEL_ID) as SupportedModel;
+    const isSummaryPrimaryHealthy = await checkModelHealth(summaryModel);
+    if (isSummaryPrimaryHealthy) {
+      return {
+        model: summaryModel,
+        providerName: 'google',
+        modelId: SUMMARY_PRIMARY_MODEL_ID,
+      };
+    }
+
+    const summaryFallbackModel = google(SUMMARY_FALLBACK_MODEL_ID) as SupportedModel;
+    const isSummaryFallbackHealthy = await checkModelHealth(summaryFallbackModel);
+    if (isSummaryFallbackHealthy) {
+      return {
+        model: summaryFallbackModel,
+        providerName: 'google',
+        modelId: SUMMARY_FALLBACK_MODEL_ID,
+      };
+    }
+
+    const fallbackSummaryModel = getFallbackSummaryModel();
     return {
-      model: summaryModel,
-      providerName: 'google',
-      modelId: 'gemini-1.5-flash',
+      model: fallbackSummaryModel,
+      providerName: serverEnv.COHERE_API_KEY ? 'cohere' : 'openai',
+      modelId: serverEnv.COHERE_API_KEY ? 'command-r' : 'gpt-4o-mini',
     };
   }
 

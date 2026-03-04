@@ -1,0 +1,327 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  EDITOR
+  REVIEWER
+  COMMENTER
+  VIEWER
+}
+
+enum DocumentType {
+  PETITION
+  CONTRACT
+  NOTICE
+  DEFENSE
+  INTERNAL_MEMO
+}
+
+enum DocumentStatus {
+  DRAFT
+  REVIEW
+  FINAL
+  ARCHIVED
+}
+
+enum ExportFormat {
+  PDF
+  DOCX
+}
+
+enum ExportStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+enum SharePermission {
+  VIEW
+  COMMENT
+}
+
+enum ClauseCategory {
+  GENERAL
+  LIABILITY
+  PAYMENT
+  TERMINATION
+  CONFIDENTIALITY
+  DISPUTE
+}
+
+enum AuditAction {
+  DOCUMENT_CREATED
+  DOCUMENT_UPDATED
+  DOCUMENT_AUTOSAVED
+  DOCUMENT_STATUS_CHANGED
+  DOCUMENT_VERSION_CREATED
+  DOCUMENT_FINALIZED
+  DOCUMENT_LOCK_ACQUIRED
+  DOCUMENT_LOCK_REFRESHED
+  DOCUMENT_LOCK_RELEASED
+  DOCUMENT_CRASH_RECOVERED
+  DOCUMENT_EXPORT_REQUESTED
+  DOCUMENT_EXPORT_STARTED
+  DOCUMENT_EXPORT_COMPLETED
+  DOCUMENT_EXPORT_FAILED
+  DOCUMENT_EXPORT_DOWNLOAD_URL_ISSUED
+  DOCUMENT_EXPORT_DOWNLOADED
+  TEMPLATE_CREATED
+  TEMPLATE_UPDATED
+  CLAUSE_CREATED
+  CLAUSE_UPDATED
+  SHARE_LINK_CREATED
+  SHARE_LINK_REVOKED
+  SHARE_LINK_VIEWED
+  SHARE_LINK_COMMENTED
+  AUTH_LOGIN_SUCCESS
+  AUTH_LOGIN_FAILED
+  AUTH_TOKEN_REFRESHED
+}
+
+enum AuditObjectType {
+  DOCUMENT
+  DOCUMENT_EXPORT
+  DOCUMENT_VERSION
+  TEMPLATE
+  CLAUSE
+  SHARE_LINK
+  AUTH
+  SYSTEM
+}
+
+model Tenant {
+  id          String      @id @default(uuid()) @db.Uuid
+  slug        String      @unique
+  name        String
+  status      TenantStatus @default(ACTIVE)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  users       User[]
+  documents   Document[]
+  versions    DocumentVersion[]
+  documentLocks DocumentLock[]
+  exports     DocumentExport[]
+  auditLogs   AuditLog[]
+  shareLinks  ShareLink[]
+  shareLinkComments ShareLinkComment[]
+  templates   Template[]
+  clauses     Clause[]
+}
+
+model User {
+  id                     String            @id @default(uuid()) @db.Uuid
+  tenantId               String            @db.Uuid
+  email                  String
+  fullName               String
+  passwordHash           String?
+  role                   UserRole
+  isActive               Boolean           @default(true)
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+  tenant                 Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ownedDocuments         Document[]        @relation("DocumentOwner")
+  createdDocumentVersions DocumentVersion[] @relation("DocumentVersionAuthor")
+  documentLocks         DocumentLock[]
+  requestedExports      DocumentExport[]    @relation("DocumentExportRequester")
+  actorAuditLogs         AuditLog[]        @relation("AuditActor")
+  createdShareLinks      ShareLink[]       @relation("ShareLinkCreator")
+  createdTemplates       Template[]        @relation("TemplateCreator")
+  createdClauses         Clause[]          @relation("ClauseCreator")
+
+  @@unique([tenantId, email])
+  @@index([tenantId, role])
+}
+
+model Document {
+  id                String          @id @default(uuid()) @db.Uuid
+  tenantId          String          @db.Uuid
+  ownerId           String          @db.Uuid
+  title             String
+  type              DocumentType
+  status            DocumentStatus  @default(DRAFT)
+  schemaVersion     Int             @default(1)
+  canonicalJson     Json
+  latestVersion     Int             @default(1)
+  finalVersionId    String?         @db.Uuid
+  finalContentHash  String?
+  finalizedAt       DateTime?
+  archivedAt        DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner             User            @relation("DocumentOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  versions          DocumentVersion[]
+  lock              DocumentLock?
+  exports           DocumentExport[]
+  shareLinks        ShareLink[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, type])
+}
+
+model DocumentLock {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @db.Uuid
+  documentId String   @db.Uuid @unique
+  userId     String   @db.Uuid
+  acquiredAt DateTime @default(now())
+  expiresAt  DateTime
+  updatedAt  DateTime @updatedAt
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, expiresAt])
+}
+
+model DocumentExport {
+  id            String       @id @default(uuid()) @db.Uuid
+  tenantId      String       @db.Uuid
+  documentId    String       @db.Uuid
+  requestedById String       @db.Uuid
+  format        ExportFormat
+  status        ExportStatus @default(QUEUED)
+  queueJobId    String?
+  storageKey    String?
+  checksum      String?
+  fileSizeBytes Int?
+  failureReason String?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  tenant        Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  document      Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  requestedBy   User         @relation("DocumentExportRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, documentId, createdAt])
+  @@index([tenantId, status, createdAt])
+}
+
+model DocumentVersion {
+  id              String         @id @default(uuid()) @db.Uuid
+  tenantId        String         @db.Uuid
+  documentId      String         @db.Uuid
+  versionNumber   Int
+  schemaVersion   Int            @default(1)
+  canonicalJson   Json
+  snapshotHash    String
+  isFinalSnapshot Boolean        @default(false)
+  createdById     String         @db.Uuid
+  createdAt       DateTime       @default(now())
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  document        Document       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdBy       User           @relation("DocumentVersionAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([documentId, versionNumber])
+  @@index([tenantId, documentId])
+  @@index([tenantId, isFinalSnapshot])
+}
+
+model AuditLog {
+  id                 String          @id @default(uuid()) @db.Uuid
+  tenantId           String          @db.Uuid
+  actorUserId        String?         @db.Uuid
+  action             AuditAction
+  objectType         AuditObjectType
+  objectId           String?
+  requestId          String?
+  ipAddress          String?
+  userAgentHash      String?
+  metadata           Json?
+  occurredAt         DateTime        @default(now())
+  dataClassification String          @default("general")
+  tenant             Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actorUser          User?           @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, objectType, objectId])
+}
+
+model ShareLink {
+  id             String          @id @default(uuid()) @db.Uuid
+  tenantId       String          @db.Uuid
+  documentId     String          @db.Uuid
+  createdById    String          @db.Uuid
+  tokenHash      String          @unique
+  permission     SharePermission
+  expiresAt      DateTime
+  maxViews       Int?
+  viewCount      Int             @default(0)
+  revokedAt      DateTime?
+  lastAccessedAt DateTime?
+  createdAt      DateTime        @default(now())
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  document       Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdBy      User            @relation("ShareLinkCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  comments       ShareLinkComment[]
+
+  @@index([tenantId, documentId])
+  @@index([tenantId, expiresAt])
+}
+
+model ShareLinkComment {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  shareLinkId String    @db.Uuid
+  authorName  String
+  body        String
+  createdAt   DateTime  @default(now())
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shareLink   ShareLink @relation(fields: [shareLinkId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, shareLinkId, createdAt])
+}
+
+model Template {
+  id            String       @id @default(uuid()) @db.Uuid
+  tenantId      String       @db.Uuid
+  name          String
+  description   String?
+  documentType  DocumentType
+  schemaVersion Int          @default(1)
+  canonicalJson Json
+  createdById   String       @db.Uuid
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  tenant        Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy     User         @relation("TemplateCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, name])
+  @@index([tenantId, documentType, isActive])
+}
+
+model Clause {
+  id          String         @id @default(uuid()) @db.Uuid
+  tenantId    String         @db.Uuid
+  title       String
+  category    ClauseCategory @default(GENERAL)
+  bodyJson    Json
+  createdById String         @db.Uuid
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy   User           @relation("ClauseCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, category, isActive])
+  @@unique([tenantId, title])
+}

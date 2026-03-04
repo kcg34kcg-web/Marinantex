@@ -1,0 +1,30 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  line-height: var(--line-height-scale-factor, 1.6);
+  -webkit-font-smoothing: antialiased;
+  font-family: var(--font-family-current, var(--font-family-sans));
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.2s, color 0.2s;
+}
+
+[data-font-family='sans'] {
+  --font-family-current: var(--font-family-sans);
+}
+
+[data-font-family='serif'] {
+  --font-family-current: var(--font-family-serif);
+}
+
+input, button, textarea, select {
+  font: inherit;
+}

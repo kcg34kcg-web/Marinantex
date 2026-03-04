@@ -1,0 +1,26 @@
+{
+  "imported": {
+    "7538": {
+      "status": "ok",
+      "dryRun": true,
+      "textLen": 14436,
+      "detailUrl": "https://www.tbmm.gov.tr/Yasama/Kanun/EF878609-056D-4758-A275-019363660385",
+      "at": "2026-03-01T15:38:15.078Z"
+    },
+    "7539": {
+      "status": "ok",
+      "dryRun": true,
+      "textLen": 15955,
+      "detailUrl": "https://www.tbmm.gov.tr/Yasama/Kanun/F1D6CC87-06F7-4BBB-BCE3-01945043D1AA",
+      "at": "2026-03-01T15:38:15.594Z"
+    },
+    "7540": {
+      "status": "ok",
+      "dryRun": true,
+      "textLen": 14681,
+      "detailUrl": "https://www.tbmm.gov.tr/Yasama/Kanun/D6A14FA8-BF9E-4E9B-BE58-0193DEE6C99A",
+      "at": "2026-03-01T15:38:16.128Z"
+    }
+  },
+  "failed": {}
+}

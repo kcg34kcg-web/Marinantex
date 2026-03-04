@@ -1,0 +1,134 @@
+/* ==========================================================================
+   1. PRIMITIVE TOKENS (Brand-agnostic base values)
+   ========================================================================== */
+:root {
+  /* --- Colors: Gray Scale --- */
+  --color-gray-50: #F9FAFB; --color-gray-100: #F3F4F6; --color-gray-200: #E5E7EB; --color-gray-300: #D1D5DB; --color-gray-400: #9CA3AF; --color-gray-500: #6B7280; --color-gray-600: #4B5563; --color-gray-700: #374151; --color-gray-800: #1F2937; --color-gray-900: #111827; --color-white: #FFFFFF; --color-black: #000000;
+  /* --- Colors: Accent --- */
+  --color-blue-400: #60A5FA; --color-blue-500: #3B82F6; --color-blue-600: #2563EB;
+  /* --- Colors: Semantic States --- */
+  --color-green-500: #22C55E; --color-red-500: #EF4444; --color-yellow-500: #EAB308;
+  /* --- Typography --- */
+  --font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-family-serif: 'Lora', Georgia, serif;
+  --font-family-mono: 'Fira Code', 'JetBrains Mono', monospace;
+}
+
+/* ==========================================================================
+   2. SEMANTIC TOKENS (Theme-specific mappings)
+   ========================================================================== */
+
+/* --- Theme: Default Light (default) --- */
+:root, [data-theme='light'] {
+  --bg-primary: var(--color-gray-100);
+  --bg-surface: var(--color-white);
+  --text-primary: var(--color-gray-900);
+  --text-muted: var(--color-gray-600);
+  --border-subtle: var(--color-gray-200);
+  --accent: var(--color-blue-600);
+  --accent-contrast: var(--color-white);
+  --success: var(--color-green-500);
+  --danger: var(--color-red-500);
+  --warning: var(--color-yellow-500);
+}
+
+/* --- Theme: Dark --- */
+[data-theme='dark'] {
+  --bg-primary: var(--color-gray-900);
+  --bg-surface: var(--color-gray-800);
+  --text-primary: var(--color-gray-100);
+  --text-muted: var(--color-gray-400);
+  --border-subtle: var(--color-gray-700);
+  --accent: var(--color-blue-500);
+  --accent-contrast: var(--color-white);
+  --success: var(--color-green-500);
+  --danger: var(--color-red-500);
+  --warning: var(--color-yellow-500);
+}
+
+/* --- Theme: Corporate Focus --- */
+[data-theme='corporate'] {
+  --bg-primary: #0d1429;
+  --bg-surface: #131d38;
+  --text-primary: var(--color-gray-100);
+  --text-muted: #90a4d4;
+  --border-subtle: #243257;
+  --accent: #4f80ff;
+  --accent-contrast: var(--color-white);
+  --success: var(--color-green-500);
+  --danger: var(--color-red-500);
+  --warning: var(--color-yellow-500);
+}
+
+/* ==========================================================================
+   3. HIGH CONTRAST MODE OVERRIDES
+   ========================================================================== */
+[data-high-contrast='true'][data-theme='light'] {
+  --bg-primary: var(--color-white);
+  --text-primary: var(--color-black);
+  --text-muted: #111;
+}
+[data-high-contrast='true'][data-theme='dark'] {
+  --bg-primary: var(--color-black);
+  --text-primary: var(--color-white);
+  --text-muted: #eee;
+}
+
+/* ==========================================================================
+   4. TYPOGRAPHY & DENSITY OVERRIDES
+   ========================================================================== */
+:root {
+  --font-scale-factor: 1;
+  --line-height-scale-factor: 1.6;
+}
+
+/* --- Font Size --- */
+[data-font-size='small'] { --font-scale-factor: 0.9; }
+[data-font-size='medium'] { --font-scale-factor: 1; }
+[data-font-size='large'] { --font-scale-factor: 1.1; }
+[data-font-size='xl'] { --font-scale-factor: 1.2; }
+
+/* --- Line Height --- */
+[data-line-height='compact'] { --line-height-scale-factor: 1.4; }
+[data-line-height='comfortable'] { --line-height-scale-factor: 1.6; }
+
+/* --- Font Family --- */
+[data-font-family='sans'] { --font-family-current: var(--font-family-sans); }
+[data-font-family='serif'] { --font-family-current: var(--font-family-serif); }
+[data-font-family='mono'] { --font-family-current: var(--font-family-mono); }
+
+/* --- Sidebar Density --- */
+/* These variables would be consumed by your actual Sidebar component */
+[data-sidebar-density='wide'] {
+  --sidebar-width: 280px;
+  --sidebar-padding: 1rem;
+}
+[data-sidebar-density='narrow'] {
+  --sidebar-width: 220px;
+  --sidebar-padding: 0.75rem;
+}
+
+html {
+  /* Base font size is 16px. Scaling factor adjusts this. `rem` units will scale accordingly. */
+  font-size: calc(16px * var(--font-scale-factor));
+}
+
+body {
+  font-family: var(--font-family-current, var(--font-family-sans));
+  line-height: var(--line-height-scale-factor, 1.6);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+
+  /* Smooth transitions for theme changes */
+  transition: background-color 150ms ease-in-out, color 150ms ease-in-out;
+}
+
+/* ==========================================================================
+   5. REDUCE MOTION
+   ========================================================================== */
+[data-reduce-motion='true'] * {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}

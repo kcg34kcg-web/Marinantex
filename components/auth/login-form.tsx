@@ -35,7 +35,7 @@ export function LoginForm({ nextPath, expectedRole }: LoginFormProps) {
       <input type="hidden" name="nextPath" value={nextPath ?? ''} />
       <input type="hidden" name="expectedRole" value={expectedRole} />
       {state.error ? <p className="text-sm text-orange-600">{state.error}</p> : null}
-      <Button className="w-full" disabled={isPending}>
+      <Button type="submit" className="w-full" disabled={isPending}>
         {isPending ? 'Giriş yapılıyor...' : 'Giriş Yap'}
       </Button>
     </form>

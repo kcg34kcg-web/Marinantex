@@ -20,7 +20,12 @@ function isAuthRoute(pathname: string): boolean {
 }
 
 function isPublicRoute(pathname: string): boolean {
-  return pathname === '/' || isAuthRoute(pathname) || pathname.startsWith('/auth');
+  return (
+    pathname === '/' ||
+    isAuthRoute(pathname) ||
+    pathname.startsWith('/auth') ||
+    pathname.startsWith('/editor')
+  );
 }
 
 function isDashboardRoute(pathname: string): boolean {

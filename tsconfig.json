@@ -16,7 +16,11 @@
     "plugins": [{ "name": "next" }],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "react-hot-toast": ["./shims/react-hot-toast"],
+      "framer-motion": ["./shims/framer-motion"],
+      "@radix-ui/react-hover-card": ["./shims/radix-hover-card"],
+      "browser-image-compression": ["./shims/browser-image-compression"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

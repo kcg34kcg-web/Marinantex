@@ -55,7 +55,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from infrastructure.config import settings
 
@@ -89,6 +89,8 @@ class SourceVersionRecord:
     collected_at: Optional[str]    # ISO-8601 string; None when not set
     norm_hierarchy: Optional[str]
     authority_score: float
+    injection_flag: bool = False
+    injection_notes: List[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -117,10 +119,23 @@ class LegalAuditEntry:
     cost_estimate_usd: float
     why_this_answer: str                        # Human-readable, KVKK-safe log
     audit_signature: str                        # HMAC-SHA256 hex digest
+    requested_tier: Optional[str] = None        # UI tier label (hazir_cevap...)
+    final_tier: Optional[int] = None            # Final generation tier (1-4)
+    final_generation_tier: Optional[int] = None # Step 22: explicit final generation tier
+    final_model: Optional[str] = None           # Step 22: explicit final model
+    subtask_models: List[str] = field(default_factory=list)  # Step 22: hybrid subtask model list
+    response_type: str = "legal_grounded"
+    source_count: int = 0
+    case_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    intent_class: Optional[str] = None
+    strict_grounding: bool = True
     # Step 15: context summarisation + LitM stats (optional — default safe values)
     docs_summarized_count: int = 0
     tokens_saved: int = 0
     litm_applied: bool = False
+    temporal_fields: Dict[str, str] = field(default_factory=dict)
+    tenant_context: Dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +220,11 @@ def _build_why_this_answer(
     docs_summarized_count: int = 0,
     tokens_saved: int = 0,
     litm_applied: bool = False,
+    injection_doc_count: int = 0,
+    temporal_fields: Optional[Dict[str, str]] = None,
+    subtask_models: Optional[List[str]] = None,
+    final_model: Optional[str] = None,
+    final_generation_tier: Optional[int] = None,
 ) -> str:
     """
     Builds a human-readable 'why this answer' explanation log.
@@ -225,6 +245,12 @@ def _build_why_this_answer(
         parts.append(f"Araç çağrıları: {', '.join(tool_calls)}.")
     if tool_errors:
         parts.append(f"Araç hataları (non-fatal): {', '.join(tool_errors)}.")
+    if subtask_models:
+        parts.append(f"Subtask models: {', '.join(subtask_models)}.")
+    if final_model:
+        parts.append(f"Final model: {final_model}.")
+    if final_generation_tier is not None:
+        parts.append(f"Final generation tier: {final_generation_tier}.")
     if docs_summarized_count > 0:
         parts.append(
             f"Özetleme: {docs_summarized_count} ikincil belge özetlendi, "
@@ -232,6 +258,21 @@ def _build_why_this_answer(
         )
     if litm_applied:
         parts.append("Lost-in-the-Middle yeniden sıralama uygulandı.")
+    if injection_doc_count > 0:
+        parts.append(
+            f"Belge-içi talimat savunması: {injection_doc_count} kaynakta "
+            "injection paterni tespit edildi ve sanitize edildi."
+        )
+    if temporal_fields:
+        pairs: List[str] = []
+        if temporal_fields.get("as_of_date"):
+            pairs.append(f"Analiz Tarihi={temporal_fields['as_of_date']}")
+        if temporal_fields.get("event_date"):
+            pairs.append(f"Olay Tarihi={temporal_fields['event_date']}")
+        if temporal_fields.get("decision_date"):
+            pairs.append(f"Karar Tarihi={temporal_fields['decision_date']}")
+        if pairs:
+            parts.append("Temporal alanlar: " + ", ".join(pairs) + ".")
     parts.append(f"Hukuki uyarı seviyesi: {disclaimer_severity}.")
     return " ".join(parts)
 
@@ -296,13 +337,27 @@ class AuditTrailRecorder:
         source_docs: List[Any],         # List[LegalDocument]
         tool_calls: List[str],
         tool_errors: Optional[List[str]] = None,
+        final_model: Optional[str] = None,
+        final_generation_tier: Optional[int] = None,
+        subtask_models: Optional[List[str]] = None,
+        requested_tier: Optional[str] = None,
+        final_tier: Optional[int] = None,
+        response_type: str = "legal_grounded",
+        source_count: Optional[int] = None,
+        case_id: Optional[str] = None,
+        thread_id: Optional[str] = None,
+        intent_class: Optional[str] = None,
+        strict_grounding: bool = True,
         docs_summarized_count: int = 0,
         tokens_saved: int = 0,
         litm_applied: bool = False,
+        injection_doc_count: int = 0,
         grounding_ratio: float = 0.0,
         disclaimer_severity: str = "INFO",
         latency_ms: int = 0,
         cost_estimate_usd: float = 0.0,
+        temporal_fields: Optional[Dict[str, str]] = None,
+        tenant_context: Optional[Dict[str, Any]] = None,
     ) -> LegalAuditEntry:
         """
         Builds and returns a signed LegalAuditEntry.  Also emits an INFO log.
@@ -338,6 +393,8 @@ class AuditTrailRecorder:
                 ),
                 norm_hierarchy=doc.norm_hierarchy,
                 authority_score=float(doc.authority_score),
+                injection_flag=bool(getattr(doc, "injection_flag", False)),
+                injection_notes=list(getattr(doc, "injection_notes", []) or []),
             )
             for doc in source_docs
         ]
@@ -357,6 +414,15 @@ class AuditTrailRecorder:
             docs_summarized_count=docs_summarized_count,
             tokens_saved=tokens_saved,
             litm_applied=litm_applied,
+            injection_doc_count=injection_doc_count,
+            temporal_fields=temporal_fields,
+            subtask_models=list(subtask_models or []),
+            final_model=final_model or model_used,
+            final_generation_tier=(
+                final_generation_tier
+                if final_generation_tier is not None
+                else (final_tier or tier)
+            ),
         )
 
         # Sign the core fields
@@ -376,7 +442,22 @@ class AuditTrailRecorder:
             query_hash=query_hash,
             bureau_id=bureau_id,
             tier=tier,
+            requested_tier=requested_tier,
+            final_tier=final_tier or tier,
+            final_generation_tier=(
+                final_generation_tier
+                if final_generation_tier is not None
+                else (final_tier or tier)
+            ),
+            final_model=final_model or model_used,
             model_used=model_used,
+            subtask_models=list(subtask_models or []),
+            response_type=response_type,
+            source_count=source_count if source_count is not None else len(source_docs),
+            case_id=case_id,
+            thread_id=thread_id,
+            intent_class=intent_class,
+            strict_grounding=bool(strict_grounding),
             source_versions=source_versions,
             tool_calls_made=list(tool_calls),
             tool_errors=_tool_errors,
@@ -389,14 +470,17 @@ class AuditTrailRecorder:
             docs_summarized_count=docs_summarized_count,
             tokens_saved=tokens_saved,
             litm_applied=litm_applied,
+            temporal_fields=dict(temporal_fields or {}),
+            tenant_context=dict(tenant_context or {}),
         )
 
         logger.info(
-            "AUDIT_TRAIL | request_id=%s | tier=%d | model=%s | "
+            "AUDIT_TRAIL | request_id=%s | tier=%d | final_tier=%s | model=%s | "
             "sources=%d | grounding=%.2f | cost=$%.6f | latency=%dms | "
             "severity=%s | sig=%s...",
             request_id,
             tier,
+            final_tier or tier,
             model_used,
             len(source_versions),
             grounding_ratio,
@@ -428,3 +512,4 @@ class AuditTrailRecorder:
 # ---------------------------------------------------------------------------
 
 audit_recorder = AuditTrailRecorder()
+

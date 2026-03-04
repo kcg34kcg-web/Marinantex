@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { differenceInDays, parseISO } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { LegalDocumentSkeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
+import Badge from '../../Badge'; // Corrected path to use our custom Badge
 import { fetchDashboardData } from '@/lib/queries';
 import { formatDateTR } from '@/lib/date';
 import { BrainCircuit, ArrowRight, AlertTriangle, Clock, CheckCircle2, Sparkles } from 'lucide-react';
@@ -14,8 +14,8 @@ import { cn } from '@/lib/utils';
 
 function DeadlineUrgency({ date }: { date: string }) {
   const days = differenceInDays(parseISO(date), new Date());
-  if (days < 0) return <Badge variant="critical">Geçti</Badge>;
-  if (days <= 3) return <Badge variant="critical">{days} gün kaldı</Badge>;
+  if (days < 0) return <Badge variant="danger">Geçti</Badge>;
+  if (days <= 3) return <Badge variant="danger">{days} gün kaldı</Badge>;
   if (days <= 7) return <Badge variant="warning">{days} gün kaldı</Badge>;
   return <Badge variant="success">{days} gün kaldı</Badge>;
 }

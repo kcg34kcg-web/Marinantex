@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
+import { createAdminClient } from '@/utils/supabase/admin';
+import { logDashboardAudit } from '@/lib/dashboard/audit';
 
 const createCaseTaskSchema = z.object({
   caseId: z.string().uuid(),
@@ -22,8 +24,9 @@ export async function POST(request: Request) {
   }
 
   const payload = parsed.data;
+  const admin = createAdminClient();
 
-  const { data: caseRow } = await access.supabase
+  const { data: caseRow } = await admin
     .from('cases')
     .select('id, title')
     .eq('id', payload.caseId)
@@ -35,7 +38,7 @@ export async function POST(request: Request) {
 
   const taskDescription = payload.description ?? `Dosya: ${caseRow.title}`;
 
-  const { data, error } = await access.supabase
+  const { data, error } = await admin
     .from('office_tasks')
     .insert({
       case_id: payload.caseId,
@@ -56,6 +59,32 @@ export async function POST(request: Request) {
   if (error || !data) {
     return Response.json({ error: 'Görev oluşturulamadı.' }, { status: 500 });
   }
+
+  await admin.from('case_timeline_events').insert({
+    case_id: payload.caseId,
+    event_type: 'reminder',
+    title: 'Yeni görev oluşturuldu',
+    description: payload.title,
+    metadata: {
+      taskId: data.id,
+      priority: payload.priority,
+      dueAt: payload.dueAt ?? null,
+      assignedTo: payload.assignedTo ?? access.userId,
+    },
+    created_by: access.userId,
+  });
+
+  await logDashboardAudit(admin, {
+    actorUserId: access.userId,
+    action: 'case_task_created',
+    entityType: 'office_task',
+    entityId: data.id,
+    metadata: {
+      caseId: payload.caseId,
+      priority: payload.priority,
+      dueAt: payload.dueAt ?? null,
+    },
+  });
 
   return Response.json({ task: data });
 }

@@ -120,7 +120,7 @@ export async function signupAction(
 
     const inviteResult = await adminSupabase
       .from('user_invites')
-      .select('id, email, full_name, username, target_role, expires_at, accepted_at')
+      .select('id, email, full_name, username, target_role, expires_at, accepted_at, invited_client_id')
       .eq('token', payload.data.inviteToken)
       .single();
 
@@ -220,6 +220,35 @@ export async function signupAction(
       .from('user_invites')
       .update({ accepted_at: new Date().toISOString(), accepted_by: signupData.user.id })
       .eq('id', invite.id);
+
+    if (role === 'client') {
+      const inviteRecord = invite as Record<string, unknown>;
+      const invitedClientId =
+        typeof inviteRecord.invited_client_id === 'string' && inviteRecord.invited_client_id.length > 0
+          ? inviteRecord.invited_client_id
+          : null;
+
+      if (invitedClientId) {
+        await adminSupabase
+          .from('clients')
+          .update({
+            profile_id: signupData.user.id,
+            status: 'active',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', invitedClientId);
+      } else {
+        await adminSupabase
+          .from('clients')
+          .update({
+            profile_id: signupData.user.id,
+            status: 'active',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('email', payload.data.email.toLowerCase())
+          .is('deleted_at', null);
+      }
+    }
 
     const redirectTo = role === 'client' ? '/portal' : '/dashboard';
 

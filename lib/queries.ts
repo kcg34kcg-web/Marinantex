@@ -67,6 +67,14 @@ export interface DashboardCaseItem {
   id: string;
   title: string;
   clientName: string;
+  clients?: Array<{
+    id: string;
+    fullName: string;
+    publicRefCode: string;
+    fileNo: string | null;
+    relationRefCode: string;
+  }>;
+  fileNo?: string | null;
   status: CaseStatus;
   updatedAt: string;
   lastNoteAt: string | null;

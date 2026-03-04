@@ -1,0 +1,73 @@
+/* Using semantic tokens from themes.css */
+
+.settings-container {
+  max-width: 800px;
+  margin: 2rem auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem; /* Using rem for scalability */
+}
+
+/* The .settings-section is now handled by the Card component. */
+/* We just need to style the items inside the card. */
+.settings-container .card {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.settings-section-header {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 1rem;
+}
+
+.setting-item {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.setting-item label {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.radio-group {
+  display: flex;
+  gap: 0.25rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 0.25rem;
+  background-color: var(--bg-primary);
+}
+
+.radio-group button {
+  flex-grow: 1;
+  padding: 0.5rem 0;
+  border: 1px solid transparent;
+  background-color: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 150ms ease-in-out;
+  font-size: 0.9rem;
+}
+
+.radio-group button.active {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  font-weight: 600;
+  border-color: var(--border-subtle);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+
+.setting-item.switch {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  grid-template-columns: 1fr auto;
+}

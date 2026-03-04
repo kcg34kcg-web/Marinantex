@@ -1,0 +1,1026 @@
+﻿
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="content-language" content="tr">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    
+        <script type="text/javascript">
+
+            //var _gaq = _gaq || [];
+            //_gaq.push(['_setAccount', 'UA-21405575-5']);
+            //_gaq.push(['_trackPageview']);
+            //
+            //(function () {
+            //    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+            //    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+            //    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+            //})();
+        </script>
+    
+
+
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-K30R4B6KS2"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag() { dataLayer.push(arguments); }
+        gtag('js', new Date());
+
+        gtag('config', 'G-K30R4B6KS2');
+    </script>
+
+
+    <title aria-hidden="true">Mevzuat Bilgi Sistemi</title>
+    <meta name="keywords" content="mevzuat bilgi sistemi, mevzuat, tc mevzuat bilgi sistemi, mevzuatlar" />
+    <meta name="description" content="Resmî Gazete’de yayımlanan kanunlar, Cumhurbaşkanlığı kararnameleri, yönetmelikler, tebliğler ve diğer düzenleyici idari işlemler tek metin haline getirilir ve güncel olarak yayımlanır" />
+    <link rel="shortcut icon" href="favicon.ico" />
+
+    
+    
+        <link rel="stylesheet" href="/css/bundle.min.css?v=9zUQ_ZWOpiEW88ANaJ2fF5029bJHG4VDTpHiqWwcWVM" />
+    
+    <link href="/lib/owlcarousel/owl.carousel.min.css" rel="stylesheet" />
+    <link href="/lib/owlcarousel/owl.theme.default.min.css" rel="stylesheet" />
+
+
+    
+
+    <style id="antiClickjack">
+        body {
+            display: none !important;
+        }
+    </style>
+    <script type="text/javascript">
+        if (self === top) {
+            var antiClickjack = document.getElementById("antiClickjack");
+            antiClickjack.parentNode.removeChild(antiClickjack);
+        } else {
+            top.location = self.location;
+        }
+
+        window.showLoader = function () {
+            $("#loaderContainer").css("display", "block");
+        };
+
+        window.hideLoader = function () {
+            $("#loaderContainer").css("display", "none");
+        };
+    </script>
+
+
+</head>
+<body>
+    <div class="container pr-0 mt-2 mb-1" id="navContainer">
+        <nav class="navbar navbar-expand-lg navbar-light position-absolute" style="margin-top:-14px" id="navLogoRow">
+            <a id="text-logo" class="navbar-brand" href="/" style="z-index:10;" title="Cumhurbaşkanlığı Forsu">
+                <div class="media">
+                    <img src="/img/arma.png" id="logo-img" alt="Türkiye Cumhuriyeti Cumhurbaşkanlığı Mevzuat Bilgi Sistemi">
+                    <div class="media-body align-self-stretch d-flex align-items-start flex-column" id="text-logo-container" title="Türkiye Cumhuriyeti Cumhurbaşkanlığı Mevzuat Bilgi Sistemi">
+                        <div id="text-logo-01" class="mt-auto mb-0"><span aria-hidden="true">T.C.</span> <span aria-hidden="true" class="text-logo-cumhurbaskanligi">CUMHURBAŞKANLIĞI</span></div>
+                        <div id="text-logo-02" class="mb-auto mt-0" aria-hidden="true">MEVZUAT BİLGİ SİSTEMİ</div>
+                    </div>
+                </div>
+            </a>
+        </nav>
+        <nav class="navbar navbar-expand-xl navbar-light">
+
+            <div class="ml-auto">
+            </div>
+
+            <button class="navbar-toggler" id="navButtonMobile" type="button" data-toggle="collapse" data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+
+            <div class="w-100 mb-2" id="mobilMenuNav">
+
+                <div class="collapse navbar-collapse" id="navbarSupportedContent">
+                    <ul class="navbar-nav small ml-auto">
+                        <li class="nav-item dropdown" id="dropdown-menu-Regulation">
+                            <a class="nav-link pl-0 pr-0 dropdown-toggle" href="#" style="cursor:pointer;" id="navbarDropdownRegulation" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                Mevzuat Türü
+                            </a>
+                            <div class="dropdown-menu" aria-labelledby="navbarDropdown" id="dropdown-menu-Regulation-Down">
+                                <a class="dropdown-item" data-toggle=pill href="#kanunlar" onclick="clickNavigation(name)" name="kanunlar">Kanunlar</a>
+                                <a class="dropdown-item" data-toggle=pill href="#kanunHukmundeKararnameler" onclick="clickNavigation(name)" name="kanunHukmundeKararnameler">Kanun Hükmünde Kararnameler</a>
+                                <a class="dropdown-item" data-toggle=pill href="#cumhurbaskanligiKararnameleri" onclick="clickNavigation(name)" name="cumhurbaskanligiKararnameleri">Cumhurbaşkanlığı Kararnameleri</a>
+                                <a class="dropdown-item" data-toggle=pill href="#tuzukler" onclick="clickNavigation(name)" name="tuzukler">Tüzükler</a>
+                                <a class="dropdown-item" data-toggle=pill href="#cumhurbaskaniKararlari" onclick="clickNavigation(name)" name="cumhurbaskaniKararlari">Cumhurbaşkanı Kararları</a>
+                                <a class="dropdown-item" data-toggle=pill href="#cumhurbaskaniGenelgeleri" onclick="clickNavigation(name)" name="cumhurbaskaniGenelgeleri">Cumhurbaşkanlığı Genelgeleri</a>
+                                <a class="dropdown-item" data-toggle=pill href="#yonetmelikler" onclick="clickNavigation(name)" name="yonetmelikler">Yönetmelikler</a>
+                                <a class="dropdown-item" data-toggle=pill href="#tebligler" onclick="clickNavigation(name)" name="tebligler">Tebliğler</a>
+                            </div>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link pl-0 pr-0" title="TÜRKİYE CUMHURİYETİ ANAYASASI" href="#" onclick="clickNavigation(name)" name="anayasa" data-toggle=pill><div aria-hidden="true">T.C. Anayasası</div></a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link pl-0 pr-0" href="#mulga" onclick="clickNavigation(name)" name="mulga" data-toggle=pill>Mülga Mevzuat</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link pl-0 pr-0" href="#mevzuatFihristleri" onclick="clickNavigation(name)" name="mevzuatFihristleri" data-toggle=pill>Kanunlar Fihristi</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link pl-0 pr-0" href="#cumhurbaskanligiKararnameleriFihristi" onclick="clickNavigation(name)" name="cumhurbaskanligiKararnameleriFihristi" data-toggle=pill>Cumhurbaşkanlığı Kararnameleri Fihristi</a>
+                        </li>
+                        <li class="nav-item dropdown" id="dropdown-menu-Publications">
+                            <a class="nav-link pl-0 pr-0 dropdown-toggle" href="#" style="cursor:pointer;" id="navbarDropdownPublications" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                Yayınlar
+                            </a>
+                            <div class="dropdown-menu" aria-labelledby="navbarDropdown" id="dropdown-menu-Publications-Down">
+                                    <a class="dropdown-item" href=" /Publications?fp=Q1VNSFVSQkHFnktBTkxJxJ5JIEtBUkFSTkFNRUxFUsSwIEvDnExMxLBZQVRJ">CUMHURBA&#x15E;KANLI&#x11E;I KARARNAMELER&#x130; K&#xDC;LL&#x130;YATI</a>
+                                    <a class="dropdown-item" href=" /Publications?fp=MjA1IEtBTlVO">205 KANUN</a>
+                                    <a class="dropdown-item" href=" /Publications?fp=VEFIS8SwTSBLxLBUQUJJ">TAHK&#x130;M K&#x130;TABI</a>
+                                    <a class="dropdown-item" href=" /Publications?fp=VEFIS8SwTURFIEdVzIhOQ0VMIFNPUlVOTEFSIFYtVkk%3D">TAHK&#x130;MDE GU&#x308;NCEL SORUNLAR V-VI</a>
+                                    <a class="dropdown-item" href=" /Publications?fp=VEFIS8SwTURFIEfDnE5DRUwgR0VMxLDFnk1FTEVSIFNFTcSwTkVSIEvEsFRBQkk%3D">TAHK&#x130;MDE G&#xDC;NCEL GEL&#x130;&#x15E;MELER SEM&#x130;NER K&#x130;TABI</a>
+                                    <a class="dropdown-item" href=" /Publications?fp=VC5DLiBSRVNNw44gR0FaRVRFIMSwTEsgMTAwIFNBWUkgQ8SwTFQtSQ%3D%3D">T.C. RESM&#xCE; GAZETE &#x130;LK 100 SAYI C&#x130;LT-I</a>
+                                    <a class="dropdown-item" href=" /Publications?fp=VC5DLiBSRVNNw44gR0FaRVRFIMSwTEsgMTAwIFNBWUkgQ8SwTFQtSUk%3D">T.C. RESM&#xCE; GAZETE &#x130;LK 100 SAYI C&#x130;LT-II</a>
+                                    <a class="dropdown-item" href=" /Publications?fp=VEFIS8SwTSBTRU1QT1pZVU0gS8SwVEFCSQ%3D%3D">TAHK&#x130;M SEMPOZYUM K&#x130;TABI</a>
+                            </div>
+                        </li>
+                        <li class="nav-item font-weight-bold">
+                            <a data-toggle="modal" data-target="#UserLoginFormModal" id="userNameSessionDiv" class="nav-link" style="display:none;outline:0px" href="#"><i class="fa fa-user "></i> Oturum Aç</a>
+                        </li>
+                        <li>
+                            <div class="ml-auto  d-lg-block nav-link pl-0 pr-0">
+                                <div class="dropdown" style="display:none" id="userNameLoginDiv">
+                                    <a class="text-muted" style="text-decoration:none;cursor:pointer" href="javascript:void(0);">
+                                        <i class="fa fa-user-circle mr-2 float-left" style="margin-top:2px;"></i>&nbsp;&nbsp;<h6 id="userNameLogin" class="float-left"> </h6>
+                                    </a>
+                                    <div class="dropdown-menu" aria-labelledby="navbarDropdown" id="userNameLoginDivDown">
+                                        <a class="dropdown-item" href="/Favorites" id="myFavorites">Favorilerim</a>
+                                        <a class="dropdown-item" href="#" data-toggle="modal" data-target="#MyInformationsFormModal" id="myInformations" data-toggle=pill>Üye Bilgileri</a>
+                                        <a style="display:none" class="dropdown-item" data-toggle=pill>Üye Bilgileri</a>
+                                        <a class="dropdown-item" href="#" data-toggle=pill id="signOut">Çıkış</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+        </nav>
+    </div>
+
+    
+
+
+<div class="container-fluid ortaalan">
+    <div class="container h-100">
+        <div class="row align-items-center h-100">
+            <div class="col-12 col-sm-10 col-md-8 col-lg-6 col-xl-5 mx-auto">
+                <div class="text-center text-white mt-3">
+                    <div>
+                        <img src="/img/mevzuat_mobil_logo.png" style="height:45px; opacity:.8" />
+                    </div>
+                    <a href="/" class="ortaLink">
+                        <div class="row">
+                            <div class="col-12 mt-3">
+                                <h3 class="pb-2">MEVZUAT BİLGİ SİSTEMİ</h3>
+                            </div>
+                        </div>
+                    </a>
+                    <form id="aramaForm" class="form-inline justify-content-center mt-2 mb-3" method="post" action="/aramasonuc">
+                        <input style="font-weight:400" type="search" id="aramaButonu" autocomplete="off" class="form-control-sm pl-4 " name="AranacakMetin" placeholder="Aranacak ifade/sayıyı yazınız..." value="">
+                        <span title="Arama butonu" id="aramaButonuIkon" class="fa fa-search form-control-feedback aramaButonuIkon" tabindex="0"></span>
+                    <input name="antiforgerytoken" type="hidden" value="CfDJ8By9VBOtU6RDp2rXgxJkOrb1CyI4P1U7q1vGyKqOsj1xP4HiJTiU-ZsnTGKKHPy6qKR7nAoQtIkl4Iw-AyK50IvfgAygCKoHj_2KrfSbeEvmdg3RR3DZpNbYNbYoqKHXDci2JPN8ffVaNQuZ74VOzRA" /></form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+    
+
+<div class="modal fade" asp-formhelper="true" id="ChangePasswordFormModal" role="dialog" aria-labelledby="ChangePasswordFormModalTitle" aria-hidden="true">
+    <form id="ChangePasswordForm">
+        <div class="modal-dialog" role="document" style="max-width:400px;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <span class="modal-title text-center font-weight-bold">Şifre Değiştirme</span>
+                    <button type="button" title="Formu Kapat" class="close" data-dismiss="modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="form-group col mb-4">
+                            <input autocomplete="off" id="oldPassword" type="password" name="OldPassword" class="form-control form-control-sm" placeholder="Eski şifre" data-val="true" data-val-length="&#x15E;ifreniz en az 6 karakterden olu&#x15F;mal&#x131;d&#x131;r." data-val-length-max="60" data-val-length-min="6" data-val-required="The Eski &#x15E;ifre field is required." maxlength="60">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="OldPassword" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="form-group col mb-4">
+                            <input autocomplete="off" id="password" type="password" class="form-control form-control-sm" placeholder="Yeni şifre" data-val="true" data-val-length="&#x15E;ifreniz en az 6 karakterden olu&#x15F;mal&#x131;d&#x131;r." data-val-length-max="60" data-val-length-min="6" data-val-required="The Yeni &#x15E;ifre field is required." maxlength="60" name="Password">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Password" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="form-group col mb-4">
+                            <input autocomplete="off" id="newPassword" type="password" class="form-control form-control-sm" placeholder="Yeni şifre tekrar" data-val="true" data-val-length="&#x15E;ifreniz en az 6 karakterden olu&#x15F;mal&#x131;d&#x131;r." data-val-length-max="60" data-val-length-min="6" data-val-required="The Yeni &#x15E;ifre Tekrar field is required." maxlength="60" name="NewPassword">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="NewPassword" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer " style="position:relative;margin:auto">
+                    <button type="button" onclick="sendDataPassword()" class="btn btn-primary center-block">Güncelle</button>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<render-script></render-script>
+
+
+    <div id="myInformationsTable" style="display:block">
+        
+<div class="modal" asp-formhelper="true" id="MyInformationsFormModal" role="dialog" aria-labelledby="MyInformationsFormModalTitle">
+    <form id="MyInformationsForm">
+        <div class="modal-dialog" role="document" style="max-width:400px;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <span class="modal-title font-weight-bold">Üyelik Bilgileri</span>
+                    <button type="button" title="Formu Kapat" class="close" data-dismiss="modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="form-group col mb-4">
+                            <label class="col-form-label col-form-label-sm" for="Name">Ad&#x131;n&#x131;z</label>
+                            <input id="name" type="text" class="form-control form-control-sm" data-val="true" data-val-length="Bu alan&#x131; doldurman&#x131;z gerekmektedir." data-val-length-max="60" data-val-length-min="3" maxlength="60" name="Name" value="">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Name" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="form-group col mb-4">
+                            <label class="col-form-label col-form-label-sm" for="Surname">Soyad&#x131;n&#x131;z</label>
+                            <input id="surname" type="text" class="form-control form-control-sm" data-val="true" data-val-length="Bu alan&#x131; doldurman&#x131;z gerekmektedir." data-val-length-max="60" data-val-length-min="3" maxlength="60" name="Surname" value="">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Surname" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="form-group col mb-4">
+                            <label class="col-form-label col-form-label-sm" for="Job">Mesle&#x11F;iniz</label>
+                            <input id="job" type="text" class="form-control form-control-sm" data-val="true" data-val-length="Bu alan&#x131; doldurman&#x131;z gerekmektedir." data-val-length-max="60" data-val-length-min="3" maxlength="60" name="Job" value="">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Job" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer " style="position:relative;margin:auto">
+                    <button type="button" onclick="sendData()" class="btn btn-primary center-block">Güncelle</button>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<render-script></render-script>
+
+
+
+    </div>
+
+    
+
+
+<div class="container text-center" style="padding-bottom:150px; padding-top: 150px;">
+
+    <h1>404 - Sayfa Bulunamad&#x131;</h1>
+    &#xDC;zg&#xFC;n&#xFC;z, ula&#x15F;maya &#xE7;al&#x131;&#x15F;t&#x131;&#x11F;&#x131;n&#x131;z sayfa bulunamad&#x131;. Di&#x11F;er mevzuatlar&#x131; g&#xF6;r&#xFC;nt&#xFC;lemek i&#xE7;in ana sayfa&#x27;ya gidebilirsiniz.
+    <br><br>
+    <a href="/">Ana Sayfa'ya gitmek için tıklayınız.</a>
+</div>
+
+
+
+
+    <div class="modal fade" asp-formhelper="true" id="mevzuatDipnotModal" role="dialog" aria-labelledby="mevzuatDipnotModalTitle">
+        <div class="modal-dialog" role="document" style="padding-left:17px;" id="mevzuatDipnotModalWrapper">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <span class="modal-title font-weight-bold"></span>
+                    <button type="button" title="Formu Kapat" class="close" data-dismiss="modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="form-group col" id="mevzuatDipnotContainer" style="text-align:justify;">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer" style="position:relative;margin:auto">
+                    <button type="button" class="btn btn-info" data-dismiss="modal">Kapat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="container-fluid">
+        <div class="container py-4">
+            <div class="row">
+                <div class="col-12">
+                    <div class="row">
+                        <div class="col-12 col-sm-4 col-xl-4 text-center text-xl-left">
+                            <ul class="list-group list-group-transparent text-center text-md-left">
+                                <li class="list-group-item p-1">
+                                    <a href="/hakkimizda" target="_blank" title="Hakkımızda Sayfası">
+                                        Hakkımızda
+                                    </a>
+                                </li>
+                                <li class="list-group-item p-1">
+                                    <a href="/Yardim" target="_blank" title="Yardım Sayfası">
+                                        <i class="far fa-question-circle mr-1"></i>Yardım
+                                    </a>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="col-12 col-sm-4 col-xl-4 text-center">
+                            <div>
+                                <div class="d-inline-block">
+                                    <a href="https://apps.apple.com/tr/app/t-c-mevzuat-bilgi-sistemi/id1462051828" target="_blank" title="Mevzuat Mobil uygulamasını Apple App Store'dan indirin."><i class="fab fa-apple fa-3x"></i></a>
+                                </div><div class="d-inline-block ml-3">
+                                    <a href="https://play.google.com/store/apps/details?id=tr.gov.tccb.mevzuat" target="_blank" title="Mevzuat Mobil uygulamasını Google Play'den indirin."><i class="fab fa-android fa-3x"></i></a>
+                                </div>
+
+                            </div>
+                        </div>
+                        <div class="col-12 col-sm-4 col-xl-4 text-center text-xl-right">
+                            <ul class="list-group list-group-transparent text-center text-md-right">
+                                <li class="list-group-item p-1">
+                                    <a href="http://www.resmigazete.gov.tr/" target="_blank">Resmî Gazete</a>
+                                </li>
+                                <li class="list-group-item p-1">
+                                    <a href="/faydalilinkler">
+                                        Faydalı Linkler
+                                    </a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12"><hr></div>
+                <div class="col-12">
+                    <div class="row">
+                        <div class="col-12 col-xl-5 text-center text-xl-left">
+                            T.C. Cumhurbaşkanlığı Külliyesi<br>Hukuk ve Mevzuat Genel Müdürlüğü 06560 Beştepe / Ankara
+                        </div>
+                        <div class="col-12 col-xl-7 text-center text-xl-right">
+                            <ul class="list-inline mb-0 mt-3 mt-xl-0">
+                                <li class="list-inline-item"><a id="contactButton" href="#" data-toggle="modal" data-target="#ContactFormModal"><i class="fas fa-envelope ml-2"></i> Bize Ulaşın</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12"><hr></div>
+                <div class="col-12">
+                    <div class="row small">
+                        <div class="col-sm-12 col-md-12 col-lg-5">
+                            <img id="imgFooter" src="/img/logoFooter.png" alt="Türkiye Cumhuriyeti Cumhurbaşkanlığı">
+                            <a href="https://www.tccb.gov.tr/" target="_blank" title="T.C. Cumhurbaşkanlığı Genel Sekreterliği Hukuk ve Mevzuat Genel Müdürlüğü"><span aria-hidden="true" class="ml-1">T.C. Cumhurbaşkanlığı Genel Sekreterliği Hukuk ve Mevzuat Genel Müdürlüğü</span></a>
+                        </div>
+                        <div class="col-sm-12 col-md-12 col-lg-7 text-center text-lg-right">
+                            <i class="far fa-copyright mr-2"></i>2020 Tüm Hakları Saklıdır. Gizlilik,
+                            Kullanım ve Telif Hakları bildiriminde belirtilen kurallar çerçevesinde hizmet
+                            sunulmaktadır.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </footer>
+    <div id="loaderContainer" style="display: none;">
+        <div id="loader"></div>
+    </div>
+
+
+    
+    
+        <script src="/js/bundle.min.js?v=9SrF85DFK52EX0a_3gH7oMgJcZmXdWWmZvnPrHvGMYc"></script>
+    
+    <script src="/js/blockui.min.js"></script>
+    <script src="/js/Mevzuat.js?v=1.2"></script>
+
+
+    <render-script render="true">
+    <script>
+        function sendDataPassword() {
+            var formData = { OldPassword: $('#oldPassword').val(), Password: $('#password').val(), NewPassword: $('#newPassword').val() };
+            Mevzuat.Ajax("/User/ChangePassword", { data: formData }, function (e) {
+                if (e.IsSucceed) {//başarılı
+
+                    window.location.href = "/Anasayfa";
+                }
+                else {
+                    document.getElementById("oldPassword").value = "";
+                    document.getElementById("password").value = "";
+                    document.getElementById("newPassword").value = "";
+                }
+            });
+        }
+
+    </script>
+
+    <script>
+        function sendData() {
+            var postData = { Name: $('#name').val(), Surname: $('#surname').val(), Job: $('#job').val() };
+            Mevzuat.Ajax("User/UpdateUser", { data: postData }, function (e) {
+                $("#MyInformationsFormModal").modal("hide");
+                setTimeout(function () {
+                    location.href = '/Anasayfa';
+                }, 1000);
+            });
+        }
+    </script>
+</render-script>
+
+    
+
+<div class="modal fade" id="ContactFormModal" role="dialog" aria-labelledby="ContactFormModalTitle" aria-hidden="true">
+    <form id="contactForm">
+
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <span class="modal-title font-weight-bold">Bize Ulaşın</span>
+                    <button type="button" title="Formu Kapat" class="close" data-dismiss="modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="form-group col-12 col-md-6">
+                            <label class="col-form-label col-form-label-sm" for="FirstName">Ad&#x131;n&#x131;z</label>
+                            <input type="text" class="form-control form-control-sm" data-val="true" data-val-length="Bu alan&#x131; doldurman&#x131;z gerekmektedir." data-val-length-max="60" data-val-length-min="3" id="FirstName" maxlength="60" name="FirstName" value="">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="FirstName" data-valmsg-replace="true"></span>
+
+                        </div>
+                        <div class="form-group col-12 col-md-6">
+                            <label class="col-form-label col-form-label-sm" for="LastName">Soyad&#x131;n&#x131;z</label>
+                            <input type="text" class="form-control form-control-sm" data-val="true" data-val-length="Bu alan&#x131; doldurman&#x131;z gerekmektedir." data-val-length-max="60" data-val-length-min="2" id="LastName" maxlength="60" name="LastName" value="">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="LastName" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="form-group col-12 col-md-6">
+                            <label class="col-form-label col-form-label-sm" for="Email">E-Posta Adresiniz</label>
+                            <input type="text" class="form-control form-control-sm" data-val="true" data-val-regex="Ge&#xE7;erli bir E-posta adresi giriniz" data-val-regex-pattern="^([\w\.\-]&#x2B;)@([\w\-]&#x2B;)((\.(\w){2,3})&#x2B;)$" id="Email" name="Email" value="">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Email" data-valmsg-replace="true"></span>
+                        </div>
+                        <div class="form-group col-12 col-md-6">
+                            <label class="col-form-label col-form-label-sm" for="Profession">Mesle&#x11F;iniz</label>
+                            <input type="text" class="form-control form-control-sm" data-val="true" data-val-length="Bu alan&#x131; doldurman&#x131;z gerekmektedir." data-val-length-max="60" data-val-length-min="3" id="Profession" maxlength="60" name="Profession" value="">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Profession" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="form-group col-8">
+                            <label class="col-form-label col-form-label-sm" for="ContactSubjectType">Konu</label>
+                            <select class="form-control form-control-sm" data-val="true" data-val-required="The Konu field is required." id="ContactSubjectType" name="ContactSubjectType">
+                                <option value="">Seçiniz</option>
+                            <option value="1">Mevzuat Hakk&#x131;nda</option>
+<option value="3">&#x130;nternet Sitesi Hakk&#x131;nda</option>
+<option value="4">Di&#x11F;er</option>
+</select>
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="ContactSubjectType" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="form-group col-12">
+                            <label class="col-form-label col-form-label-sm" for="Message">Mesaj</label>
+                            <textarea class="form-control form-control-sm" rows="5" data-val="true" data-val-length="Bu alan&#x131; doldurman&#x131;z gerekmektedir." data-val-length-max="2000" data-val-length-min="10" id="Message" maxlength="2000" name="Message">
+</textarea>
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Message" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-12">
+                            <div class="g-recaptcha float-right" data-sitekey="6LfB6rQUAAAAAPkzXxHpLY8I4CFQHod0yJIg_hkl" data-callback="captchaCallBackCon"></div>
+                            <span data-valmsg-for="g-recaptcha-response" class="form-text m-b-none text-danger" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer d-block">
+                    <button type="button" class="btn btn-outline-secondary float-right" onclick="saveContactForm()">Gönder</button>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<script>
+    var captchaKeyyy = "";
+    var captchaCallBackCon = function (e) {
+        captchaKeyyy = e;
+    }
+
+    function saveContactForm() {
+        var captchaKey = captchaKeyyy;
+        Mevzuat.Ajax("/Anasayfa/SaveContactForm", {
+            form: "#contactForm", data: { GoogleReCaptchaResponse: captchaKey }
+        }, function (e) {
+            if (e.Status == 1) {//başarılı
+                $("#ContactFormModal").modal("hide");
+                captchaKeyy = "";
+            }
+        });
+    }
+</script>
+
+
+    
+
+
+<div class="modal fade" asp-formhelper="true" id="UserLoginFormModal" role="dialog" aria-labelledby="UserLoginFormModalTitle" aria-hidden="true">
+    <form id="UserLoginForm" method="post">
+        <div class="modal-dialog" role="document" style="max-width:400px;">
+            <div class="modal-content">
+                <div class="modal-body">
+                    <button type="button" title="Formu Kapat" class="close" data-dismiss="modal">&times;</button>
+                    <div class="text-center mt-2 mb-3">
+                        <img src="/img/login_header.png" alt="" />
+                    </div>
+                    <div class="row">
+                        <div class="form-group col mb-2">
+                            <input id="Username" type="text" class="form-control" name="Username" placeholder="E-posta adresiniz" style="font-size:14px;" data-val="true" data-val-regex="Ge&#xE7;erli bir E-posta adresi giriniz" data-val-regex-pattern="^([\w\.\-]&#x2B;)@([\w\-]&#x2B;)((\.(\w){2,3})&#x2B;)$" value="">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Username" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="form-group col mb-2">
+                            <input autocomplete="off" id="Password" type="password" name="Password" class="form-control" placeholder="Şifreniz" style="font-size:14px;" data-val="true" data-val-length="&#x15E;ifreniz en az 6 karakterden olu&#x15F;mal&#x131;d&#x131;r." data-val-length-max="60" data-val-length-min="6" maxlength="60">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Password" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="form-group col mb-2">
+                            <button id="loginButton" type="button" onclick="loginForm()" class="btn btn-info btn-block center-block">Giriş</button>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="form-group col-6">
+                            <a id="newUser" data-toggle="modal" data-target="#UserFormModal" class="d-inline-block" style="cursor:pointer;" tabindex="0" onkeypress="clickElement(event)">
+                                <div class="media small font-weight-bold text-secondary">
+                                    <i class="fa fa-user-plus mr-1" style="margin-top:3px;"></i> Yeni Üyelik
+                                </div>
+                            </a>
+                        </div>
+                        <div class="form-group  col-6 text-right">
+                            <a id="forgotPassword" data-toggle="modal" data-target="#ForgotPasswordFormModal" class="d-inline-block" style="cursor:pointer;" tabindex="0" onkeypress="clickElement(event)">
+                                <div class="media small font-weight-bold text-secondary">
+                                    <i class="fa fa-lock mr-1" style="margin-top:3px;"></i> Şifremi Unuttum
+                                </div>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    <input name="antiforgerytoken" type="hidden" value="CfDJ8By9VBOtU6RDp2rXgxJkOrb1CyI4P1U7q1vGyKqOsj1xP4HiJTiU-ZsnTGKKHPy6qKR7nAoQtIkl4Iw-AyK50IvfgAygCKoHj_2KrfSbeEvmdg3RR3DZpNbYNbYoqKHXDci2JPN8ffVaNQuZ74VOzRA" /></form>
+</div>
+
+
+
+
+<!-- Recaptcha -->
+
+<script>
+    var UserLoginFormCallback = function (response) {
+
+    }
+    var input = document.getElementById("Password");
+    input.addEventListener("keyup", function (event) {
+        if (event.keyCode === 13) {
+            event.preventDefault();
+            loginForm();
+        }
+    });
+
+
+    $("#newUser").click(function () {
+        $("#UserLoginFormModal").modal("hide");
+    });
+    $("#forgotPassword").click(function () {
+        $("#UserLoginFormModal").modal("hide");
+    });
+
+    function loginForm() {
+        Mevzuat.Ajax("/Login/SignIn", { alert: false, form: "#UserLoginForm" }, function (e) {
+            if (e.Status == 1) {//başarılı
+                localStorage.setItem("token", e.Data.access_token);
+                $("#UserLoginFormModal").modal("hide");
+                this.Mevzuat.SetUser();
+                if (window.location.hash === "#anayasa") {
+                    setTimeout(function () {
+                        window.location.reload();
+                    }, 1000);
+                }
+            }
+            else {
+                document.getElementById("Username").value = "";
+                document.getElementById("Password").value = "";
+            }
+        });
+    }
+
+</script>
+
+
+    
+
+<!-- Recaptcha -->
+
+
+<div class="modal fade" asp-formhelper="true" id="UserFormModal" role="dialog" aria-labelledby="UserFormModalTitle" aria-hidden="true">
+    <form id="UserForm">
+        <div class="modal-dialog" role="document" style="max-width:400px;">
+            <div class="modal-content">
+                <div class="modal-body">
+                    <div>
+                        <span class="modal-title font-weight-bold"><i class="fas fa-user-plus mr-1" style="margin-top:3px;"></i> Yeni Üyelik</span>
+                        <button type="button" title="Formu Kapat" class="close" data-dismiss="modal">×</button>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="form-group col-12 mb-1">
+                            <input type="text" class="form-control" placeholder="Adınız" style="font-size:14px;" data-val="true" data-val-length="Bu alan&#x131; doldurman&#x131;z gerekmektedir." data-val-length-max="60" data-val-length-min="3" id="Name" maxlength="60" name="Name" value="">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Name" data-valmsg-replace="true"></span>
+
+                        </div>
+                        <div class="form-group col-12 mb-1">
+                            <input type="text" class="form-control" placeholder="Soyadınız" style="font-size:14px;" data-val="true" data-val-length="Bu alan&#x131; doldurman&#x131;z gerekmektedir." data-val-length-max="60" data-val-length-min="2" id="Surname" maxlength="60" name="Surname" value="">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Surname" data-valmsg-replace="true"></span>
+                        </div>
+                        <div class="form-group col-12 mb-1">
+                            <input type="text" class="form-control" placeholder="Mesleğiniz" style="font-size:14px;" data-val="true" data-val-length="Bu alan&#x131; doldurman&#x131;z gerekmektedir." data-val-length-max="60" data-val-length-min="3" id="Job" maxlength="60" name="Job" value="">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Job" data-valmsg-replace="true"></span>
+                        </div>
+                        <div class="form-group col-12 mb-1">
+                            <input type="text" class="form-control" placeholder="E-posta adresiniz" style="font-size:14px;" data-val="true" data-val-regex="Ge&#xE7;erli bir E-posta adresi giriniz" data-val-regex-pattern="^([\w\.\-]&#x2B;)@([\w\-]&#x2B;)((\.(\w){2,3})&#x2B;)$" id="Username" name="Username" value="">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Username" data-valmsg-replace="true"></span>
+                        </div>
+                        <div class="form-group col-12 mb-1">
+                            <input autocomplete="off" type="password" class="form-control" placeholder="Şifre" style="font-size:14px;" data-val="true" data-val-length="&#x15E;ifreniz en az 8 karakterden olu&#x15F;mal&#x131;d&#x131;r." data-val-length-max="60" data-val-length-min="8" data-val-regex="&#x15E;ifrenizde en az bir k&#xFC;&#xE7;&#xFC;k harf, bir b&#xFC;y&#xFC;k harf, bir rakam ve bir &#xF6;zel karakter bulunmal&#x131;d&#x131;r." data-val-regex-pattern="^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).&#x2B;$" id="Password" maxlength="60" name="Password">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Password" data-valmsg-replace="true"></span>
+                        </div>
+                        <div class="form-group col-12 mb-1">
+                            <input autocomplete="off" type="password" class="form-control" placeholder="Şifre(Tekrar)" style="font-size:14px;" data-val="true" data-val-length="&#x15E;ifreniz en az 8 karakterden olu&#x15F;mal&#x131;d&#x131;r." data-val-length-max="60" data-val-length-min="8" data-val-regex="&#x15E;ifrenizde en az bir k&#xFC;&#xE7;&#xFC;k harf, bir b&#xFC;y&#xFC;k harf, bir rakam ve bir &#xF6;zel karakter bulunmal&#x131;d&#x131;r." data-val-regex-pattern="^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).&#x2B;$" id="PasswordAgain" maxlength="60" name="PasswordAgain">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="PasswordAgain" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-12">
+                            <div class="g-recaptcha float-right" data-sitekey="6LfB6rQUAAAAAPkzXxHpLY8I4CFQHod0yJIg_hkl" data-callback="captchaCallBack"></div>
+                            <span data-valmsg-for="g-recaptcha-response" class="form-text m-b-none text-danger" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+                    <div class="mt-3 text-right">
+                        <button type="button" onclick="saveForm()" class="btn btn-info center-block">Kaydet</button>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="form-group col small text-secondary" style="font-weight: 500;">
+                            Kaydı tamamladığınızda e-posta adresinize aktivasyon için mesaj gönderilecektir. <br />
+                            Aktivasyon işlemi sonrası sisteme giriş yapabilirsiniz.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </form>
+</div>
+
+<script>
+    var captchaKeyy = "";
+    var captchaCallBack = function (e) {
+        captchaKeyy = e;
+    }
+
+   
+
+    function saveForm() {
+        var captchaKey = captchaKeyy;
+        Mevzuat.Ajax("/User/SaveUserForm", {
+            alert: false, form: "#UserForm", data: { GoogleReCaptchaResponse: captchaKey }
+        }, function (e) {
+            if (e.Status == 1) {//başarılı
+                $("#UserFormModal").modal("hide");
+                captchaKeyy = "";
+                setTimeout(function () {
+                    window.location.reload();
+                }, 1500);
+            }
+            else {
+                document.getElementById("Username").value = "";
+                document.getElementById("Password").value = "";
+            }
+        });
+    }
+
+
+</script>
+
+    
+
+<div class="modal fade" id="ForgotPasswordFormModal" role="dialog" aria-labelledby="ForgotPasswordFormModalTitle" aria-hidden="true">
+    <form method="post">
+        <div class="modal-dialog" role="document" style="max-width:400px;">
+            <div class="modal-content">
+                <div class="modal-body">
+                    <div>
+                        <span class="modal-title font-weight-bold"><i class="fa fa-lock mr-1" style="margin-top:3px;"></i> Şifremi Unuttum</span>
+                        <button type="button" title="Formu Kapat" class="close" data-dismiss="modal" title="Formu Kapat">×</button>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="form-group col small text-secondary" style="font-weight: 500;">
+                            Şifrenizi sıfırlamak için lütfen sistemde kayıtlı e-posta adresinizi giriniz.
+                        </div>
+                    </div>
+                    <div class="row">
+
+                        <div class="form-group col mb-0">
+                            <input type="text" id="username" class="form-control" placeholder="E-posta adresinizi giriniz" style="font-size:14px;" data-val="true" data-val-length="&#x15E;ifreniz en az 6 karakterden olu&#x15F;mal&#x131;d&#x131;r." data-val-length-max="60" data-val-length-min="5" data-val-regex="Ge&#xE7;erli bir E-posta adresi giriniz" data-val-regex-pattern="^([\w\.\-]&#x2B;)@([\w\-]&#x2B;)((\.(\w){2,3})&#x2B;)$" maxlength="60" name="Username" value="">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Username" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+                    <div class="mt-2 text-right">
+                        <button type="button" onclick="sendMail()" class="btn btn-info center-block">Gönder</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    <input name="antiforgerytoken" type="hidden" value="CfDJ8By9VBOtU6RDp2rXgxJkOrb1CyI4P1U7q1vGyKqOsj1xP4HiJTiU-ZsnTGKKHPy6qKR7nAoQtIkl4Iw-AyK50IvfgAygCKoHj_2KrfSbeEvmdg3RR3DZpNbYNbYoqKHXDci2JPN8ffVaNQuZ74VOzRA" /></form>
+</div>
+
+<script>
+    var ForgotPasswordFormCallback = function (response) {
+        if (response.IsSucceed == true) {
+
+        }
+    }
+    function sendMail() {
+        var postData = { Username: $('#username').val() };
+        Mevzuat.Ajax("User/ForgotPasswordSendMail", { data: postData }, function (e) {
+            if (e.Status == 1) {
+                $("#ForgotPasswordFormModal").modal("hide");
+            }
+        });
+    }
+</script>
+
+
+    <div class="modal fade"  id="ForgotPasswordConfirmFormModal" role="dialog" aria-labelledby="ForgotPasswordConfirmFormModalTitle" aria-hidden="true">
+    <form method="post">
+        <div class="modal-dialog" role="document" style="max-width:400px;">
+            <div class="modal-content">
+                <div class="modal-body">
+                    <div>
+                        <span class="modal-title font-weight-bold"><i class="fa fa-lock mr-1" style="margin-top:3px;"></i> Şifremi Unuttum</span>
+                        <button type="button" title="Formu Kapat" class="close" data-dismiss="modal">×</button>
+                    </div>
+                    <br />
+                    <div class="row">
+                        <div class="form-group col mb-0">
+                            <input autocomplete="off" id="passwordConfirm" type="password" class="form-control form-control-sm" placeholder="Şifre" data-val="true" data-val-length="&#x15E;ifreniz en az 6 karakterden olu&#x15F;mal&#x131;d&#x131;r." data-val-length-max="60" data-val-length-min="6" data-val-regex="&#x15E;ifrenizde en az bir k&#xFC;&#xE7;&#xFC;k harf, bir b&#xFC;y&#xFC;k harf, bir rakam ve bir &#xF6;zel karakter bulunmal&#x131;d&#x131;r." data-val-regex-pattern="^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).&#x2B;$" maxlength="60" name="Password">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="Password" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+                    <br />
+
+                    <div class="row">
+                        <div class="form-group col mb-0">
+                            <input autocomplete="off" id="newPasswordConfirm" type="password" class="form-control form-control-sm" placeholder="Şifre (Tekrar)" data-val="true" data-val-length="&#x15E;ifreniz en az 6 karakterden olu&#x15F;mal&#x131;d&#x131;r." data-val-length-max="60" data-val-length-min="6" data-val-regex="&#x15E;ifrenizde en az bir k&#xFC;&#xE7;&#xFC;k harf, bir b&#xFC;y&#xFC;k harf, bir rakam ve bir &#xF6;zel karakter bulunmal&#x131;d&#x131;r." data-val-regex-pattern="^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).&#x2B;$" maxlength="60" name="NewPassword">
+                            <span class="form-text m-b-none text-danger field-validation-valid" data-valmsg-for="NewPassword" data-valmsg-replace="true"></span>
+                        </div>
+                    </div>
+                    <div class="mt-2 text-right">
+                        <button type="button" onclick="sendPasswordData()" class="btn btn-primary ">Güncelle</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    <input name="antiforgerytoken" type="hidden" value="CfDJ8By9VBOtU6RDp2rXgxJkOrb1CyI4P1U7q1vGyKqOsj1xP4HiJTiU-ZsnTGKKHPy6qKR7nAoQtIkl4Iw-AyK50IvfgAygCKoHj_2KrfSbeEvmdg3RR3DZpNbYNbYoqKHXDci2JPN8ffVaNQuZ74VOzRA" /></form>
+</div>
+
+
+    
+
+    <div class="modal fade" id="AnnouncementFormModal" role="dialog" aria-labelledby="AnnouncementFormModalTitle" aria-hidden="true">
+        <div class="modal-dialog" style="max-width:630px;">
+            <form id="announcementForm" style="text-align:center;" class="mt-5">
+                <div class="modal-content">
+                    <div class="modal-body">
+                        <div class="row ">
+                            <div class="media" style="text-align:center">
+                                <img src="/img/DUYURU.PNG" width="100%" height="auto">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer d-block" style="padding:3px">
+                        <button type="button" class="btn btn-outline-secondary" data-dismiss="modal" title="Duyuruyu Kapat">Tamam</button>
+                    </div>
+                </div>
+            </form>
+            </div>
+        </div>
+
+
+
+
+
+    
+
+
+    <script src="/lib/owlcarousel/owl.carousel.min.js"></script>
+    <script type="text/javascript">
+        function clickNavigation(name) {
+            if (name == "anayasa") {
+                window.location.replace(window.location.origin + "/mevzuat?MevzuatNo=2709&MevzuatTur=1&MevzuatTertip=5");
+            }
+            else {
+                window.location.replace(window.location.origin + "/#" + name);
+            }
+        }
+
+        $('body').on('shown.bs.modal', function () {
+            var focusableElementsString = "a[href], area[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]),  iframe, object, embed, *[tabindex], *[contenteditable]";
+            var activeModalId = document.getElementsByClassName('modal show')[0].id;
+            var activeEl = jQuery('#' + activeModalId);
+            var allElInActiveEl = activeEl.find('*');
+            allElInActiveEl.filter(focusableElementsString).filter(':visible').first().focus();
+        });
+
+        $(function () {
+            $('.dropdown-item').click(function (e) {
+                var id = $(this).attr("id");
+                switch (id) {
+                    case "myInformations":
+                        elementName = "#myInformationsTable";
+                        Mevzuat.Ajax('/Anasayfa/GetMyInformations', { element: elementName, noty: false, dataType: 'html' }, function (e) {
+                            $("#MyInformationsFormModal").modal("show");
+                        });
+                        break;
+                    case "myFavorites":
+                        break;
+                    default:
+                }
+            });
+            $("#dropdown-menu-Regulation").mouseover(function () {
+                document.getElementById("dropdown-menu-Regulation-Down").style.display = "block";
+            });
+
+            $("#dropdown-menu-Regulation").mouseleave(function () {
+                setTimeout(function () {
+                    document.getElementById("dropdown-menu-Regulation-Down").style.display = "none";
+                }, 300);
+            });
+            $("#dropdown-menu-Publications").mouseover(function () {
+                document.getElementById("dropdown-menu-Publications-Down").style.display = "block";
+            });
+
+            $("#dropdown-menu-Publications").mouseleave(function () {
+                setTimeout(function () {
+                    document.getElementById("dropdown-menu-Publications-Down").style.display = "none";
+                }, 300);
+            });
+
+            $("#userNameLoginDiv").mouseover(function () {
+                document.getElementById("userNameLoginDivDown").style.display = "block";
+            });
+
+            $("#userNameLoginDiv").mouseleave(function () {
+                setTimeout(function () {
+                    document.getElementById("userNameLoginDivDown").style.display = "none";
+                }, 300);
+            });
+            $(".dropdown-item").click(function () {
+                var item = $(".dropdown-item");
+                //Buraası açılacak
+                //document.getElementById("dropdown-menu-Publications-Down").style.display = "none";
+                //document.getElementById("userNameLoginDivDown").style.display = "none";
+                //document.getElementById("dropdown-menu-Regulation-Down").style.display = "none";
+                item.removeClass("active show");
+            });
+            $("#newUser,#contactButton").click(function () {
+                var s = document.createElement("script");
+                s.type = "text/javascript";
+                s.src = "https://www.google.com/recaptcha/api.js?hl=tr";
+                $("head").append(s);
+            });
+        });
+
+
+            function sendPasswordData() {
+                var key = window.location.search.split('key=')[1];
+                var postData = { Password: $('#passwordConfirm').val(), NewPassword: $('#newPasswordConfirm').val(), EntityID: key };
+                Mevzuat.Ajax("/User/PasswordConfirmation", { data: postData }, function (e) {
+                    if (e.IsSucceed) {
+                        window.location.href = "/";
+                    }
+                    else {
+                        document.getElementById("newPasswordConfirm").value = "";
+                        document.getElementById("passwordConfirm").value = "";
+                    }
+                });
+            }
+
+    </script>
+    <script>
+        function clickElement(e) {
+            if (e.keyCode === 13) {
+                e.target.click();
+            }
+        }
+        Mevzuat.SetUser();
+        $("#signOut").click(function () {
+            Mevzuat.Ajax("/Login/SignOut", { type: "GET" }, function (e) {
+                Mevzuat.SignOut();
+            });
+        });
+        //POP-UP göstermek isterlerse
+        //if (CheckAnnouncementTime() && window.location.hash == "" && window.location.pathname == "/") {
+        //    $("#AnnouncementFormModal").modal("show");
+        //}
+        $(document).ready(function () {
+            $("#navbarDropdownRegulation").click(function () {
+                document.getElementById("dropdown-menu-Publications-Down").style.display = "none";
+                document.getElementById("userNameLoginDivDown").style.display = "none";
+                if (document.getElementById("dropdown-menu-Regulation-Down").style["display"] == "block") {
+                    document.getElementById("dropdown-menu-Regulation-Down").style.display = "none";
+                }
+                else {
+                    document.getElementById("dropdown-menu-Regulation-Down").style.display = "block";
+                }
+            });
+            $("#navbarDropdownPublications").click(function () {
+                document.getElementById("dropdown-menu-Regulation-Down").style.display = "none";
+                document.getElementById("userNameLoginDivDown").style.display = "none";
+                if (document.getElementById("dropdown-menu-Publications-Down").style["display"] == "block") {
+                    document.getElementById("dropdown-menu-Publications-Down").style.display = "none";
+                }
+                else {
+                    document.getElementById("dropdown-menu-Publications-Down").style.display = "block";
+                }
+            });
+            $("#userNameLoginDiv").click(function () {
+                document.getElementById("dropdown-menu-Publications-Down").style.display = "none";
+                document.getElementById("dropdown-menu-Regulation-Down").style.display = "none";
+                if (document.getElementById("userNameLoginDivDown").style["display"] == "block") {
+                    document.getElementById("userNameLoginDivDown").style.display = "none";
+                }
+                else {
+                    document.getElementById("userNameLoginDivDown").style.display = "block";
+                }
+            });
+            $(".owl-carousel").owlCarousel({
+                loop: true,
+                margin: 10,
+                autoplay: true,
+                autowidth: false,
+                items: 1,
+                margin: 30,
+                stagePadding: 30,
+                smartSpeed: 450
+            });
+            var passwordIndex = window.location.pathname.indexOf("ForgotPassword");
+            if (passwordIndex > 0) {
+                $("#ForgotPasswordConfirmFormModal").modal("show");
+            }
+
+
+
+            var activeKey = window.location.search.indexOf("activeKey");
+            if (activeKey > 0) {
+                var key = window.location.search.split('activeKey=')[1];
+                Mevzuat.Ajax("/User/UserVerification/?key=" + key, { type: "GET" }, function (e) {
+                    if (e.IsSucceed) {
+                        setTimeout(function () {
+                            window.location.href = "/";
+                        }, 500);
+                    }
+                });
+            }
+
+            // mevzuatDipnotModalWrapper genisligini ekran boyutuna gore ayarla
+            setDipnotModalWidth();
+            window.addEventListener('resize', setDipnotModalWidth);
+        });
+
+        window.addEventListener('message', function (event) { if (event.data === 'openModal') { openModal(); } });
+        function openModal() {
+            $("#mevzuatDipnotModal").modal("show");
+        }
+        function setDipnotModalWidth() {
+            var screenWidth = window.innerWidth;
+            var div = document.getElementById('mevzuatDipnotModalWrapper');
+            if (screenWidth < 900) {
+                div.style.maxWidth = '100%';
+            } else {
+                div.style.maxWidth = '500px';
+            }
+        }
+    </script>
+
+</body>
+</html>
