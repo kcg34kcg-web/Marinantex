@@ -13,7 +13,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       <div className="app-main-pane flex min-w-0 flex-1 flex-col">
         <DashboardHeader />
-        <main className="app-main-content flex-1 space-y-6 p-6">{children}</main>
+        <main className="app-main-content flex-1 space-y-6 p-4 md:p-6 lg:p-7">
+          <div className="mx-auto w-full max-w-[1400px]">{children}</div>
+        </main>
       </div>
     </div>
   );

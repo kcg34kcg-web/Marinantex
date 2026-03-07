@@ -16,6 +16,7 @@ import {
   Settings,
   Users,
   Wallet,
+  Mail,
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -48,6 +49,15 @@ const COMMAND_ITEMS: CommandItem[] = [
     icon: Briefcase,
     group: 'Calisma Alani',
     keywords: ['dava', 'dosya', 'case'],
+  },
+  {
+    id: 'mail-project',
+    label: 'Mail Projesi',
+    description: 'Ofis mail altyapisi ve proje sayfasi',
+    href: '/dashboard/mail',
+    icon: Mail,
+    group: 'Calisma Alani',
+    keywords: ['mail', 'eposta', 'inbox', 'outlook', 'gmail'],
   },
   {
     id: 'clients',
@@ -96,7 +106,7 @@ const COMMAND_ITEMS: CommandItem[] = [
   },
   {
     id: 'hukuk-ai',
-    label: 'Hukuk AI',
+    label: 'Hukuk AI Chat',
     description: 'RAG arastirmasi',
     href: '/tools/hukuk-ai',
     icon: BrainCircuit,
@@ -227,34 +237,35 @@ export function CommandPalette() {
       aria-modal="true"
       aria-label="Komut paleti"
     >
-      <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-[3px]" />
 
       <div
         className={cn(
-          'relative z-10 mx-4 w-full max-w-xl overflow-hidden rounded-2xl border border-[var(--border)]',
-          'bg-[color-mix(in_srgb,var(--surface),transparent_6%)] shadow-2xl backdrop-blur-xl',
+          'relative z-10 mx-4 w-full max-w-xl overflow-hidden rounded-[var(--radius-md)] border border-[var(--main-border,var(--border))]',
+          'bg-[color-mix(in_srgb,var(--main-surface-3,var(--surface)),transparent_2%)] shadow-[var(--shadow-elev-3)] backdrop-blur-[var(--blur-heavy)]',
+          'animate-fade-in-scale',
         )}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3">
-          <Search className="h-4 w-4 flex-shrink-0 text-[var(--secondary)]" />
+        <div className="flex items-center gap-3 border-b border-[var(--main-border,var(--border))] px-4 py-3">
+          <Search className="h-4 w-4 flex-shrink-0 text-[var(--main-muted,var(--secondary))]" />
           <input
             ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Sayfa veya ozellik ara..."
-            className="flex-1 bg-transparent text-sm text-[var(--text)] placeholder:text-[var(--secondary)] focus:outline-none"
+            className="flex-1 bg-transparent text-sm text-[var(--main-text,var(--text))] placeholder:text-[var(--main-muted,var(--secondary))] focus:outline-none"
           />
           {query ? (
             <button
               type="button"
               onClick={() => setQuery('')}
-              className="text-[var(--secondary)] transition-colors hover:text-[var(--text)]"
+              className="text-[var(--main-muted,var(--secondary))] transition-colors hover:text-[var(--main-text,var(--text))]"
             >
               <X className="h-4 w-4" />
             </button>
           ) : null}
-          <kbd className="hidden rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--secondary)] sm:inline-flex">
+          <kbd className="hidden rounded border border-[var(--main-border,var(--border))] px-1.5 py-0.5 text-[10px] text-[var(--main-muted,var(--secondary))] sm:inline-flex">
             ESC
           </kbd>
         </div>
@@ -265,7 +276,7 @@ export function CommandPalette() {
           ) : (
             Object.entries(grouped).map(([group, items]) => (
               <div key={group}>
-                <p className="px-4 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--secondary)]">
+                <p className="px-4 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--main-muted,var(--secondary))]">
                   {group}
                 </p>
                 {items.map((item) => {
@@ -277,19 +288,19 @@ export function CommandPalette() {
                       onClick={() => handleSelect(item.href)}
                       className={cn(
                         'group flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors',
-                        'hover:bg-[color-mix(in_srgb,var(--surface),var(--primary)_8%)]',
+                        'hover:bg-[color-mix(in_srgb,var(--main-surface-2,var(--surface)),var(--primary)_10%)]',
                       )}
                     >
-                      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)]">
-                        <Icon className="h-4 w-4 text-[var(--secondary)] group-hover:text-[var(--primary)]" />
+                      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--radius-xs)] border border-[var(--main-border,var(--border))] bg-[color-mix(in_srgb,var(--main-surface-3,var(--surface)),transparent_4%)]">
+                        <Icon className="h-4 w-4 text-[var(--main-muted,var(--secondary))] group-hover:text-[var(--primary)]" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-[var(--text)]">{item.label}</p>
+                        <p className="truncate text-sm font-medium text-[var(--main-text,var(--text))]">{item.label}</p>
                         {item.description ? (
-                          <p className="truncate text-xs text-[var(--secondary)]">{item.description}</p>
+                          <p className="truncate text-xs text-[var(--main-muted,var(--secondary))]">{item.description}</p>
                         ) : null}
                       </div>
-                      <ArrowRight className="h-3.5 w-3.5 text-[var(--secondary)] opacity-0 transition-opacity group-hover:opacity-100" />
+                      <ArrowRight className="h-3.5 w-3.5 text-[var(--main-muted,var(--secondary))] opacity-0 transition-opacity group-hover:opacity-100" />
                     </button>
                   );
                 })}
@@ -298,7 +309,7 @@ export function CommandPalette() {
           )}
         </div>
 
-        <div className="border-t border-[var(--border)] px-4 py-2 text-[10px] text-[var(--secondary)]">
+        <div className="border-t border-[var(--main-border,var(--border))] px-4 py-2 text-[10px] text-[var(--main-muted,var(--secondary))]">
           Ctrl/Cmd + K: ac - ESC: kapat
         </div>
       </div>
@@ -320,15 +331,15 @@ export function CommandPaletteTrigger({ className }: { className?: string }) {
         );
       }}
       className={cn(
-        'inline-flex min-h-[36px] items-center gap-2 rounded-xl border border-[var(--border)]',
-        'bg-[var(--surface)] px-3 py-2 text-sm text-[var(--secondary)] transition-colors',
-        'hover:text-[var(--text)]',
+        'inline-flex min-h-[38px] items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--main-border,var(--border))]',
+        'bg-[color-mix(in_srgb,var(--main-surface-3,var(--surface)),transparent_4%)] px-3 py-2 text-sm text-[var(--main-muted,var(--secondary))] shadow-[var(--shadow-elev-0)] transition-colors',
+        'hover:bg-[color-mix(in_srgb,var(--main-surface-2,var(--surface)),var(--primary)_8%)] hover:text-[var(--main-text,var(--text))]',
         className,
       )}
     >
       <Search className="h-3.5 w-3.5" />
       <span className="hidden md:inline">Ara...</span>
-      <kbd className="hidden rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] md:inline-flex">
+      <kbd className="hidden rounded border border-[var(--main-border,var(--border))] px-1.5 py-0.5 text-[10px] md:inline-flex">
         Ctrl+K
       </kbd>
     </button>

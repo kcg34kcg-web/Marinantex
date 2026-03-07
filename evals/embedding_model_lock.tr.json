@@ -1,0 +1,8 @@
+{
+  "benchmark": "tr_legal_embedding_benchmark_v1",
+  "language": "tr",
+  "locked_model": "text-embedding-3-small",
+  "evaluated_at": "2026-03-06",
+  "selection_rule": "highest_mrr_at_10_then_recall_at_5",
+  "notes": "Bu dosya run-tr-embedding-benchmark.mjs tarafindan guncellenir."
+}

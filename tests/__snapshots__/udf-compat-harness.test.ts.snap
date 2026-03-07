@@ -1,0 +1,332 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-01-plain-text-only > scenario-01-plain-text-only.content.xml 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<udfContent schemaVersion="1">
+<contentBuffer>Duz metin satiri birDuz metin satiri iki</contentBuffer>
+<body>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="0" length="20" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="20" length="20" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+</body>
+<warnings />
+</udfContent>"
+`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-01-plain-text-only > scenario-01-plain-text-only.warnings.txt 1`] = `"No warnings."`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-02-bold-italic-underline > scenario-02-bold-italic-underline.content.xml 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<udfContent schemaVersion="1">
+<contentBuffer>Kalin Egrik Altcizili</contentBuffer>
+<body>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="0" length="5" fontFamily="&apos;Times New Roman&apos;, Times, serif" bold="1" />
+  <text startOffset="5" length="1" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+  <text startOffset="6" length="5" fontFamily="&apos;Times New Roman&apos;, Times, serif" italic="1" />
+  <text startOffset="11" length="1" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+  <text startOffset="12" length="9" fontFamily="&apos;Times New Roman&apos;, Times, serif" underline="1" />
+</paragraph>
+</body>
+<warnings />
+</udfContent>"
+`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-02-bold-italic-underline > scenario-02-bold-italic-underline.warnings.txt 1`] = `"No warnings."`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-03-font-family-size > scenario-03-font-family-size.content.xml 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<udfContent schemaVersion="1">
+<contentBuffer>Bilinmeyen font / Bilinen font</contentBuffer>
+<body>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="0" length="15" fontFamily="&apos;Times New Roman&apos;, Times, serif" fontSize="19" />
+  <text startOffset="15" length="3" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+  <text startOffset="18" length="12" fontFamily="Calibri, &apos;Segoe UI&apos;, sans-serif" fontSize="14" />
+</paragraph>
+</body>
+<warnings>
+  <warning code="FONT_FALLBACK" path="doc/content/0/content/0">Font fallback uygulandi: X-Unsupported-Font -&gt; &apos;Times New Roman&apos;, Times, serif</warning>
+</warnings>
+</udfContent>"
+`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-03-font-family-size > scenario-03-font-family-size.warnings.txt 1`] = `"1. [FONT_FALLBACK] doc/content/0/content/0 - Font fallback uygulandi: X-Unsupported-Font -> 'Times New Roman', Times, serif"`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-04-alignments > scenario-04-alignments.content.xml 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<udfContent schemaVersion="1">
+<contentBuffer>Sola hizaliOrtaliSaga hizaliIki yana yasli uzun cumle ornegi.</contentBuffer>
+<body>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="0" length="11" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="center" source="paragraph">
+  <text startOffset="11" length="6" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="right" source="paragraph">
+  <text startOffset="17" length="11" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="justify" source="paragraph">
+  <text startOffset="28" length="33" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+</body>
+<warnings />
+</udfContent>"
+`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-04-alignments > scenario-04-alignments.warnings.txt 1`] = `"No warnings."`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-05-empty-lines > scenario-05-empty-lines.content.xml 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<udfContent schemaVersion="1">
+<contentBuffer>Ust satir​​Alt satir</contentBuffer>
+<body>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="0" length="9" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="9" length="1" placeholder="1" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="10" length="1" placeholder="1" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="11" length="9" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+</body>
+<warnings />
+</udfContent>"
+`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-05-empty-lines > scenario-05-empty-lines.warnings.txt 1`] = `"No warnings."`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-06-tab-characters > scenario-06-tab-characters.content.xml 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<udfContent schemaVersion="1">
+<contentBuffer>Kolon1	Kolon2	Kolon3</contentBuffer>
+<body>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="0" length="6" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+  <tab startOffset="6" length="1" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+  <text startOffset="7" length="6" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+  <tab startOffset="13" length="1" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+  <text startOffset="14" length="6" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+</body>
+<warnings />
+</udfContent>"
+`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-06-tab-characters > scenario-06-tab-characters.warnings.txt 1`] = `"No warnings."`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-07-simple-table > scenario-07-simple-table.content.xml 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<udfContent schemaVersion="1">
+<contentBuffer>H1H2A1A2</contentBuffer>
+<body>
+  <table border="single">
+  <row index="0">
+    <cell index="0" colSpan="1" rowSpan="1" border="single">
+      <paragraph alignment="left" source="paragraph">
+        <text startOffset="0" length="2" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+      </paragraph>
+    </cell>
+    <cell index="1" colSpan="1" rowSpan="1" border="single">
+      <paragraph alignment="left" source="paragraph">
+        <text startOffset="2" length="2" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+      </paragraph>
+    </cell>
+  </row>
+  <row index="1">
+    <cell index="0" colSpan="1" rowSpan="1" border="single">
+      <paragraph alignment="left" source="paragraph">
+        <text startOffset="4" length="2" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+      </paragraph>
+    </cell>
+    <cell index="1" colSpan="1" rowSpan="1" border="single">
+      <paragraph alignment="left" source="paragraph">
+        <text startOffset="6" length="2" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+      </paragraph>
+    </cell>
+  </row>
+</table>
+</body>
+<warnings />
+</udfContent>"
+`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-07-simple-table > scenario-07-simple-table.warnings.txt 1`] = `"No warnings."`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-08-multiline-cell > scenario-08-multiline-cell.content.xml 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<udfContent schemaVersion="1">
+<contentBuffer>Satir 1
+Satir 2
+Satir 3Yanit hucre</contentBuffer>
+<body>
+  <table border="single">
+  <row index="0">
+    <cell index="0" colSpan="1" rowSpan="1" border="single">
+      <paragraph alignment="left" source="paragraph">
+        <text startOffset="0" length="7" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+        <lineBreak startOffset="7" length="1" />
+        <text startOffset="8" length="7" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+        <lineBreak startOffset="15" length="1" />
+        <text startOffset="16" length="7" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+      </paragraph>
+    </cell>
+    <cell index="1" colSpan="1" rowSpan="1" border="single">
+      <paragraph alignment="left" source="paragraph">
+        <text startOffset="23" length="11" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+      </paragraph>
+    </cell>
+  </row>
+</table>
+</body>
+<warnings />
+</udfContent>"
+`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-08-multiline-cell > scenario-08-multiline-cell.warnings.txt 1`] = `"No warnings."`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-09-large-document > scenario-09-large-document.content.xml 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<udfContent schemaVersion="1">
+<contentBuffer>Bolum 01 - buyuk belge satiriBolum 02 - buyuk belge satiriBolum 03 - buyuk belge satiriBolum 04 - buyuk belge satiriBolum 05 - buyuk belge satiriBolum 06 - buyuk belge satiriBolum 07 - buyuk belge satiriBolum 08 - buyuk belge satiriBolum 09 - buyuk belge satiriBolum 10 - buyuk belge satiriBolum 11 - buyuk belge satiriBolum 12 - buyuk belge satiriBolum 13 - buyuk belge satiriBolum 14 - buyuk belge satiriBolum 15 - buyuk belge satiriBolum 16 - buyuk belge satiriBolum 17 - buyuk belge satiriBolum 18 - buyuk belge satiriBolum 19 - buyuk belge satiriBolum 20 - buyuk belge satiriBolum 21 - buyuk belge satiriBolum 22 - buyuk belge satiriBolum 23 - buyuk belge satiriBolum 24 - buyuk belge satiriBolum 25 - buyuk belge satiri</contentBuffer>
+<body>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="0" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="29" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="58" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="87" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="116" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="145" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="174" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="203" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="232" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="261" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="290" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="319" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="348" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="377" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="406" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="435" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="464" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="493" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="522" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="551" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="580" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="609" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="638" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="667" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="696" length="29" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+</body>
+<warnings />
+</udfContent>"
+`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-09-large-document > scenario-09-large-document.warnings.txt 1`] = `"No warnings."`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-10-mixed-formatting-and-table > scenario-10-mixed-formatting-and-table.content.xml 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<udfContent schemaVersion="1">
+<contentBuffer>BaslikKalem	TutarUrunDegerSatir ADeger AKarisik format ile kapanis paragrafi.</contentBuffer>
+<body>
+  <paragraph alignment="center" source="paragraph">
+  <text startOffset="0" length="6" fontFamily="Cambria, Georgia, serif" fontSize="20" bold="1" />
+</paragraph>
+  <paragraph alignment="left" source="paragraph">
+  <text startOffset="6" length="5" fontFamily="&apos;Times New Roman&apos;, Times, serif" italic="1" />
+  <tab startOffset="11" length="1" fontFamily="&apos;Times New Roman&apos;, Times, serif" italic="1" />
+  <text startOffset="12" length="5" fontFamily="&apos;Times New Roman&apos;, Times, serif" italic="1" />
+</paragraph>
+  <table border="single">
+  <row index="0">
+    <cell index="0" colSpan="1" rowSpan="1" border="single">
+      <paragraph alignment="left" source="paragraph">
+        <text startOffset="17" length="4" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+      </paragraph>
+    </cell>
+    <cell index="1" colSpan="1" rowSpan="1" border="single">
+      <paragraph alignment="left" source="paragraph">
+        <text startOffset="21" length="5" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+      </paragraph>
+    </cell>
+  </row>
+  <row index="1">
+    <cell index="0" colSpan="1" rowSpan="1" border="single">
+      <paragraph alignment="left" source="paragraph">
+        <text startOffset="26" length="7" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+      </paragraph>
+    </cell>
+    <cell index="1" colSpan="2" rowSpan="1" border="single">
+      <paragraph alignment="left" source="paragraph">
+        <text startOffset="33" length="7" fontFamily="&apos;Times New Roman&apos;, Times, serif" underline="1" />
+      </paragraph>
+    </cell>
+  </row>
+</table>
+  <paragraph alignment="justify" source="paragraph">
+  <text startOffset="40" length="37" fontFamily="&apos;Times New Roman&apos;, Times, serif" />
+</paragraph>
+</body>
+<warnings>
+  <warning code="TABLE_SPAN_DEGRADED" path="doc/content/2/content/1/content/1">Hucre birlestirme degrade edildi (colSpan=2, rowSpan=1).</warning>
+</warnings>
+</udfContent>"
+`;
+
+exports[`UDF compatibility harness (golden fixtures) > exports valid udf archive for fixture: scenario-10-mixed-formatting-and-table > scenario-10-mixed-formatting-and-table.warnings.txt 1`] = `"1. [TABLE_SPAN_DEGRADED] doc/content/2/content/1/content/1 - Hucre birlestirme degrade edildi (colSpan=2, rowSpan=1)."`;

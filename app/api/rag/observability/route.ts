@@ -35,7 +35,7 @@ export async function GET(request: Request) {
 
     let context;
     try {
-      context = await resolveBureauContext(supabase);
+      context = await resolveBureauContext(supabase, { requireClaimMatch: true });
     } catch {
       return NextResponse.json({ error: 'Oturum bulunamadi. Lutfen tekrar giris yapin.' }, { status: 401 });
     }

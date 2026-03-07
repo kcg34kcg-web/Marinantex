@@ -35,17 +35,17 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md items-center px-6">
-      <div className="w-full space-y-4 rounded-xl border border-border bg-white p-6">
-        <h1 className="text-2xl font-semibold text-slate-900">{roleTitle}</h1>
-        <p className="text-sm text-slate-600">Lütfen giriş türünüzü seçin.</p>
+      <div className="w-full space-y-4 rounded-[var(--radius-md)] border border-[var(--main-border,var(--border))] bg-[color-mix(in_srgb,var(--main-surface-3,var(--surface)),transparent_4%)] p-6 shadow-[var(--shadow-elev-2)] backdrop-blur-[var(--blur-heavy)]">
+        <h1 className="text-2xl font-semibold tracking-[-0.01em] text-[var(--main-text,var(--text))]">{roleTitle}</h1>
+        <p className="text-sm text-[var(--main-muted,var(--secondary))]">Lütfen giriş türünüzü seçin.</p>
 
         <div className="grid grid-cols-3 gap-2">
           <Link
             href={lawyerHref}
             className={
               selectedRole === 'lawyer'
-                ? 'inline-flex h-10 items-center justify-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent/90'
-                : 'inline-flex h-10 items-center justify-center rounded-md border border-border bg-white px-4 py-2 text-sm font-medium transition-colors hover:bg-muted'
+                ? 'inline-flex h-10 items-center justify-center rounded-[var(--radius-xs)] bg-[linear-gradient(135deg,color-mix(in_srgb,var(--primary),white_8%),var(--primary))] px-4 py-2 text-sm font-medium text-white shadow-[var(--shadow-elev-0)] transition-colors'
+                : 'inline-flex h-10 items-center justify-center rounded-[var(--radius-xs)] border border-[var(--main-border,var(--border))] bg-[color-mix(in_srgb,var(--main-surface-3,var(--surface)),transparent_4%)] px-4 py-2 text-sm font-medium text-[var(--main-muted,var(--secondary))] transition-colors hover:bg-[color-mix(in_srgb,var(--main-surface-2,var(--surface)),var(--primary)_8%)] hover:text-[var(--main-text,var(--text))]'
             }
           >
             Avukat
@@ -54,8 +54,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             href={assistantHref}
             className={
               selectedRole === 'assistant'
-                ? 'inline-flex h-10 items-center justify-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent/90'
-                : 'inline-flex h-10 items-center justify-center rounded-md border border-border bg-white px-4 py-2 text-sm font-medium transition-colors hover:bg-muted'
+                ? 'inline-flex h-10 items-center justify-center rounded-[var(--radius-xs)] bg-[linear-gradient(135deg,color-mix(in_srgb,var(--primary),white_8%),var(--primary))] px-4 py-2 text-sm font-medium text-white shadow-[var(--shadow-elev-0)] transition-colors'
+                : 'inline-flex h-10 items-center justify-center rounded-[var(--radius-xs)] border border-[var(--main-border,var(--border))] bg-[color-mix(in_srgb,var(--main-surface-3,var(--surface)),transparent_4%)] px-4 py-2 text-sm font-medium text-[var(--main-muted,var(--secondary))] transition-colors hover:bg-[color-mix(in_srgb,var(--main-surface-2,var(--surface)),var(--primary)_8%)] hover:text-[var(--main-text,var(--text))]'
             }
           >
             Asistan
@@ -64,8 +64,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             href={clientHref}
             className={
               selectedRole === 'client'
-                ? 'inline-flex h-10 items-center justify-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent/90'
-                : 'inline-flex h-10 items-center justify-center rounded-md border border-border bg-white px-4 py-2 text-sm font-medium transition-colors hover:bg-muted'
+                ? 'inline-flex h-10 items-center justify-center rounded-[var(--radius-xs)] bg-[linear-gradient(135deg,color-mix(in_srgb,var(--primary),white_8%),var(--primary))] px-4 py-2 text-sm font-medium text-white shadow-[var(--shadow-elev-0)] transition-colors'
+                : 'inline-flex h-10 items-center justify-center rounded-[var(--radius-xs)] border border-[var(--main-border,var(--border))] bg-[color-mix(in_srgb,var(--main-surface-3,var(--surface)),transparent_4%)] px-4 py-2 text-sm font-medium text-[var(--main-muted,var(--secondary))] transition-colors hover:bg-[color-mix(in_srgb,var(--main-surface-2,var(--surface)),var(--primary)_8%)] hover:text-[var(--main-text,var(--text))]'
             }
           >
             Müvekkil
@@ -73,13 +73,13 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         </div>
 
         {!selectedRole ? (
-          <p className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+          <p className="rounded-[var(--radius-xs)] border border-[var(--main-border,var(--border))] bg-[color-mix(in_srgb,var(--main-surface-2,var(--surface)),transparent_8%)] p-3 text-sm text-[var(--main-muted,var(--secondary))]">
             Devam etmek için önce giriş türünü seçin.
           </p>
         ) : null}
 
         {hasError ? (
-          <div className="rounded-md border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800">
+          <div className="rounded-[var(--radius-xs)] border border-[color-mix(in_srgb,var(--warning),white_62%)] bg-[color-mix(in_srgb,var(--warning),white_90%)] p-3 text-sm text-[var(--warning)]">
             {params.error_description ?? 'Giriş doğrulaması başarısız oldu. Lütfen tekrar deneyin.'}
           </div>
         ) : null}

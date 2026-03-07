@@ -93,7 +93,7 @@ const citationSchema = z.object({
   source_hash: z.string().optional(),
   doc_version: z.string().optional(),
   citation_text: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 const requestSchema = z.object({
@@ -111,13 +111,13 @@ const requestSchema = z.object({
   is_final: z.boolean().optional(),
   case_id: z.string().uuid().optional(),
   new_case_title: z.string().max(300).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   citations: z.array(citationSchema).optional(),
   client_action: z.nativeEnum(ClientAction).default(ClientAction.NONE),
   client_id: z.string().uuid().optional(),
   client_draft_text: z.string().optional(),
   client_draft_title: z.string().max(300).optional(),
-  client_metadata: z.record(z.unknown()).optional(),
+  client_metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type RagSavePayload = z.infer<typeof requestSchema>;
@@ -136,7 +136,7 @@ export async function POST(req: Request) {
 
     let context;
     try {
-      context = await resolveBureauContext(supabase);
+      context = await resolveBureauContext(supabase, { requireClaimMatch: true });
     } catch {
       return NextResponse.json({ error: 'Oturum bulunamadi. Lutfen tekrar giris yapin.' }, { status: 401 });
     }

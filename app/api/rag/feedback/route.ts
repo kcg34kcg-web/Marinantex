@@ -8,7 +8,7 @@ const requestSchema = z.object({
   message_id: z.string().uuid(),
   reaction: z.enum(['like', 'dislike']),
   reason_code: z.string().trim().min(1).max(64).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export async function POST(req: Request) {
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
   const supabase = await createClient();
   let context;
   try {
-    context = await resolveBureauContext(supabase);
+    context = await resolveBureauContext(supabase, { requireClaimMatch: true });
   } catch {
     return NextResponse.json({ error: 'Oturum bulunamadi.' }, { status: 401 });
   }

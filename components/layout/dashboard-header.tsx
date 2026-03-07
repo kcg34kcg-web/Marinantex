@@ -13,6 +13,7 @@ const ROUTE_MAP: Record<string, string> = {
   '/dashboard': 'Panel',
   '/dashboard/calendar': 'Takvim',
   '/dashboard/cases': 'Dosyalar',
+  '/dashboard/mail': 'Mail Projesi',
   '/dashboard/clients': 'Muvekkiller',
   '/dashboard/time-billing': 'Zaman ve Tahsilat',
   '/dashboard/profile': 'Profil',
@@ -20,7 +21,7 @@ const ROUTE_MAP: Record<string, string> = {
   '/dashboard/invites': 'Davetler',
   '/dashboard/corpus': 'Corpus',
   '/office': 'Ofisim',
-  '/tools/hukuk-ai': 'Hukuk AI',
+  '/tools/hukuk-ai': 'Hukuk AI Chat',
   '/tools/kaynak-ictihat-arama': 'Kaynak / Ictihat Arama',
   '/tools/calculator/interest': 'Faiz Hesaplayici',
   '/tools/calculator/smm': 'SMM Araci',
@@ -51,8 +52,8 @@ export function DashboardHeader() {
   return (
     <header
       className={cn(
-        'app-glass-topbar sticky top-0 z-20 border-b border-[var(--main-border,var(--border))] px-6 py-3',
-        'bg-[var(--main-surface-0,var(--surface))] backdrop-blur-[var(--blur-heavy)]',
+        'app-glass-topbar sticky top-0 z-20 border-b border-[var(--main-border,var(--border))] px-4 py-3 md:px-6',
+        'bg-[color-mix(in_srgb,var(--main-surface-0,var(--surface)),transparent_4%)] backdrop-blur-[var(--blur-heavy)]',
       )}
     >
       <div className="flex items-center justify-between gap-4">
@@ -61,7 +62,7 @@ export function DashboardHeader() {
             <nav aria-label="Breadcrumb" className="mb-0.5 flex items-center gap-1">
               <Link
                 href="/dashboard"
-                className="flex items-center text-[10px] text-[var(--secondary)] transition-colors hover:text-[var(--primary)]"
+                className="flex items-center text-[10px] text-[var(--main-muted,var(--secondary))] transition-colors hover:text-[var(--primary)]"
               >
                 <Home className="h-2.5 w-2.5" />
               </Link>
@@ -73,7 +74,7 @@ export function DashboardHeader() {
                   ) : (
                     <Link
                       href={crumb.href as Route}
-                      className="text-[10px] text-[var(--secondary)] transition-colors hover:text-[var(--primary)]"
+                      className="text-[10px] text-[var(--main-muted,var(--secondary))] transition-colors hover:text-[var(--primary)]"
                     >
                       {crumb.label}
                     </Link>
@@ -83,7 +84,7 @@ export function DashboardHeader() {
             </nav>
           ) : null}
 
-          <h1 className="truncate font-serif text-xl font-semibold leading-tight text-[var(--text)]">{currentTitle}</h1>
+          <h1 className="truncate text-xl font-semibold leading-tight tracking-[-0.01em] text-[var(--main-text,var(--text))]">{currentTitle}</h1>
         </div>
 
         <div className="flex flex-shrink-0 items-center gap-2">

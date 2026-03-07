@@ -19,12 +19,17 @@ function isAuthRoute(pathname: string): boolean {
   return pathname.startsWith('/login') || pathname === '/signup';
 }
 
+function isPublicNewsRoute(pathname: string): boolean {
+  return pathname === '/dashboard/news' || pathname.startsWith('/api/dashboard/news/stream');
+}
+
 function isPublicRoute(pathname: string): boolean {
   return (
     pathname === '/' ||
     isAuthRoute(pathname) ||
     pathname.startsWith('/auth') ||
-    pathname.startsWith('/editor')
+    pathname.startsWith('/editor') ||
+    isPublicNewsRoute(pathname)
   );
 }
 
@@ -112,7 +117,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (isDashboardRoute(pathname) && role === 'client') {
+  if (isDashboardRoute(pathname) && pathname !== '/dashboard/news' && role === 'client') {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = getHomeRouteByRole(role);
     redirectUrl.search = '';

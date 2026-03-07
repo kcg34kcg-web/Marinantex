@@ -7,6 +7,7 @@ from datetime import date
 from infrastructure.rag_v3.governance import (
     apply_norm_hierarchy,
     evaluate_policy,
+    evaluate_policy_lattice,
     resolve_as_of_date,
     verify_claim_support,
 )
@@ -22,6 +23,8 @@ def _match(
     effective_from: date | None = None,
     effective_to: date | None = None,
     text: str = "Madde 17 ihbar suresi dort haftadir.",
+    classification: str = "PUBLIC",
+    acl_tags: list[str] | None = None,
 ) -> RagV3ChunkMatch:
     return RagV3ChunkMatch(
         chunk_id=f"chunk-{source_type}-{source_id}",
@@ -29,6 +32,7 @@ def _match(
         title="Belge",
         source_type=source_type,
         source_id=source_id,
+        classification=classification,
         jurisdiction="TR",
         article_no=article_no,
         clause_no="1",
@@ -38,7 +42,7 @@ def _match(
         page_range=None,
         effective_from=effective_from,
         effective_to=effective_to,
-        acl_tags=["public"],
+        acl_tags=list(acl_tags or ["public"]),
         doc_hash="doc-hash",
         chunk_hash=f"hash-{source_type}-{source_id}",
         semantic_score=0.7,
@@ -57,6 +61,19 @@ def test_resolve_as_of_date_parses_year_only_query() -> None:
     resolved = resolve_as_of_date("2019 yilinda hangi duzenleme vardi?", None, today=date(2026, 3, 3))
     assert resolved.as_of_date == date(2019, 12, 31)
     assert resolved.source == "query_year"
+
+
+def test_resolve_as_of_date_prefers_event_date_when_dual_temporal_input_exists() -> None:
+    resolved = resolve_as_of_date(
+        "ihbar suresi nedir",
+        None,
+        event_date=date(2010, 1, 1),
+        decision_date=date(2020, 1, 1),
+        today=date(2026, 3, 3),
+    )
+    assert resolved.as_of_date == date(2010, 1, 1)
+    assert resolved.source == "event_date"
+    assert "decision_date_not_used_in_single_as_of" in resolved.warnings
 
 
 def test_apply_norm_hierarchy_boosts_source_id_and_article_match() -> None:
@@ -118,3 +135,48 @@ def test_evaluate_policy_marks_guarantee_request_as_critical() -> None:
     assert policy.risk_level == "CRITICAL"
     assert "GUARANTEE_REQUEST" in policy.policy_flags
     assert policy.should_block_generation is True
+
+
+def test_policy_lattice_tightens_on_sensitive_classification() -> None:
+    lattice = evaluate_policy_lattice(
+        matches=[
+            _match(source_type="kanun", source_id="1", classification="PUBLIC"),
+            _match(source_type="sozlesme", source_id="2", classification="SENSITIVE"),
+        ],
+        session_policy={},
+        default_provider_allowlist=["google", "openai", "anthropic", "groq"],
+        self_host_provider_allowlist=["openai"],
+    )
+    assert lattice.sensitivity == "privileged"
+    assert lattice.external_transfer == "forbidden"
+    assert lattice.provider_allowlist == ["openai"]
+    assert lattice.should_block_generation is False
+
+
+def test_policy_lattice_blocks_prohibited_source_rights() -> None:
+    lattice = evaluate_policy_lattice(
+        matches=[
+            _match(
+                source_type="sozlesme",
+                source_id="x1",
+                classification="CONFIDENTIAL",
+                acl_tags=["source_rights:prohibited"],
+            )
+        ],
+        session_policy={},
+        default_provider_allowlist=["openai"],
+        self_host_provider_allowlist=["openai"],
+    )
+    assert lattice.source_rights == "prohibited"
+    assert lattice.should_block_generation is True
+    assert "SOURCE_RIGHTS_PROHIBITED" in lattice.policy_flags
+
+
+def test_policy_lattice_intersects_session_provider_allowlist() -> None:
+    lattice = evaluate_policy_lattice(
+        matches=[_match(source_type="sozlesme", source_id="x2", classification="CONFIDENTIAL")],
+        session_policy={"provider_allowlist": ["google", "openai"]},
+        default_provider_allowlist=["google", "openai", "anthropic"],
+        self_host_provider_allowlist=["openai"],
+    )
+    assert lattice.provider_allowlist == ["openai"]

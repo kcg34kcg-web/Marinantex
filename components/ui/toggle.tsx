@@ -16,18 +16,18 @@ export function Toggle({ checked, onCheckedChange, disabled = false, className }
       disabled={disabled}
       onClick={() => onCheckedChange(!checked)}
       className={cn(
-        'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+        'relative inline-flex h-7 w-12 items-center rounded-full border transition-colors duration-200',
         checked
-          ? 'bg-[color-mix(in_srgb,var(--primary),white_6%)]'
-          : 'bg-[color-mix(in_srgb,var(--border),var(--surface)_60%)]',
+          ? 'border-[color-mix(in_srgb,var(--primary),white_24%)] bg-[color-mix(in_srgb,var(--primary),white_8%)]'
+          : 'border-[var(--main-border,var(--border))] bg-[color-mix(in_srgb,var(--main-surface-2,var(--surface)),var(--border)_36%)]',
         'disabled:cursor-not-allowed disabled:opacity-50',
         className,
       )}
     >
       <span
         className={cn(
-          'inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform',
-          checked ? 'translate-x-5' : 'translate-x-0.5',
+          'inline-block h-5 w-5 transform rounded-full bg-white shadow-[var(--shadow-elev-0)] transition-transform duration-200',
+          checked ? 'translate-x-6' : 'translate-x-1',
         )}
       />
     </button>

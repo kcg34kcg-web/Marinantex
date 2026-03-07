@@ -10,7 +10,13 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { AiTier, ChatMode, ClientAction, ResponseDepth, ResponseType, SaveMode } from '@/types';
 import { resolveBureauContext } from '@/app/api/rag/_lib/bureau-context';
+import {
+  ragProxyErrorResponse,
+  RAG_PROXY_ERROR_CONTRACT_VERSION,
+  RAG_PROXY_ERROR_SCHEMA_VERSION,
+} from '@/app/api/rag/_lib/error-contract';
 import { fetchRagBackend, getRagBackendForLogs } from '@/app/api/rag/_lib/rag-backend';
+import { enforceRagRouteRateLimit } from '@/app/api/rag/_lib/rate-limit';
 import { createClient } from '@/utils/supabase/server';
 
 const QUERY_FLAG_KEYS = ['strict_grounding_v2', 'tier_selector_ui', 'router_hybrid_v3'] as const;
@@ -109,6 +115,11 @@ type RagV3Citation = {
   subclause_no?: string | null;
   page_range?: string | null;
   final_score?: number;
+  temporal_version?: string | null;
+  evidence_text?: string | null;
+  evidence_start?: number | null;
+  evidence_end?: number | null;
+  evidence_overlap?: number | null;
 };
 
 type RagV3Fingerprint = {
@@ -122,6 +133,17 @@ type RagV3Structured = {
   warnings?: string[];
 };
 
+type RagV3CostEstimate = {
+  model_id?: string;
+  tier?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  total_cost_usd?: number;
+  cached?: boolean;
+  rate_per_1m_in?: number;
+  rate_per_1m_out?: number;
+};
+
 type RagV3QueryPayload = {
   request_id?: string;
   answer: string;
@@ -130,6 +152,8 @@ type RagV3QueryPayload = {
   citations: RagV3Citation[];
   fingerprint: RagV3Fingerprint;
   structured: RagV3Structured;
+  estimated_cost?: number;
+  cost_estimate?: RagV3CostEstimate;
   contract_version?: string;
   schema_version?: string;
 };
@@ -144,6 +168,12 @@ function tierToNumber(tier: AiTier): number {
 function clampTopK(value: number | undefined): number {
   const raw = Number.isFinite(value) ? Number(value) : 10;
   return Math.max(8, Math.min(12, raw));
+}
+
+function aclTagsForAccessLevel(accessLevel: 'OWNER' | 'MEMBER' | 'READ_ONLY'): string[] {
+  if (accessLevel === 'OWNER') return ['public', 'internal', 'confidential', 'sensitive'];
+  if (accessLevel === 'MEMBER') return ['public', 'internal', 'confidential'];
+  return ['public', 'internal'];
 }
 
 function toPageNo(value: string | null | undefined): number | undefined {
@@ -181,6 +211,33 @@ function normalizeRagV3Response(body: unknown): RagV3QueryPayload | null {
     : [];
   const fingerprint = asObject(obj.fingerprint) ?? {};
   const structured = asObject(obj.structured) ?? {};
+  const rawCostEstimate = asObject(obj.cost_estimate) ?? {};
+  const costEstimate: RagV3CostEstimate = {
+    model_id: typeof rawCostEstimate.model_id === 'string' ? rawCostEstimate.model_id : undefined,
+    tier: typeof rawCostEstimate.tier === 'number' && Number.isFinite(rawCostEstimate.tier)
+      ? Math.trunc(rawCostEstimate.tier)
+      : undefined,
+    input_tokens: typeof rawCostEstimate.input_tokens === 'number' && Number.isFinite(rawCostEstimate.input_tokens)
+      ? Math.trunc(rawCostEstimate.input_tokens)
+      : undefined,
+    output_tokens: typeof rawCostEstimate.output_tokens === 'number' && Number.isFinite(rawCostEstimate.output_tokens)
+      ? Math.trunc(rawCostEstimate.output_tokens)
+      : undefined,
+    total_cost_usd: typeof rawCostEstimate.total_cost_usd === 'number' && Number.isFinite(rawCostEstimate.total_cost_usd)
+      ? rawCostEstimate.total_cost_usd
+      : undefined,
+    cached: typeof rawCostEstimate.cached === 'boolean' ? rawCostEstimate.cached : undefined,
+    rate_per_1m_in: typeof rawCostEstimate.rate_per_1m_in === 'number' && Number.isFinite(rawCostEstimate.rate_per_1m_in)
+      ? rawCostEstimate.rate_per_1m_in
+      : undefined,
+    rate_per_1m_out: typeof rawCostEstimate.rate_per_1m_out === 'number' && Number.isFinite(rawCostEstimate.rate_per_1m_out)
+      ? rawCostEstimate.rate_per_1m_out
+      : undefined,
+  };
+  const estimatedCost =
+    typeof obj.estimated_cost === 'number' && Number.isFinite(obj.estimated_cost)
+      ? Math.max(0, obj.estimated_cost)
+      : undefined;
   return {
     request_id: typeof obj.request_id === 'string' ? obj.request_id : undefined,
     answer,
@@ -189,22 +246,28 @@ function normalizeRagV3Response(body: unknown): RagV3QueryPayload | null {
     citations,
     fingerprint,
     structured,
+    estimated_cost: estimatedCost,
+    cost_estimate: costEstimate,
     contract_version: typeof obj.contract_version === 'string' ? obj.contract_version : undefined,
     schema_version: typeof obj.schema_version === 'string' ? obj.schema_version : undefined,
   };
 }
 
 function buildNoSourceHardFailResponse(strictGrounding: boolean, message?: string) {
+  const resolvedMessage =
+    typeof message === 'string' && message.trim().length > 0
+      ? message
+      : 'Bu hukuki soru icin kaynak bulunamadi; bu nedenle yanit uretilmedi.';
   return {
     error_code: 'NO_SOURCE_HARD_FAIL',
-    message:
-      typeof message === 'string' && message.trim().length > 0
-        ? message
-        : 'Bu hukuki soru icin kaynak bulunamadi; bu nedenle yanit uretilmedi.',
+    error: resolvedMessage,
+    message: resolvedMessage,
     suggestions: [...DEFAULT_NO_SOURCE_ACTIONS],
     llm_called: false,
     strict_grounding: strictGrounding,
     intent_class: 'legal_query',
+    contract_version: RAG_PROXY_ERROR_CONTRACT_VERSION,
+    schema_version: RAG_PROXY_ERROR_SCHEMA_VERSION,
   };
 }
 
@@ -240,6 +303,8 @@ function adaptRagV3ToLegacy(
     const content = [
       citation.title ? `Baslik: ${citation.title}` : null,
       anchor ? `Atif: ${anchor}` : null,
+      citation.temporal_version ? `Versiyon: ${citation.temporal_version}` : null,
+      citation.evidence_text ? `Kanit: ${citation.evidence_text}` : null,
       citation.page_range ? `Sayfa: ${citation.page_range}` : null,
       typeof citation.final_score === 'number' ? `Skor: ${citation.final_score.toFixed(3)}` : null,
     ]
@@ -277,6 +342,37 @@ function adaptRagV3ToLegacy(
   const modelVersion = String(payload.fingerprint.model_version ?? '').trim();
   const promptVersion = String(payload.fingerprint.prompt_version ?? '').trim();
   const modelUsed = modelVersion || modelName || 'rag_v3';
+  const costEstimateObj = payload.cost_estimate ?? {};
+  const inputTokens =
+    typeof costEstimateObj.input_tokens === 'number' && Number.isFinite(costEstimateObj.input_tokens)
+      ? Math.max(0, Math.trunc(costEstimateObj.input_tokens))
+      : 0;
+  const outputTokens =
+    typeof costEstimateObj.output_tokens === 'number' && Number.isFinite(costEstimateObj.output_tokens)
+      ? Math.max(0, Math.trunc(costEstimateObj.output_tokens))
+      : 0;
+  const totalCost =
+    typeof costEstimateObj.total_cost_usd === 'number' && Number.isFinite(costEstimateObj.total_cost_usd)
+      ? Math.max(0, costEstimateObj.total_cost_usd)
+      : (
+        typeof payload.estimated_cost === 'number' && Number.isFinite(payload.estimated_cost)
+          ? Math.max(0, payload.estimated_cost)
+          : 0
+      );
+  const rateIn =
+    typeof costEstimateObj.rate_per_1m_in === 'number' && Number.isFinite(costEstimateObj.rate_per_1m_in)
+      ? Math.max(0, costEstimateObj.rate_per_1m_in)
+      : 0;
+  const rateOut =
+    typeof costEstimateObj.rate_per_1m_out === 'number' && Number.isFinite(costEstimateObj.rate_per_1m_out)
+      ? Math.max(0, costEstimateObj.rate_per_1m_out)
+      : 0;
+  const costTier =
+    typeof costEstimateObj.tier === 'number' && Number.isFinite(costEstimateObj.tier)
+      ? Math.max(1, Math.min(4, Math.trunc(costEstimateObj.tier)))
+      : tierToNumber(options.selectedTier);
+  const costCached = Boolean(costEstimateObj.cached);
+  const costModelId = String(costEstimateObj.model_id ?? modelUsed).trim() || modelUsed;
   const auditTrailId =
     (typeof payload.request_id === 'string' && payload.request_id.trim().length > 0)
       ? payload.request_id.trim()
@@ -299,16 +395,16 @@ function adaptRagV3ToLegacy(
       average_support_span: 0,
       average_citation_confidence: payload.status === 'no_answer' ? 0 : groundingRatio,
     },
-    estimated_cost: 0,
+    estimated_cost: totalCost,
     cost_estimate: {
-      model_id: modelUsed,
-      tier: tierToNumber(options.selectedTier),
-      input_tokens: 0,
-      output_tokens: 0,
-      total_cost_usd: 0,
-      cached: false,
-      rate_per_1m_in: 0,
-      rate_per_1m_out: 0,
+      model_id: costModelId,
+      tier: costTier,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_cost_usd: totalCost,
+      cached: costCached,
+      rate_per_1m_in: rateIn,
+      rate_per_1m_out: rateOut,
     },
     audit_trail_id: auditTrailId,
     temporal_fields: options.temporal,
@@ -353,18 +449,52 @@ export async function POST(req: Request) {
     const parsed = requestSchema.safeParse(await req.json());
 
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.issues.map((i) => i.message).join(' ') }, { status: 400 });
+      return ragProxyErrorResponse({
+        status: 400,
+        errorCode: 'INVALID_REQUEST',
+        message: parsed.error.issues.map((i) => i.message).join(' '),
+      });
     }
 
     const supabase = await createClient();
     let context;
     try {
-      context = await resolveBureauContext(supabase);
-    } catch {
-      return NextResponse.json({ error: 'Oturum bulunamadi. Lutfen tekrar giris yapin.' }, { status: 401 });
+      context = await resolveBureauContext(supabase, {
+        requireClaimMatch: true,
+        requireBureau: true,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : '';
+      if (reason === 'TENANT_CLAIM_MISMATCH') {
+        return ragProxyErrorResponse({
+          status: 403,
+          errorCode: 'TENANT_CLAIM_MISMATCH',
+          message: 'Oturum tenant bilgisi ile profil tenant bilgisi uyusmuyor. Lutfen tekrar giris yapin.',
+        });
+      }
+      if (reason === 'BUREAU_CONTEXT_MISSING') {
+        return ragProxyErrorResponse({
+          status: 401,
+          errorCode: 'BUREAU_CONTEXT_MISSING',
+          message: 'Buro baglami bulunamadi. Lutfen tekrar giris yapin.',
+        });
+      }
+      return ragProxyErrorResponse({
+        status: 401,
+        errorCode: 'AUTH_REQUIRED',
+        message: 'Oturum bulunamadi. Lutfen tekrar giris yapin.',
+      });
     }
 
-    const { bureauId, userId, planTier, messagesToday, tokensUsedMonth } = context;
+    const { bureauId, userId, accessLevel, planTier, messagesToday, tokensUsedMonth } = context;
+    const rateLimit = enforceRagRouteRateLimit({
+      request: req,
+      routeKey: 'query_proxy',
+      userId,
+    });
+    if (rateLimit.limited && rateLimit.response) {
+      return rateLimit.response;
+    }
 
     const flags = await resolveQueryFlags(supabase, bureauId);
     const { top_k, ...restPayload } = parsed.data;
@@ -383,10 +513,13 @@ export async function POST(req: Request) {
     );
     const upstreamPayload = {
       query: restPayload.query,
+      history: restPayload.history,
       top_k: effectiveTopK,
       jurisdiction: 'TR',
       as_of_date: restPayload.as_of_date,
-      acl_tags: ['public'],
+      event_date: restPayload.event_date,
+      decision_date: restPayload.decision_date,
+      acl_tags: aclTagsForAccessLevel(accessLevel),
       requested_tier: requestedTierNumber,
     };
     const timeoutMs = TIER_TIMEOUT_MS[effectiveTier] ?? 95_000;
@@ -394,6 +527,7 @@ export async function POST(req: Request) {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-User-ID': userId,
+      'X-Access-Level': accessLevel,
       'X-Router-Hybrid-V3': flags.router_hybrid_v3 ? '1' : '0',
       'X-Plan-Tier': planTier,
     };
@@ -405,10 +539,9 @@ export async function POST(req: Request) {
     }
     if (bureauId) {
       headers['X-Bureau-ID'] = bureauId;
-    } else {
-      // Keep query path functional when profile is incomplete; middleware only
-      // requires a syntactically valid UUID and user id is UUID in Supabase.
-      headers['X-Bureau-ID'] = userId;
+    }
+    if (context.accessToken) {
+      headers.Authorization = `Bearer ${context.accessToken}`;
     }
 
     const upstream = await fetchRagBackend('/api/v1/rag-v3/query', {
@@ -428,21 +561,28 @@ export async function POST(req: Request) {
     if (!upstream.ok) {
       const bodyObj = asObject(body);
       const detailObj = asObject(bodyObj?.detail);
+      const backendErrorCode =
+        typeof detailObj?.error_code === 'string'
+          ? detailObj.error_code
+          : typeof bodyObj?.error_code === 'string'
+            ? bodyObj.error_code
+            : 'RAG_BACKEND_ERROR';
 
-      return NextResponse.json(
-        {
-          error: pickErrorMessage(body),
-          error_code: typeof detailObj?.error_code === 'string' ? detailObj.error_code : undefined,
-        },
-        { status: upstream.status },
-      );
+      return ragProxyErrorResponse({
+        status: upstream.status,
+        errorCode: backendErrorCode,
+        message: pickErrorMessage(body),
+        retryable: upstream.status >= 500,
+      });
     }
     const normalized = normalizeRagV3Response(body);
     if (!normalized) {
-      return NextResponse.json(
-        { error: 'RAG v3 yaniti gecersiz veya eksik.' },
-        { status: 503 },
-      );
+      return ragProxyErrorResponse({
+        status: 503,
+        errorCode: 'INVALID_BACKEND_RESPONSE',
+        message: 'RAG v3 yaniti gecersiz veya eksik.',
+        retryable: true,
+      });
     }
     const noSourceHardFail =
       effectiveStrictGrounding
@@ -470,6 +610,11 @@ export async function POST(req: Request) {
         ? 'Istek zaman asimina ugradi. Lutfen tekrar deneyin.'
         : 'Sunucu baglanti hatasi.';
     console.error('[RAG proxy]', err, { backendCandidates: getRagBackendForLogs() });
-    return NextResponse.json({ error: message }, { status: 502 });
+    return ragProxyErrorResponse({
+      status: 502,
+      errorCode: err instanceof Error && err.name === 'AbortError' ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
+      message,
+      retryable: true,
+    });
   }
 }

@@ -1,0 +1,218 @@
+{
+  "started_at": "2026-03-06T19:36:58.160Z",
+  "api_base": "http://127.0.0.1:8000/api/v1/rag-v3",
+  "context": {
+    "bureau_id": "061bab08-4230-4b1f-878e-c50b95d3fc6c",
+    "user_id": "f8fceece-ef61-4a5d-96d1-35324a59c672",
+    "role": "lawyer"
+  },
+  "preflight": {
+    "health": {
+      "ok": true,
+      "status": 200,
+      "latencyMs": 4,
+      "body": {
+        "status": "healthy",
+        "components": {
+          "api": true,
+          "postgres": true,
+          "redis": true,
+          "supabase": true,
+          "checkpointer": true
+        }
+      },
+      "rawPreview": "{\"status\":\"healthy\",\"components\":{\"api\":true,\"postgres\":true,\"redis\":true,\"supabase\":true,\"checkpointer\":true}}"
+    },
+    "health_wait": {
+      "ok": true,
+      "attempts": 1,
+      "waited_ms": 0,
+      "last": {
+        "ok": true,
+        "status": 200,
+        "latencyMs": 4,
+        "body": {
+          "status": "healthy",
+          "components": {
+            "api": true,
+            "postgres": true,
+            "redis": true,
+            "supabase": true,
+            "checkpointer": true
+          }
+        },
+        "rawPreview": "{\"status\":\"healthy\",\"components\":{\"api\":true,\"postgres\":true,\"redis\":true,\"supabase\":true,\"checkpointer\":true}}"
+      }
+    },
+    "health_after": {
+      "ok": true,
+      "status": 200,
+      "latencyMs": 7,
+      "body": {
+        "status": "healthy",
+        "components": {
+          "api": true,
+          "postgres": true,
+          "redis": true,
+          "supabase": true,
+          "checkpointer": true
+        }
+      },
+      "rawPreview": "{\"status\":\"healthy\",\"components\":{\"api\":true,\"postgres\":true,\"redis\":true,\"supabase\":true,\"checkpointer\":true}}"
+    }
+  },
+  "tests": [
+    {
+      "key": "tenant_isolation",
+      "pass": true,
+      "source_id": "t1-tenant-2026-03-06T19-36-58-171Z-ee05",
+      "checks": {
+        "ingest_status": 201,
+        "own_query_status": 200,
+        "own_hit": true,
+        "wrong_bureau_query_status": 200,
+        "wrong_bureau_hit": false,
+        "no_bureau_query_status": 401
+      }
+    },
+    {
+      "key": "acl_classification",
+      "pass": true,
+      "source_ids": [
+        "t2-public-2026-03-06T19-37-02-310Z-2de0",
+        "t2-internal-2026-03-06T19-37-02-310Z-bdce"
+      ],
+      "checks": {
+        "ingest_public_status": 201,
+        "ingest_internal_status": 201,
+        "public_acl_hits_public_doc": true,
+        "public_acl_hits_internal_doc": false,
+        "internal_acl_hits_internal_doc": true
+      }
+    },
+    {
+      "key": "delete_flow",
+      "pass": true,
+      "source_id": "t3-delete-2026-03-06T19-37-04-477Z-cb7a",
+      "checks": {
+        "ingest_status": 201,
+        "before_hit": true,
+        "delete_status": 200,
+        "delete_deleted_documents": 1,
+        "after_hit": false
+      }
+    },
+    {
+      "key": "no_answer",
+      "pass": true,
+      "checks": {
+        "query_status": 200,
+        "response_status": "no_answer",
+        "gate_decision": "answerability_overlap_low",
+        "no_answer_like": true,
+        "citation_count": 2
+      }
+    },
+    {
+      "key": "prompt_injection",
+      "pass": true,
+      "checks": {
+        "query_status": 400,
+        "response_status": null,
+        "gate_decision": null,
+        "blocked_by_http_guard": true,
+        "guard_error_code": "PROMPT_INJECTION_DETECTED",
+        "detail_error": "İstek güvenlik denetiminden geçemedi: zararlı içerik tespit edildi. LLM çağrısı yapılmadı.",
+        "policy_flags": [],
+        "answer_contains_paris": false
+      }
+    },
+    {
+      "key": "grounding",
+      "pass": true,
+      "source_id": "t6-ground-2026-03-06T19-37-06-215Z-6ac0",
+      "checks": {
+        "ingest_status": 201,
+        "query_status": 200,
+        "citation_count": 3,
+        "cites_target_source": true,
+        "answer_contains_expected_value": true
+      }
+    },
+    {
+      "key": "hybrid_fail_open",
+      "pass": true,
+      "source_id": "t7-hybrid-2026-03-06T19-37-07-064Z-b277",
+      "checks": {
+        "ingest_status": 201,
+        "doc_lookup_status": 200,
+        "chunk_lookup_status": 200,
+        "embedding_present": false,
+        "query_status": 200,
+        "citation_hit": true
+      }
+    },
+    {
+      "key": "load_admission_timeout",
+      "pass": true,
+      "checks": {
+        "total_requests": 90,
+        "total_duration_ms": 25343,
+        "status_counts": {
+          "200": 90
+        },
+        "non_200_count": 0,
+        "admission_not_accepted_count": 0,
+        "admission_degraded_count": 0,
+        "admission_reason_counts": {
+          "accepted": 90
+        },
+        "latency_ms": {
+          "min": 13816,
+          "avg": 24158.74,
+          "p95": 25337,
+          "max": 25338
+        }
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "source_id": "t1-tenant-2026-03-06T19-36-58-171Z-ee05",
+      "method": "api_delete",
+      "status": 200
+    },
+    {
+      "source_id": "t2-public-2026-03-06T19-37-02-310Z-2de0",
+      "method": "api_delete",
+      "status": 200
+    },
+    {
+      "source_id": "t2-internal-2026-03-06T19-37-02-310Z-bdce",
+      "method": "api_delete",
+      "status": 200
+    },
+    {
+      "source_id": "t3-delete-2026-03-06T19-37-04-477Z-cb7a",
+      "method": "api_delete",
+      "status": 200
+    },
+    {
+      "source_id": "t6-ground-2026-03-06T19-37-06-215Z-6ac0",
+      "method": "api_delete",
+      "status": 200
+    },
+    {
+      "source_id": "t7-hybrid-2026-03-06T19-37-07-064Z-b277",
+      "method": "api_delete",
+      "status": 200
+    }
+  ],
+  "detected_issues": [],
+  "finished_at": "2026-03-06T19:37:34.619Z",
+  "summary": {
+    "total_tests": 8,
+    "passed_tests": 8,
+    "failed_tests": 0
+  }
+}

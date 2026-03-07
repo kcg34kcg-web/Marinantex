@@ -220,6 +220,12 @@ class Settings(BaseSettings):
     """Highest requested tier allowed to use embedding fail-open mode.
     1=hazir_cevap, 2=dusunceli, 3=uzman, 4=muazzam."""
 
+    embedding_model_lock_enforced: bool = True
+    """When True, runtime rejects EMBEDDING_MODEL values that do not match the Turkish benchmark lock file."""
+
+    embedding_model_lock_file: str = "evals/embedding_model_lock.tr.json"
+    """Path to benchmark lock file that records the approved Turkish embedding model."""
+
     turkish_ner_model: Optional[str] = None
 
     # ========================================================================
@@ -243,6 +249,15 @@ class Settings(BaseSettings):
     rag_v3_rrf_keyword_weight: float = 1.0
     """Lane multiplier applied to sparse rank contributions in RRF."""
 
+    rag_v3_chunk_target_min_tokens: int = 400
+    """Chunker minimum target token size."""
+
+    rag_v3_chunk_target_max_tokens: int = 900
+    """Chunker maximum target token size before sub-splitting."""
+
+    rag_v3_chunk_overlap_tokens: int = 80
+    """Token overlap prepended between adjacent chunks from the same article."""
+
     rag_v3_reranker_enabled: bool = True
     """When True, second-stage reranking is applied on fused candidates."""
 
@@ -251,6 +266,9 @@ class Settings(BaseSettings):
 
     rag_v3_reranker_top_n: int = 12
     """How many fused candidates enter second-stage reranking."""
+
+    rag_v3_reranker_timeout_s: float = 4.0
+    """Hard timeout for reranker stage; on timeout, retrieval order is used."""
 
     rag_v3_retrieval_score_weight: float = 0.70
     """Weight of retrieval score when combining retrieval+rereanker scores."""
@@ -285,6 +303,27 @@ class Settings(BaseSettings):
     rag_v3_no_answer_on_claim_verification_fail: bool = True
     """When True, unsupported claim ratio forces a no-answer fallback."""
 
+    rag_v3_claim_graph_enabled: bool = True
+    """When True, builds claim graph metadata for traceability and pruning."""
+
+    rag_v3_constrained_synthesis_enabled: bool = True
+    """When True, final answer is pruned to verified claim graph support."""
+
+    rag_v3_citation_snippet_min_overlap: float = 0.18
+    """Minimum lexical overlap needed to attach evidence snippet to a citation."""
+
+    rag_v3_iterative_retrieval_enabled: bool = True
+    """When True, low-confidence/low-overlap queries trigger a second retrieval pass."""
+
+    rag_v3_iterative_top_k: int = 14
+    """Candidate pool size for the second retrieval pass before reranking."""
+
+    rag_v3_dual_temporal_enabled: bool = True
+    """When True, event_date+decision_date queries run dual retrieval passes."""
+
+    rag_v3_dual_temporal_top_k: int = 14
+    """Per-temporal candidate size (event and decision) before fusion/rerank."""
+
     rag_v3_human_review_enabled: bool = True
     """When True, escalated/unsafe outputs are enqueued for human review."""
 
@@ -294,10 +333,10 @@ class Settings(BaseSettings):
     rag_v3_tenant_hard_fail_missing_bureau: bool = True
     """Hard fail RAG v3 query when tenant isolation requires bureau scope."""
 
-    rag_v3_max_inflight_requests: int = 64
+    rag_v3_max_inflight_requests: int = 96
     """Admission control: maximum concurrent RAG v3 requests."""
 
-    rag_v3_queue_timeout_ms: int = 1000
+    rag_v3_queue_timeout_ms: int = 5000
     """Admission control: queue wait timeout before request is rejected/degraded."""
 
     rag_v3_admission_max_query_chars: int = 4000
@@ -317,6 +356,30 @@ class Settings(BaseSettings):
 
     rag_v3_query_schema_version: str = "rag.v3.query.response.schema.v1"
     """Schema version paired with query contract for deterministic rollout."""
+
+    rag_v3_query_cache_enabled: bool = True
+    """Enable lightweight in-process query result cache for repeated requests."""
+
+    rag_v3_query_cache_ttl_s: int = 120
+    """TTL (seconds) for in-process RAG v3 query cache entries."""
+
+    rag_v3_query_cache_max_entries: int = 500
+    """Upper bound for in-process RAG v3 query cache entries."""
+
+    rag_v3_policy_lattice_enabled: bool = True
+    """When True, session+document policy lattice is enforced before generation."""
+
+    rag_v3_policy_default_provider_allowlist: str = "google,openai,anthropic,groq"
+    """Default provider set used as lattice baseline (CSV; provider aliases supported)."""
+
+    rag_v3_policy_self_host_provider_allowlist: str = "openai"
+    """Providers considered self-host/egress-safe for external_transfer=forbidden (CSV)."""
+
+    rag_v3_snapshot_enforcement_enabled: bool = True
+    """When True, query read path enforces publish snapshot + lifecycle state filters."""
+
+    rag_v3_mid_turn_revoke_check_enabled: bool = True
+    """When True, revocation epoch drift during generation forces safe no-answer."""
     
     # ========================================================================
     # LangGraph
@@ -412,9 +475,21 @@ class Settings(BaseSettings):
     """Per-provider SDK retry budget for final generation calls.
     Kept low because RAGService already applies timeout/fail-open policies."""
 
+    llm_provider_timeout_s: float = 12.0
+    """Hard timeout (seconds) for a single final generation call.
+    If exceeded, RAG v3 degrades to extractive fail-open path."""
+
+    llm_provider_quota_cooldown_s: int = 300
+    """Cooldown window after provider quota exhaustion is detected.
+    During cooldown, generation is skipped and fail-open is used immediately."""
+
     llm_provider_fail_open_enabled: bool = True
     """When True, provider/quota failures in final generation degrade to
     source-extractive fallback text so legal-grounded flow can continue."""
+
+    llm_force_extractive_only: bool = False
+    """When True, skip final LLM generation and always return extractive
+    evidence-based answers from retrieved chunks."""
 
     # ========================================================================
     # Step 21: User-facing AI tier -> final model mapping

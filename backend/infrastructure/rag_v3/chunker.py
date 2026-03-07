@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import bisect
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 _TR_FOLD_TABLE = str.maketrans(
@@ -50,6 +50,7 @@ _SUBCLAUSE_RE = re.compile(r"^([a-z])\)\s+", re.MULTILINE)
 _HEADING_MARKER_RE = re.compile(r"^\[(H1|H2|H3)\]\s+(.+)$", re.IGNORECASE)
 _PUNCT_RE = re.compile(r"[.;:,!?]")
 _LINE_RE = re.compile(r"^.*$", re.MULTILINE)
+_TOKEN_SPAN_RE = re.compile(r"\S+")
 
 
 @dataclass(frozen=True)
@@ -78,9 +79,11 @@ class LegalStructuredChunker:
         self,
         target_min_tokens: int = 400,
         target_max_tokens: int = 900,
+        overlap_tokens: int = 80,
     ) -> None:
         self._target_min_tokens = max(50, int(target_min_tokens))
         self._target_max_tokens = max(self._target_min_tokens, int(target_max_tokens))
+        self._overlap_tokens = max(0, int(overlap_tokens))
 
     def chunk(self, text: str) -> list[LegalChunkDraft]:
         """Create structured chunks from normalized legal text."""
@@ -124,7 +127,7 @@ class LegalStructuredChunker:
                 )
             )
 
-        return chunks
+        return self._apply_overlap(chunks)
 
     def _chunk_article(
         self,
@@ -300,6 +303,36 @@ class LegalStructuredChunker:
 
         return heading_map
 
+    def _apply_overlap(self, chunks: list[LegalChunkDraft]) -> list[LegalChunkDraft]:
+        if self._overlap_tokens <= 0 or len(chunks) < 2:
+            return chunks
+
+        overlapped: list[LegalChunkDraft] = [chunks[0]]
+        for idx in range(1, len(chunks)):
+            prev = chunks[idx - 1]
+            current = chunks[idx]
+            if prev.article_no != current.article_no:
+                overlapped.append(current)
+                continue
+
+            overlap_prefix = _tail_tokens(prev.text, self._overlap_tokens)
+            if not overlap_prefix:
+                overlapped.append(current)
+                continue
+
+            current_text = current.text.strip()
+            if current_text.startswith(overlap_prefix):
+                overlapped.append(current)
+                continue
+
+            overlapped.append(
+                replace(
+                    current,
+                    text=f"{overlap_prefix}\n{current_text}".strip(),
+                )
+            )
+        return overlapped
+
 
 def _fold_tr(text: str) -> str:
     return (text or "").translate(_TR_FOLD_TABLE)
@@ -308,6 +341,23 @@ def _fold_tr(text: str) -> str:
 def _estimate_tokens(text: str) -> int:
     words = len(re.findall(r"\S+", text or ""))
     return int(words * 1.3)
+
+
+def _tail_tokens(text: str, count: int) -> str:
+    if count <= 0:
+        return ""
+    payload = (text or "").strip()
+    if not payload:
+        return ""
+
+    spans = list(_TOKEN_SPAN_RE.finditer(payload))
+    if not spans:
+        return ""
+    if len(spans) <= count:
+        return payload
+
+    start = spans[-count].start()
+    return payload[start:].strip()
 
 
 def _article_no_from_match(match: re.Match[str]) -> str:

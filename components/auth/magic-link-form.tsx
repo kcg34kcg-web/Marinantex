@@ -71,11 +71,11 @@ export function MagicLinkForm({ nextPath, expectedRole }: MagicLinkFormProps) {
         onChange={(e) => setEmail(e.target.value)}
         required
       />
-      {message ? <p className="text-sm text-slate-700">{message}</p> : null}
+      {message ? <p className="text-sm text-[var(--main-muted,var(--secondary))]">{message}</p> : null}
       <Button type="submit" className="w-full" disabled={isPending}>
         {isPending ? 'Bağlantı gönderiliyor...' : 'Magic Link Gönder'}
       </Button>
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-[var(--main-muted,var(--secondary))]">
         Not: İlk girişte sizden ad-soyad ve rol seçimi istenebilir.
       </p>
     </form>

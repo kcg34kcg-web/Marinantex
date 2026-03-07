@@ -20,7 +20,7 @@ const appendAssistantSchema = z.object({
   response_type: z.nativeEnum(ResponseType),
   model_used: z.string().max(240).optional(),
   source_count: z.number().int().min(0).max(300).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 const requestSchema = z.discriminatedUnion('action', [bootstrapSchema, appendAssistantSchema]);
@@ -37,7 +37,7 @@ async function resolveContext(): Promise<RequestContext | NextResponse> {
   const supabase = await createClient();
   let context;
   try {
-    context = await resolveBureauContext(supabase);
+    context = await resolveBureauContext(supabase, { requireClaimMatch: true });
   } catch {
     return NextResponse.json({ error: 'Oturum bulunamadi.' }, { status: 401 });
   }

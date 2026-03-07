@@ -2,7 +2,13 @@ import type { Config } from 'tailwindcss';
 
 const config: Config = {
   darkMode: ['class'],
-  content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}', './lib/**/*.{ts,tsx}', './store/**/*.{ts,tsx}'],
+  content: [
+    './app/**/*.{js,jsx,ts,tsx,mdx}',
+    './components/**/*.{js,jsx,ts,tsx,mdx}',
+    './lib/**/*.{js,jsx,ts,tsx,mdx}',
+    './store/**/*.{js,jsx,ts,tsx,mdx}',
+    './apps/web/**/*.{js,jsx,ts,tsx,mdx}',
+  ],
   theme: {
     extend: {
       colors: {
@@ -45,10 +51,10 @@ const config: Config = {
           border: 'var(--color-sepia-border)',
         },
       },
-      // ── Tipografi: Playfair Display (hukuki otorite) + Inter (UI netliği) ──
+      // ── Tipografi: Source Serif 4 (okuma) + Manrope (UI netligi) ───────────
       fontFamily: {
-        sans: ['var(--font-sans)', 'Inter', 'system-ui', 'sans-serif'],
-        serif: ['var(--font-serif)', 'Playfair Display', 'Georgia', 'serif'],
+        sans: ['var(--font-sans)', 'Manrope', 'system-ui', 'sans-serif'],
+        serif: ['var(--font-serif)', 'Source Serif 4', 'Georgia', 'serif'],
       },
       borderRadius: {
         sm: 'calc(var(--radius) - 4px)',

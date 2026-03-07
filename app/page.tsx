@@ -30,35 +30,39 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const friendlyMessage = getFriendlyAuthErrorMessage(params.error, params.error_description);
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-4xl flex-col items-center justify-center gap-6 px-6 text-center">
-      {hasAuthError ? (
-        <Card className="w-full max-w-2xl border-orange-200 bg-orange-50 text-left">
-          <CardHeader>
-            <CardTitle className="text-base text-orange-800">Giriş doğrulaması tamamlanamadı</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm text-orange-900">
-            <p>{friendlyMessage}</p>
-            {process.env.NODE_ENV !== 'production' ? (
-              <pre className="overflow-auto rounded-md border border-orange-200 bg-white p-3 text-xs text-slate-700">
-                {JSON.stringify(params, null, 2)}
-              </pre>
-            ) : null}
-          </CardContent>
-        </Card>
-      ) : null}
+    <main className="app-glass-shell">
+      <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col items-center justify-center gap-6 px-6 py-10 text-center">
+        {hasAuthError ? (
+          <Card className="w-full max-w-2xl border-[color-mix(in_srgb,var(--warning),white_62%)] bg-[color-mix(in_srgb,var(--warning),white_90%)] text-left">
+            <CardHeader>
+              <CardTitle className="text-base text-[var(--warning)]">Giriş doğrulaması tamamlanamadı</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm text-[color-mix(in_srgb,var(--warning),black_18%)]">
+              <p>{friendlyMessage}</p>
+              {process.env.NODE_ENV !== 'production' ? (
+                <pre className="overflow-auto rounded-md border border-[color-mix(in_srgb,var(--warning),white_64%)] bg-[var(--surface)] p-3 text-xs text-[var(--main-text,var(--text))]">
+                  {JSON.stringify(params, null, 2)}
+                </pre>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
 
-      <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-sm text-blue-700">
-        <Scale className="h-4 w-4" />
-        Babylexit'e Hoş Geldiniz
-      </div>
-      <h1 className="text-4xl font-bold tracking-tight text-slate-900">Hukuk operasyonlarınızı tek panelde yönetin</h1>
-      <p className="max-w-2xl text-slate-600">
-        Dijital İkiz ve Müvekkil Portalı ile dosya yönetimini hızlandırın, şeffaflığı artırın.
-      </p>
-      <div className="flex gap-3">
-        <Link href="/login?switch=1">
-          <Button>Giriş Yap</Button>
-        </Link>
+        <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_srgb,var(--primary),white_58%)] bg-[color-mix(in_srgb,var(--primary),white_90%)] px-4 py-2 text-sm text-[var(--primary)] shadow-[var(--shadow-elev-0)]">
+          <Scale className="h-4 w-4" />
+          Babylexit'e Hoş Geldiniz
+        </div>
+        <h1 className="max-w-3xl text-4xl font-semibold tracking-[-0.02em] text-[var(--main-text,var(--text))] md:text-5xl">
+          Hukuk operasyonlarınızı tek panelde yönetin
+        </h1>
+        <p className="max-w-2xl text-[var(--main-muted,var(--secondary))]">
+          Dijital İkiz ve Müvekkil Portalı ile dosya yönetimini hızlandırın, şeffaflığı artırın.
+        </p>
+        <div className="flex gap-3">
+          <Link href="/login?switch=1">
+            <Button size="lg">Giriş Yap</Button>
+          </Link>
+        </div>
       </div>
     </main>
   );

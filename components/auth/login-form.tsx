@@ -34,7 +34,7 @@ export function LoginForm({ nextPath, expectedRole }: LoginFormProps) {
       <Input name="password" type="password" placeholder="Şifre" required minLength={8} />
       <input type="hidden" name="nextPath" value={nextPath ?? ''} />
       <input type="hidden" name="expectedRole" value={expectedRole} />
-      {state.error ? <p className="text-sm text-orange-600">{state.error}</p> : null}
+      {state.error ? <p className="text-sm text-[var(--warning)]">{state.error}</p> : null}
       <Button type="submit" className="w-full" disabled={isPending}>
         {isPending ? 'Giriş yapılıyor...' : 'Giriş Yap'}
       </Button>

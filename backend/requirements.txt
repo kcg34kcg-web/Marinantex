@@ -25,7 +25,7 @@ langgraph-checkpoint-postgres==2.0.6  # Critical: Postgres checkpointer
 asyncpg==0.30.0  # Async Postgres driver for checkpointer
 supabase==2.9.1
 postgrest==0.17.2
-psycopg2-binary==2.9.10  # For synchronous operations if needed
+psycopg2-binary==2.9.11  # For synchronous operations if needed
 
 # ============================================================================
 # Vector Database (pgvector)

@@ -16,7 +16,17 @@ import type {
 } from '@/lib/news/types';
 
 const REFRESH_INTERVAL_MS = 3 * 60 * 1000;
+const NEWS_REQUEST_TIMEOUT_MS = 30000;
 const ALL_FILTER = 'all';
+const MIN_DETAIL_SENTENCE_COUNT = 5;
+const ACTION_TEMPLATE_SENTENCE_HINTS = [
+  'kaynakmetniacvedegisikliginkapsaminidogrula',
+  'etkilenendosyalardagorevacipsorumlukisiyeata',
+  'emsalkararilgili',
+  'yururluktarihinidosyatakvimineislevesontarihleri',
+  'muvekkilveriuyumlistesinderisktaramasiniyenile',
+  'muvekkilebilgilendirmetaslagihazirlayiponayagonder',
+] as const;
 
 const WORKSPACE_LABELS: Record<WorkspaceTag, string> = {
   icra: 'Icra',
@@ -88,6 +98,118 @@ function severityLabel(severity: NewsSeverity) {
   return 'Bilgi';
 }
 
+function splitSentences(text: string) {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 0);
+}
+
+function normalizeSentence(sentence: string) {
+  const trimmed = sentence.trim();
+  if (!trimmed) return '';
+  if (/[.!?]$/.test(trimmed)) return trimmed;
+  return `${trimmed}.`;
+}
+
+function compactTextForCompare(text: string) {
+  return normalize(text).replace(/[^a-z0-9]+/gi, '');
+}
+
+function isTemplateActionSentence(sentence: string) {
+  const compact = compactTextForCompare(sentence);
+  if (!compact) {
+    return false;
+  }
+  return ACTION_TEMPLATE_SENTENCE_HINTS.some((hint) => compact.includes(hint));
+}
+
+function buildDetailText(item: LiveNewsItem, minSentences = MIN_DETAIL_SENTENCE_COUNT) {
+  const candidates = [
+    ...splitSentences(item.detailText),
+    ...splitSentences(item.summary),
+    ...item.highlights.map((point) => normalizeSentence(point)),
+  ];
+  const seen = new Set<string>();
+  const selected: string[] = [];
+
+  for (const candidate of candidates) {
+    const sentence = normalizeSentence(candidate);
+    if (!sentence || isTemplateActionSentence(sentence)) continue;
+    const key = compactTextForCompare(sentence);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    selected.push(sentence);
+  }
+
+  const fallbackSentences = [
+    `Bu kayit ${item.category} kategorisinde siniflandirildi.`,
+    `Onem seviyesi ${severityLabel(item.severity)} olarak kaydedildi.`,
+    `Kaynak ${item.source} olarak belirtiliyor.`,
+    item.workspaces.length > 0
+      ? `Ilgili calisma alanlari: ${item.workspaces.map((workspace) => WORKSPACE_LABELS[workspace]).join(', ')}.`
+      : '',
+    item.tags.length > 0 ? `One cikan etiketler: ${item.tags.slice(0, 6).join(', ')}.` : '',
+  ];
+
+  for (const fallback of fallbackSentences) {
+    if (selected.length >= minSentences) break;
+    const sentence = normalizeSentence(fallback);
+    if (!sentence || isTemplateActionSentence(sentence)) continue;
+    const key = compactTextForCompare(sentence);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    selected.push(sentence);
+  }
+
+  if (selected.length === 0) {
+    return normalizeSentence(item.detailText || item.summary);
+  }
+
+  return selected.join(' ');
+}
+
+function firstSentences(text: string, count: number) {
+  const sentences = splitSentences(text);
+  if (sentences.length <= count) return text.trim();
+  return sentences.slice(0, count).join(' ');
+}
+
+function buildAiPanelSummary(item: LiveNewsItem) {
+  const candidates = [
+    ...splitSentences(item.summary),
+    ...item.highlights.slice(0, 3),
+    ...splitSentences(item.detailText).slice(0, 2),
+  ];
+  const seen = new Set<string>();
+  const selected: string[] = [];
+
+  for (const candidate of candidates) {
+    if (isTemplateActionSentence(candidate)) {
+      continue;
+    }
+    const compact = normalize(candidate).replace(/[^a-z0-9]+/gi, '');
+    if (!compact || seen.has(compact)) {
+      continue;
+    }
+    seen.add(compact);
+    selected.push(candidate);
+    if (selected.length >= 4) {
+      break;
+    }
+  }
+
+  return selected.join(' ');
+}
+
+function truncateText(text: string, maxLength = 240) {
+  const normalizedText = text.trim();
+  if (normalizedText.length <= maxLength) {
+    return normalizedText;
+  }
+  return `${normalizedText.slice(0, Math.max(maxLength - 3, 0))}...`;
+}
+
 export default function DashboardNewsPage() {
   const [items, setItems] = useState<LiveNewsItem[]>([]);
   const [sources, setSources] = useState<NewsSourceHealth[]>([]);
@@ -120,7 +242,18 @@ export default function DashboardNewsPage() {
     setLoadError(null);
 
     try {
-      const response = await fetch('/api/dashboard/news/stream?limit=120', { cache: 'no-store' });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), NEWS_REQUEST_TIMEOUT_MS);
+      let response: Response;
+      try {
+        response = await fetch('/api/dashboard/news/stream?limit=120', {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+
       const payload = (await response.json()) as DashboardNewsPayload & { error?: string };
 
       if (!response.ok || !payload.items) {
@@ -132,7 +265,11 @@ export default function DashboardNewsPage() {
       setFollowupKeywords(payload.followupKeywords?.length ? payload.followupKeywords : DEFAULT_KEYWORDS);
       setLastSyncedAt(payload.generatedAt ?? new Date().toISOString());
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : 'Haber akisi alinamadi.');
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setLoadError('Haber akisi zaman asimina ugradi. Lutfen tekrar deneyin.');
+      } else {
+        setLoadError(error instanceof Error ? error.message : 'Haber akisi alinamadi.');
+      }
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -248,37 +385,102 @@ export default function DashboardNewsPage() {
   }
 
   return (
-    <section className="space-y-5">
-      <Card className="overflow-hidden border-[var(--border)] bg-[linear-gradient(135deg,color-mix(in_srgb,var(--primary),white_94%)_0%,color-mix(in_srgb,var(--accent),white_94%)_100%)]">
+    <section className="space-y-4">
+      <Card className="overflow-hidden border-[var(--border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface),white_20%)_0%,var(--surface)_100%)] shadow-sm">
         <CardContent className="p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-2">
-              <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)]">Haberler</h1>
+            <div className="space-y-1.5">
+              <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)]">Haber Akisi</h1>
               <p className="max-w-3xl text-sm leading-6 text-[var(--secondary)]">
-                Mevzuat degisiklikleri, resmi duyurular, yargi karar ozetleri ve sektorel duzenleme gelismeleri tek akis
-                icinde toplanir. Her kayit icin kaynak baglantisi, kisa ozet ve etki analizi birlikte sunulur.
-              </p>
-              <p className="text-xs text-[var(--secondary)]">
-                Bu icerik hukuki gorus degildir. Her iddia kaynak baglantisi ile gosterilir.
+                Hukuki gelismeler sade bir akis icinde listelenir. Ozet, detay ve kaynak baglantisi her kayitta birlikte yer alir.
               </p>
             </div>
-
-            <div className="min-w-[240px] space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/70 p-3">
-              <p className="text-xs uppercase tracking-[0.1em] text-[var(--secondary)]">Canli Durum</p>
-              <p className="text-sm text-[var(--text)]">
-                Kaynak sagligi: <span className="font-semibold">{healthySourceCount}</span> / {totalSourceCount}
-              </p>
-              <p className="text-sm text-[var(--text)]">
-                Gorunen kayit: <span className="font-semibold">{filteredItems.length}</span>
-              </p>
-              <p className="text-sm text-[var(--text)]">
-                Okunmamis: <span className="font-semibold">{unreadCount}</span>
-              </p>
-              <p className="text-xs text-[var(--secondary)]">Son senkron: {formatDateTime(lastSyncedAt)}</p>
-            </div>
+            <Button type="button" size="sm" variant="outline" disabled={isRefreshing} onClick={() => loadNews(true)}>
+              {isRefreshing ? 'Yenileniyor...' : 'Akisi Yenile'}
+            </Button>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 px-3 py-2">
+              <p className="text-[11px] uppercase tracking-[0.08em] text-[var(--secondary)]">Kaynak</p>
+              <p className="text-sm font-medium text-[var(--text)]">
+                {healthySourceCount} / {totalSourceCount}
+              </p>
+            </div>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 px-3 py-2">
+              <p className="text-[11px] uppercase tracking-[0.08em] text-[var(--secondary)]">Gorunen</p>
+              <p className="text-sm font-medium text-[var(--text)]">{filteredItems.length}</p>
+            </div>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 px-3 py-2">
+              <p className="text-[11px] uppercase tracking-[0.08em] text-[var(--secondary)]">Okunmamis</p>
+              <p className="text-sm font-medium text-[var(--text)]">{unreadCount}</p>
+            </div>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 px-3 py-2">
+              <p className="text-[11px] uppercase tracking-[0.08em] text-[var(--secondary)]">Son Senkron</p>
+              <p className="text-sm font-medium text-[var(--text)]">{formatDateTime(lastSyncedAt)}</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-[var(--border)] shadow-sm">
+        <CardContent className="space-y-3 p-4">
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Ara: kanun, teblig, kvkk, yargitay..."
+          />
+
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <select
+              value={workspaceFilter}
+              onChange={(event) => setWorkspaceFilter(event.target.value as WorkspaceTag | typeof ALL_FILTER)}
+              className="h-10 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text)]"
+            >
+              <option value={ALL_FILTER}>Calisma alani: tumu</option>
+              {(Object.keys(WORKSPACE_LABELS) as WorkspaceTag[]).map((workspace) => (
+                <option key={workspace} value={workspace}>
+                  {WORKSPACE_LABELS[workspace]}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={severityFilter}
+              onChange={(event) => setSeverityFilter(event.target.value as NewsSeverity | typeof ALL_FILTER)}
+              className="h-10 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text)]"
+            >
+              <option value={ALL_FILTER}>Onem seviyesi: tumu</option>
+              <option value="kritik">Kritik</option>
+              <option value="orta">Orta</option>
+              <option value="bilgi">Bilgi</option>
+            </select>
+
+            <select
+              value={keywordFilter}
+              onChange={(event) => setKeywordFilter(event.target.value)}
+              className="h-10 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text)]"
+            >
+              <option value={ALL_FILTER}>Anahtar kelime: tumu</option>
+              {followupKeywords.map((keyword) => (
+                <option key={keyword} value={keyword}>
+                  {keyword}
+                </option>
+              ))}
+            </select>
+
+            <Button
+              type="button"
+              size="sm"
+              variant={trustedOnly ? 'default' : 'outline'}
+              onClick={() => setTrustedOnly((prev) => !prev)}
+              className="h-10"
+            >
+              {trustedOnly ? 'Sadece guvenilir' : 'Tum kaynaklar'}
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
             {CATEGORY_CHIPS.map((chip) => {
               const isActive = categoryFilter === chip.id;
               return (
@@ -286,163 +488,155 @@ export default function DashboardNewsPage() {
                   key={chip.id}
                   type="button"
                   onClick={() => setCategoryFilter(chip.id)}
-                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                  className={`rounded-full border px-3 py-1 text-xs transition ${
                     isActive
-                      ? 'border-[var(--primary)] bg-[color-mix(in_srgb,var(--primary),transparent_86%)] text-[var(--primary)]'
-                      : 'border-[var(--border)] bg-[var(--surface)]/70 text-[var(--secondary)] hover:text-[var(--text)]'
+                      ? 'border-[var(--primary)] bg-[color-mix(in_srgb,var(--primary),transparent_88%)] text-[var(--primary)]'
+                      : 'border-[var(--border)] text-[var(--secondary)] hover:text-[var(--text)]'
                   }`}
                 >
                   {chip.label}
                 </button>
               );
             })}
-
-            <Button type="button" size="sm" variant="outline" disabled={isRefreshing} onClick={() => loadNews(true)}>
-              {isRefreshing ? 'Yenileniyor...' : 'Akisi Yenile'}
-            </Button>
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-4">
-          <Card className="border-[var(--border)]">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Arama ve Kisisellestirme</CardTitle>
-              <CardDescription>
-                Calisma alani, onem seviyesi, anahtar kelime ve guvenilir kaynak listesi ile akis daraltilir.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Ara: kira artisi, isten cikarma, veri ihlali..."
-              />
+      {actionMessage ? (
+        <div className="rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface),var(--primary)_4%)] px-3 py-2 text-xs text-[var(--secondary)]">
+          {actionMessage}
+        </div>
+      ) : null}
 
-              <div className="flex flex-wrap gap-2">
-                <select
-                  value={workspaceFilter}
-                  onChange={(event) => setWorkspaceFilter(event.target.value as WorkspaceTag | typeof ALL_FILTER)}
-                  className="h-10 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text)]"
-                >
-                  <option value={ALL_FILTER}>Tum calisma alanlari</option>
-                  {(Object.keys(WORKSPACE_LABELS) as WorkspaceTag[]).map((workspace) => (
-                    <option key={workspace} value={workspace}>
-                      {WORKSPACE_LABELS[workspace]}
-                    </option>
-                  ))}
-                </select>
+      {loadError ? (
+        <Card className="border-[var(--border)]">
+          <CardContent className="pt-6">
+            <p className="text-sm text-orange-600">{loadError}</p>
+          </CardContent>
+        </Card>
+      ) : null}
 
-                <select
-                  value={severityFilter}
-                  onChange={(event) => setSeverityFilter(event.target.value as NewsSeverity | typeof ALL_FILTER)}
-                  className="h-10 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text)]"
-                >
-                  <option value={ALL_FILTER}>Tum onem seviyeleri</option>
-                  <option value="kritik">Kritik</option>
-                  <option value="orta">Orta</option>
-                  <option value="bilgi">Bilgi</option>
-                </select>
-
-                <select
-                  value={keywordFilter}
-                  onChange={(event) => setKeywordFilter(event.target.value)}
-                  className="h-10 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text)]"
-                >
-                  <option value={ALL_FILTER}>Anahtar kelime: tumu</option>
-                  {followupKeywords.map((keyword) => (
-                    <option key={keyword} value={keyword}>
-                      {keyword}
-                    </option>
-                  ))}
-                </select>
-
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={trustedOnly ? 'default' : 'outline'}
-                  onClick={() => setTrustedOnly((prev) => !prev)}
-                >
-                  {trustedOnly ? 'Sadece guvenilir kaynaklar' : 'Tum kaynaklar'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {actionMessage ? (
-            <div className="rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface),var(--primary)_5%)] px-3 py-2 text-xs text-[var(--secondary)]">
-              {actionMessage}
-            </div>
-          ) : null}
-
-          {loadError ? (
-            <Card>
+      {isLoading ? (
+        <Card className="border-[var(--border)]">
+          <CardContent className="pt-6">
+            <p className="text-sm text-[var(--secondary)]">Canli haber akisi yukleniyor...</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {filteredItems.length === 0 ? (
+            <Card className="border-[var(--border)]">
               <CardContent className="pt-6">
-                <p className="text-sm text-orange-600">{loadError}</p>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {isLoading ? (
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-sm text-[var(--secondary)]">Canli haber akisi yukleniyor...</p>
+                <p className="text-sm text-[var(--secondary)]">Bu filtrelerle eslesen haber bulunamadi.</p>
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-3">
-              {filteredItems.length === 0 ? (
-                <Card>
-                  <CardContent className="pt-6">
-                    <p className="text-sm text-[var(--secondary)]">Bu filtrelerle eslesen haber bulunamadi.</p>
-                  </CardContent>
-                </Card>
-              ) : (
-                filteredItems.map((item) => {
-                  const isRead = readIds.includes(item.id);
-                  const isSaved = savedIds.includes(item.id);
-                  const isSummaryExpanded = expandedSummaryId === item.id;
+            filteredItems.map((item) => {
+              const isRead = readIds.includes(item.id);
+              const isSaved = savedIds.includes(item.id);
+              const isSummaryExpanded = expandedSummaryId === item.id;
+              const aiPanelSummary = buildAiPanelSummary(item);
+              const detailText = buildDetailText(item);
+              const detailPreview = firstSentences(detailText, MIN_DETAIL_SENTENCE_COUNT);
 
-                  return (
-                    <Card key={item.id} className="overflow-hidden border-[var(--border)]">
-                      <CardHeader className="space-y-3 pb-2">
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
-                          <Badge variant={CATEGORY_VARIANTS[item.category]}>{item.category}</Badge>
-                          <Badge variant={SEVERITY_VARIANTS[item.severity]}>{severityLabel(item.severity)}</Badge>
-                          <Badge variant={isRead ? 'outline' : 'success'}>{isRead ? 'Okundu' : 'Yeni'}</Badge>
-                          {item.updatedAt ? <Badge variant="outline">Guncellendi: {formatDateTime(item.updatedAt)}</Badge> : null}
+              return (
+                <Card key={item.id} className="border-[var(--border)] bg-[var(--surface)] shadow-sm">
+                  <CardHeader className="space-y-2 pb-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={CATEGORY_VARIANTS[item.category]}>{item.category}</Badge>
+                        <Badge variant={SEVERITY_VARIANTS[item.severity]}>{severityLabel(item.severity)}</Badge>
+                        <Badge variant={isRead ? 'outline' : 'success'}>{isRead ? 'Okundu' : 'Yeni'}</Badge>
+                      </div>
+                      <p className="text-[11px] text-[var(--secondary)]">{formatDateTime(item.publishedAt)}</p>
+                    </div>
+                    <CardTitle className="text-[17px] leading-snug">{item.title}</CardTitle>
+                    <CardDescription>{item.source}</CardDescription>
+                  </CardHeader>
+
+                  <CardContent className="space-y-3">
+                    <div className="rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface),var(--primary)_3%)] p-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--secondary)]">Kisa Ozet</p>
+                      <p className="mt-1 text-sm leading-6 text-[var(--text)]">{item.summary}</p>
+                    </div>
+
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--secondary)]">Detay</p>
+                      <p className="mt-1 text-sm leading-6 text-[var(--secondary)]">
+                        {isSummaryExpanded ? detailText : detailPreview}
+                      </p>
+                    </div>
+
+                    {item.highlights.length > 0 ? (
+                      <ul className="flex flex-wrap gap-1.5">
+                        {Array.from(new Set(item.highlights))
+                          .slice(0, 3)
+                          .map((point, index) => (
+                            <li
+                              key={`${item.id}-highlight-${index}`}
+                              className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs text-[var(--secondary)]"
+                            >
+                              {truncateText(point, 90)}
+                            </li>
+                          ))}
+                      </ul>
+                    ) : null}
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" size="sm" variant="outline" onClick={() => toggleRead(item.id)}>
+                        {isRead ? 'Okunmamis Yap' : 'Okundu'}
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={() => toggleSave(item.id)}>
+                        {isSaved ? 'Kaydi Kaldir' : 'Kaydet'}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setExpandedSummaryId((prev) => (prev === item.id ? null : item.id))}
+                      >
+                        {isSummaryExpanded ? 'Detayi Kapat' : 'Detay ve Yapay Ozet'}
+                      </Button>
+                      <a
+                        href={item.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex min-h-[36px] items-center rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-xs font-medium text-[var(--text)] hover:bg-[color-mix(in_srgb,var(--surface),var(--primary)_8%)]"
+                      >
+                        Kaynaga Git
+                      </a>
+                    </div>
+
+                    {isSummaryExpanded ? (
+                      <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface),var(--primary)_3%)] p-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--secondary)]">Yapay Ozet</p>
+                          <p className="mt-1 text-sm leading-6 text-[var(--text)]">{aiPanelSummary}</p>
                         </div>
 
-                        <div className="space-y-1">
-                          <CardTitle className="text-[17px] leading-snug">{item.title}</CardTitle>
-                          <CardDescription>
-                            {item.source} | {formatDateTime(item.publishedAt)}
-                          </CardDescription>
-                        </div>
-                      </CardHeader>
+                        {item.tags.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {item.tags.slice(0, 6).map((tag) => (
+                              <button
+                                key={`${item.id}-${tag}`}
+                                type="button"
+                                onClick={() => muteTagForThirtyDays(tag)}
+                                className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs text-[var(--secondary)] hover:text-[var(--text)]"
+                                title="Bu etiketi 30 gun sessize al"
+                              >
+                                #{tag}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
 
-                      <CardContent className="space-y-4">
-                        <div className="rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface),var(--primary)_3%)] p-3">
-                          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--secondary)]">Kisa Ozet</p>
-                          <p className="mt-1 text-sm leading-6 text-[var(--text)]">{item.summary}</p>
-                        </div>
-
-                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
-                          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--secondary)]">Detay</p>
-                          <p className="mt-1 text-sm leading-6 text-[var(--text)]">{item.detailText}</p>
-                        </div>
-
-                        {item.highlights.length > 0 ? (
-                          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--secondary)]">
-                              One Cikan Basliklar
-                            </p>
-                            <ul className="mt-2 space-y-1 text-sm text-[var(--text)]">
-                              {item.highlights.slice(0, 3).map((point) => (
-                                <li key={`${item.id}-${point}`} className="flex gap-2">
-                                  <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--primary)]" />
-                                  <span>{point}</span>
+                        {item.impactCases.length > 0 ? (
+                          <div className="space-y-2">
+                            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--secondary)]">Etkilenen Dosyalar</p>
+                            <ul className="space-y-1 text-xs text-[var(--secondary)]">
+                              {item.impactCases.map((affected) => (
+                                <li key={`${item.id}-${affected.id}`}>
+                                  <span className="font-medium text-[var(--text)]">{affected.title}</span> | {affected.reason}
                                 </li>
                               ))}
                             </ul>
@@ -450,174 +644,93 @@ export default function DashboardNewsPage() {
                         ) : null}
 
                         <div className="flex flex-wrap gap-2">
-                          {item.tags.map((tag) => (
-                            <button
-                              key={`${item.id}-${tag}`}
-                              type="button"
-                              onClick={() => muteTagForThirtyDays(tag)}
-                              className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs text-[var(--secondary)] hover:text-[var(--text)]"
-                              title="Bu etiketi 30 gun sessize al"
-                            >
-                              #{tag}
-                            </button>
-                          ))}
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <Button type="button" size="sm" variant="outline" onClick={() => toggleRead(item.id)}>
-                            {isRead ? 'Okunmamis Yap' : 'Okundu'}
-                          </Button>
-                          <Button type="button" size="sm" variant="outline" onClick={() => toggleSave(item.id)}>
-                            {isSaved ? 'Kaydi Kaldir' : 'Kaydet'}
-                          </Button>
                           <Button type="button" size="sm" variant="outline" onClick={() => shareItem(item)}>
                             Paylas
                           </Button>
                           <Button type="button" size="sm" variant="outline" onClick={() => addToCase(item)}>
                             Dosyaya Ekle
                           </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setExpandedSummaryId((prev) => (prev === item.id ? null : item.id))}
-                          >
-                            {isSummaryExpanded ? 'Ozeti Kapat' : 'Yapay Ozet'}
-                          </Button>
-                          <a
-                            href={item.sourceUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex min-h-[36px] items-center rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-xs font-medium text-[var(--text)] hover:bg-[color-mix(in_srgb,var(--surface),var(--primary)_8%)]"
-                          >
-                            Kaynaga Git
-                          </a>
+                          {item.impactCases.length > 0 ? (
+                            <Button type="button" size="sm" onClick={() => openTasksForImpactedCases(item)}>
+                              Gorev Ac
+                            </Button>
+                          ) : null}
                         </div>
-
-                        <div className="rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface),var(--primary)_4%)] p-3">
-                          <p className="text-sm font-semibold text-[var(--text)]">Bizi Etkileyenler</p>
-                          {item.impactCases.length === 0 ? (
-                            <p className="mt-1 text-xs text-[var(--secondary)]">
-                              Bu haber icin otomatik dosya eslesmesi bulunamadi.
-                            </p>
-                          ) : (
-                            <>
-                              <ul className="mt-2 space-y-1 text-xs text-[var(--secondary)]">
-                                {item.impactCases.map((affected) => (
-                                  <li key={`${item.id}-${affected.id}`}>
-                                    <span className="font-medium text-[var(--text)]">{affected.title}</span> | {affected.reason}
-                                  </li>
-                                ))}
-                              </ul>
-                              <div className="mt-3">
-                                <Button type="button" size="sm" onClick={() => openTasksForImpactedCases(item)}>
-                                  Bu {item.impactCases.length} dosyaya gorev ac
-                                </Button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-
-                        {isSummaryExpanded ? (
-                          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
-                            <p className="text-sm font-semibold text-[var(--text)]">Yapay Ozet ve Aksiyon Taslagi</p>
-                            <p className="mt-1 text-xs text-[var(--secondary)]">
-                              Guvenli mod: kaynakta olmayan iddia uretilmez; her aksiyon kaynak baglantisi ile
-                              denetlenir.
-                            </p>
-                            <ul className="mt-2 space-y-1 text-xs text-[var(--secondary)]">
-                              {item.actionDraft.map((action) => (
-                                <li key={`${item.id}-${action}`}>- {action}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        ) : null}
-                      </CardContent>
-                    </Card>
-                  );
-                })
-              )}
-            </div>
+                      </div>
+                    ) : null}
+                  </CardContent>
+                </Card>
+              );
+            })
           )}
         </div>
+      )}
 
-        <aside className="space-y-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Bildirim Ayari</CardTitle>
-              <CardDescription>Kritik degisikliklerde anlik, digerlerinde ozet bulteni akisi.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <label className="flex items-center gap-2 text-sm text-[var(--text)]">
-                <input
-                  type="radio"
-                  name="notification-mode"
-                  checked={notificationMode === 'anlik-kritik'}
-                  onChange={() => setNotificationMode('anlik-kritik')}
-                />
-                Kritik degisikliklerde anlik bildirim
-              </label>
-              <label className="flex items-center gap-2 text-sm text-[var(--text)]">
-                <input
-                  type="radio"
-                  name="notification-mode"
-                  checked={notificationMode === 'gunluk'}
-                  onChange={() => setNotificationMode('gunluk')}
-                />
-                Gunluk ozet
-              </label>
-              <label className="flex items-center gap-2 text-sm text-[var(--text)]">
-                <input
-                  type="radio"
-                  name="notification-mode"
-                  checked={notificationMode === 'haftalik'}
-                  onChange={() => setNotificationMode('haftalik')}
-                />
-                Haftalik ozet
-              </label>
-            </CardContent>
-          </Card>
+      <Card className="border-[var(--border)] shadow-sm">
+        <CardContent className="p-4">
+          <details>
+            <summary className="cursor-pointer text-sm font-medium text-[var(--text)]">
+              Kaynak Sagligi ve Bildirim Ayarlari
+            </summary>
+            <div className="mt-3 grid gap-4 lg:grid-cols-2">
+              <div className="space-y-2">
+                <p className="text-xs text-[var(--secondary)]">Bildirim modu</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNotificationMode('anlik-kritik')}
+                    className={`rounded-full border px-3 py-1 text-xs ${
+                      notificationMode === 'anlik-kritik'
+                        ? 'border-[var(--primary)] text-[var(--primary)]'
+                        : 'border-[var(--border)] text-[var(--secondary)]'
+                    }`}
+                  >
+                    Anlik kritik
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNotificationMode('gunluk')}
+                    className={`rounded-full border px-3 py-1 text-xs ${
+                      notificationMode === 'gunluk'
+                        ? 'border-[var(--primary)] text-[var(--primary)]'
+                        : 'border-[var(--border)] text-[var(--secondary)]'
+                    }`}
+                  >
+                    Gunluk
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNotificationMode('haftalik')}
+                    className={`rounded-full border px-3 py-1 text-xs ${
+                      notificationMode === 'haftalik'
+                        ? 'border-[var(--primary)] text-[var(--primary)]'
+                        : 'border-[var(--border)] text-[var(--secondary)]'
+                    }`}
+                  >
+                    Haftalik
+                  </button>
+                </div>
+              </div>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Kaynak Sagligi</CardTitle>
-              <CardDescription>
-                Toplam {totalSourceCount} kaynak taraniyor. Basarili: {healthySourceCount}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="max-h-[320px] space-y-2 overflow-y-auto">
+              <div className="max-h-[220px] space-y-2 overflow-y-auto">
                 {sources.map((source) => (
-                  <div key={source.id} className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
+                  <div key={source.id} className="flex items-center justify-between rounded-lg border border-[var(--border)] px-2.5 py-2">
+                    <div>
                       <p className="text-xs font-medium text-[var(--text)]">{source.name}</p>
-                      <Badge variant={source.success ? 'success' : 'critical'}>
-                        {source.success ? `${source.itemCount} kayit` : 'Hata'}
-                      </Badge>
+                      <p className="text-[11px] text-[var(--secondary)]">
+                        {transportLabel(source.transport)} | {source.latencyMs} ms
+                      </p>
                     </div>
-                    <p className="mt-1 text-[11px] text-[var(--secondary)]">
-                      {transportLabel(source.transport)} | {source.latencyMs} ms
-                    </p>
-                    {source.error ? <p className="mt-1 text-[11px] text-orange-600">{source.error}</p> : null}
+                    <Badge variant={source.success ? 'success' : 'critical'}>
+                      {source.success ? `${source.itemCount} kayit` : 'Hata'}
+                    </Badge>
                   </div>
                 ))}
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Asgari Surum Kapsami</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1 text-xs text-[var(--secondary)]">
-              <p>- 20 resmi ve ilgili kaynaktan canli RSS akisi</p>
-              <p>- Gerekli erisim anahtari tanimlandiginda X arayuzu cekimi</p>
-              <p>- Etiketleme, arama, kaydetme ve dosyaya ekleme</p>
-              <p>- Dosya etkisi esitlestirmesi ve tek tik gorev koprusu</p>
-            </CardContent>
-          </Card>
-        </aside>
-      </div>
+            </div>
+          </details>
+        </CardContent>
+      </Card>
     </section>
   );
 }

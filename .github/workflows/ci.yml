@@ -65,7 +65,30 @@ jobs:
           retention-days: 30
 
   # ──────────────────────────────────────────────────────────────────────────
-  # JOB 2 — RAGAS Quality Gate (hard gate: metrics must meet thresholds)
+  # JOB 2 — Web editor UDF compatibility harness (golden fixtures)
+  # ──────────────────────────────────────────────────────────────────────────
+  udf-compatibility:
+    name: "Web UDF Compatibility Harness"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run UDF compatibility checks
+        run: npm run test:udf:compat
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # JOB 3 — RAGAS Quality Gate (hard gate: metrics must meet thresholds)
   #          Runs AFTER pytest to avoid wasting compute on broken builds
   # ──────────────────────────────────────────────────────────────────────────
   quality-gate:

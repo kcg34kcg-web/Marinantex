@@ -1,0 +1,1091 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlanTier {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  REMOVED
+}
+
+enum DomainStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  MAIL_READY
+  MISCONFIGURED
+  SUSPENDED
+}
+
+enum DomainOnboardingMode {
+  BYOP
+  MANAGED
+}
+
+enum DnsRecordType {
+  MX
+  TXT
+  CNAME
+  SPF
+  DKIM
+  DMARC
+}
+
+enum MailProvider {
+  GMAIL
+  MICROSOFT_365
+  YANDEX
+  IMAP_SMTP
+  MANAGED
+}
+
+enum MailboxStatus {
+  PENDING
+  ACTIVE
+  DISCONNECTED
+  ERROR
+  SUSPENDED
+}
+
+enum ConnectionStatus {
+  CONNECTED
+  TOKEN_EXPIRED
+  REVOKED
+  ERROR
+}
+
+enum SyncStatus {
+  IDLE
+  RUNNING
+  FAILED
+  PAUSED
+}
+
+enum MailContainerType {
+  LABEL
+  FOLDER
+  SYSTEM
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageState {
+  RECEIVED
+  SENT
+  DRAFT
+  SCHEDULED
+  ARCHIVED
+  TRASH
+  SPAM
+}
+
+enum RecipientType {
+  TO
+  CC
+  BCC
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  CANCELED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum AIMessageRole {
+  SYSTEM
+  USER
+  ASSISTANT
+  TOOL
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
+enum NotificationType {
+  INFO
+  WARNING
+  ERROR
+  SUCCESS
+}
+
+model Tenant {
+  id                String            @id @default(cuid())
+  name              String
+  slug              String            @unique
+  legalName         String?
+  planId            String?
+  ownerUserId       String?
+  logoUrl           String?
+  primaryColor      String?
+  locale            String            @default("tr-TR")
+  timezone          String            @default("Europe/Istanbul")
+  active            Boolean           @default(true)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  deletedAt         DateTime?
+  settings          TenantSettings?
+  memberships       Membership[]
+  roles             Role[]
+  domains           Domain[]
+  domainVerifications DomainVerification[]
+  domainDnsRecords  DomainDnsRecord[]
+  mailboxes         Mailbox[]
+  mailboxConnections MailboxConnection[]
+  mailboxAliases    MailboxAlias[]
+  mailboxPermissions MailboxPermission[]
+  mailboxSyncStates MailboxSyncState[]
+  mailThreads       MailThread[]
+  mailMessages      MailMessage[]
+  labels            MailLabel[]
+  folders           MailFolder[]
+  drafts            Draft[]
+  signatures        Signature[]
+  contacts          Contact[]
+  clients           Client[]
+  matters           Matter[]
+  tasks             Task[]
+  deadlines         Deadline[]
+  documents         Document[]
+  aiConversations   AIConversation[]
+  providerTokens    ProviderToken[]
+  webhooks          Webhook[]
+  backgroundJobs    BackgroundJob[]
+  notifications     Notification[]
+  featureFlags      FeatureFlag[]
+  usageRecords      UsageRecord[]
+  auditLogs         AuditLog[]
+  securityEvents    SecurityEvent[]
+  subscriptionPlan  SubscriptionPlan? @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+model TenantSettings {
+  id                         String   @id @default(cuid())
+  tenantId                   String   @unique
+  maxUsers                   Int      @default(10)
+  maxMailboxes               Int      @default(10)
+  maxAiTokensPerMonth        Int      @default(200000)
+  enforceMfa                 Boolean  @default(false)
+  allowExternalForwarding    Boolean  @default(false)
+  auditRetentionDays         Int      @default(365)
+  mailRetentionDays          Int      @default(365)
+  aiEnabled                  Boolean  @default(true)
+  aiHumanApprovalRequired    Boolean  @default(true)
+  legalPrivilegeLabelEnabled Boolean  @default(true)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id                 String          @id @default(cuid())
+  email              String          @unique
+  normalizedEmail    String          @unique
+  firstName          String
+  lastName           String
+  passwordHash       String?
+  emailVerifiedAt    DateTime?
+  mfaEnabled         Boolean         @default(false)
+  mfaSecretEncrypted String?
+  locale             String          @default("tr-TR")
+  active             Boolean         @default(true)
+  lastLoginAt        DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  deletedAt          DateTime?
+  memberships        Membership[]
+  sessions           UserSession[]
+  providerTokens     ProviderToken[]
+  mailboxConnections MailboxConnection[]
+  mailboxPermissions MailboxPermission[]
+  aiConversations    AIConversation[]
+  aiMessages         AIMessage[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  securityEvents     SecurityEvent[]
+
+  @@index([lastLoginAt])
+  @@index([deletedAt])
+}
+
+model Membership {
+  id          String           @id @default(cuid())
+  tenantId    String
+  userId      String
+  roleId      String
+  status      MembershipStatus @default(INVITED)
+  invitedById String?
+  invitedAt   DateTime?        @default(now())
+  joinedAt    DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  deletedAt   DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, userId])
+  @@index([tenantId, roleId])
+  @@index([status])
+}
+
+model Role {
+  id            String           @id @default(cuid())
+  tenantId      String?
+  code          String
+  name          String
+  description   String?
+  isSystem      Boolean          @default(false)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  deletedAt     DateTime?
+  permissions   RolePermission[]
+  memberships   Membership[]
+  tenant        Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code])
+  @@index([isSystem])
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  code        String           @unique
+  name        String
+  description String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  id           String     @id @default(cuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime   @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model UserSession {
+  id                String   @id @default(cuid())
+  userId            String
+  tenantId          String?
+  sessionTokenHash  String   @unique
+  refreshTokenHash  String?
+  deviceName        String?
+  userAgent         String?
+  ipAddress         String?
+  mfaVerifiedAt     DateTime?
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([tenantId])
+}
+
+model AuditLog {
+  id              String   @id @default(cuid())
+  tenantId        String
+  actorUserId     String?
+  action          String
+  resourceType    String
+  resourceId      String?
+  metadata        Json?
+  ipAddress       String?
+  userAgent       String?
+  requestId       String?
+  immutableHash   String?
+  createdAt       DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor  User?  @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([resourceType, resourceId])
+  @@index([action])
+}
+
+model SecurityEvent {
+  id           String   @id @default(cuid())
+  tenantId     String
+  userId       String?
+  eventType    String
+  severity     String
+  description  String
+  ipAddress    String?
+  userAgent    String?
+  payload      Json?
+  createdAt    DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, eventType, createdAt])
+  @@index([severity])
+}
+
+model Domain {
+  id                  String       @id @default(cuid())
+  tenantId            String
+  domainName          String
+  provider            MailProvider?
+  onboardingMode      DomainOnboardingMode @default(BYOP)
+  status              DomainStatus @default(PENDING_VERIFICATION)
+  verificationToken   String?
+  verifiedAt          DateTime?
+  mailReadyAt         DateTime?
+  lastHealthCheckAt   DateTime?
+  suspensionReason    String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  deletedAt           DateTime?
+
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  verifications   DomainVerification[]
+  dnsRecords      DomainDnsRecord[]
+  mailboxes       Mailbox[]
+
+  @@unique([tenantId, domainName])
+  @@index([status])
+  @@index([verifiedAt])
+}
+
+model DomainVerification {
+  id               String   @id @default(cuid())
+  tenantId         String
+  domainId         String
+  verificationType String
+  status           String
+  checkedAt        DateTime?
+  details          Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  domain Domain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, domainId])
+  @@index([status])
+}
+
+model DomainDnsRecord {
+  id               String        @id @default(cuid())
+  tenantId         String
+  domainId         String
+  type             DnsRecordType
+  host             String
+  value            String
+  priority         Int?
+  ttl              Int?
+  required         Boolean       @default(true)
+  verified         Boolean       @default(false)
+  lastCheckedAt    DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  domain Domain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, domainId, type])
+  @@unique([domainId, type, host, value])
+}
+
+model Mailbox {
+  id                     String        @id @default(cuid())
+  tenantId               String
+  domainId               String?
+  provider               MailProvider
+  email                  String
+  displayName            String?
+  status                 MailboxStatus @default(PENDING)
+  isShared               Boolean       @default(false)
+  isDelegated            Boolean       @default(false)
+  signatureId            String?
+  senderIdentityName     String?
+  senderIdentityEmail    String?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+  deletedAt              DateTime?
+
+  tenant          Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  domain          Domain?              @relation(fields: [domainId], references: [id], onDelete: SetNull)
+  signature       Signature?           @relation(fields: [signatureId], references: [id], onDelete: SetNull)
+  connections     MailboxConnection[]
+  aliases         MailboxAlias[]
+  permissions     MailboxPermission[]
+  syncStates      MailboxSyncState[]
+  threads         MailThread[]
+  messages        MailMessage[]
+  folders         MailFolder[]
+  labels          MailLabel[]
+  drafts          Draft[]
+
+  @@unique([tenantId, email])
+  @@index([status, provider])
+}
+
+model MailboxConnection {
+  id                     String           @id @default(cuid())
+  tenantId               String
+  mailboxId              String
+  userId                 String
+  provider               MailProvider
+  providerAccountId      String
+  status                 ConnectionStatus @default(CONNECTED)
+  accessTokenEncrypted   String
+  refreshTokenEncrypted  String?
+  tokenExpiresAt         DateTime?
+  scopes                 String[]
+  lastError              String?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox Mailbox @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([tenantId, mailboxId])
+  @@index([status, tokenExpiresAt])
+}
+
+model MailboxAlias {
+  id          String   @id @default(cuid())
+  tenantId    String
+  mailboxId   String
+  aliasEmail  String
+  displayName String?
+  isPrimary   Boolean  @default(false)
+  verifiedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox Mailbox @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, aliasEmail])
+  @@index([mailboxId])
+}
+
+model MailboxPermission {
+  id          String   @id @default(cuid())
+  tenantId    String
+  mailboxId   String
+  userId      String
+  canRead     Boolean  @default(true)
+  canSend     Boolean  @default(false)
+  canManage   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox Mailbox @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([mailboxId, userId])
+  @@index([tenantId, userId])
+}
+
+model MailboxSyncState {
+  id                 String     @id @default(cuid())
+  tenantId           String
+  mailboxId          String
+  provider           MailProvider
+  syncStatus         SyncStatus @default(IDLE)
+  syncCursor         String?
+  historyId          String?
+  deltaToken         String?
+  lastSyncedAt       DateTime?
+  lastSyncStartedAt  DateTime?
+  lastSyncEndedAt    DateTime?
+  lastError          String?
+  consecutiveErrors  Int        @default(0)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox Mailbox @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+
+  @@unique([mailboxId, provider])
+  @@index([tenantId, syncStatus])
+}
+
+model MailThread {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  mailboxId             String
+  providerThreadId      String
+  subject               String?
+  normalizedSubject     String?
+  snippet               String?
+  messageCount          Int      @default(0)
+  unreadCount           Int      @default(0)
+  hasAttachments        Boolean  @default(false)
+  lastMessageAt         DateTime?
+  linkedMatterId        String?
+  linkedClientId        String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  deletedAt             DateTime?
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox  Mailbox  @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  matter   Matter?  @relation(fields: [linkedMatterId], references: [id], onDelete: SetNull)
+  client   Client?  @relation(fields: [linkedClientId], references: [id], onDelete: SetNull)
+  messages MailMessage[]
+  links    MatterMessage[]
+
+  @@unique([tenantId, mailboxId, providerThreadId])
+  @@index([tenantId, lastMessageAt])
+  @@index([linkedMatterId])
+}
+
+model MailMessage {
+  id                     String           @id @default(cuid())
+  tenantId               String
+  mailboxId              String
+  threadId               String
+  providerMessageId      String
+  internetMessageId      String?
+  direction              MessageDirection
+  state                  MessageState     @default(RECEIVED)
+  subject                String?
+  snippet                String?
+  bodyText               String?
+  bodyHtml               String?
+  bodyPreview            String?
+  fromName               String?
+  fromEmail              String?
+  sentAt                 DateTime?
+  receivedAt             DateTime?
+  isRead                 Boolean          @default(false)
+  isStarred              Boolean          @default(false)
+  isImportant            Boolean          @default(false)
+  isSensitive            Boolean          @default(false)
+  providerRawPayload     Json?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  deletedAt              DateTime?
+
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox     Mailbox             @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  thread      MailThread          @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  recipients  MailRecipient[]
+  attachments MailAttachment[]
+  labels      MailMessageLabel[]
+  matterLinks MatterMessage[]
+
+  @@unique([tenantId, mailboxId, providerMessageId])
+  @@index([tenantId, threadId, sentAt])
+  @@index([tenantId, isRead, receivedAt])
+  @@index([tenantId, state])
+}
+
+model MailRecipient {
+  id          String        @id @default(cuid())
+  tenantId    String
+  messageId   String
+  type        RecipientType
+  name        String?
+  email       String
+  createdAt   DateTime      @default(now())
+
+  message MailMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, messageId])
+  @@index([email])
+}
+
+model MailAttachment {
+  id                String   @id @default(cuid())
+  tenantId          String
+  messageId         String
+  providerAttachId  String?
+  fileName          String
+  mimeType          String
+  sizeBytes         BigInt
+  storageKey        String?
+  checksumSha256    String?
+  isInline          Boolean  @default(false)
+  virusScanStatus   String?
+  dlpFlag           Boolean  @default(false)
+  createdAt         DateTime @default(now())
+
+  message MailMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, messageId])
+  @@index([storageKey])
+}
+
+model MailLabel {
+  id                 String            @id @default(cuid())
+  tenantId           String
+  mailboxId          String
+  providerLabelId    String?
+  name               String
+  color              String?
+  type               MailContainerType @default(LABEL)
+  isSystem           Boolean           @default(false)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox   Mailbox             @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  messages  MailMessageLabel[]
+
+  @@unique([tenantId, mailboxId, name])
+  @@index([providerLabelId])
+}
+
+model MailMessageLabel {
+  id         String   @id @default(cuid())
+  tenantId   String
+  messageId  String
+  labelId    String
+  createdAt  DateTime @default(now())
+
+  message MailMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  label   MailLabel   @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, labelId])
+  @@index([tenantId, labelId])
+}
+
+model MailFolder {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  mailboxId           String
+  providerFolderId    String?
+  name                String
+  parentFolderId      String?
+  isSystem            Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox Mailbox @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, mailboxId, name])
+  @@index([providerFolderId])
+}
+
+model Draft {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  mailboxId            String
+  providerDraftId      String?
+  subject              String?
+  bodyText             String?
+  bodyHtml             String?
+  toRecipients         Json
+  ccRecipients         Json?
+  bccRecipients        Json?
+  attachmentIds        String[]
+  lastAutosavedAt      DateTime?
+  scheduledSendAt      DateTime?
+  createdByUserId      String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  deletedAt            DateTime?
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox Mailbox @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, mailboxId, lastAutosavedAt])
+}
+
+model Signature {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  htmlBody    String
+  textBody    String?
+  isDefault   Boolean  @default(false)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailboxes Mailbox[]
+
+  @@index([tenantId, isDefault])
+}
+
+model Contact {
+  id              String   @id @default(cuid())
+  tenantId        String
+  firstName       String?
+  lastName        String?
+  fullName        String?
+  email           String
+  phone           String?
+  title           String?
+  company         String?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  matterContacts  MatterContact[]
+
+  @@unique([tenantId, email])
+  @@index([fullName])
+}
+
+model Client {
+  id                String   @id @default(cuid())
+  tenantId          String
+  name              String
+  code              String?
+  taxNumber         String?
+  email             String?
+  phone             String?
+  address           String?
+  status            String   @default("active")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  deletedAt         DateTime?
+
+  tenant            Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  matters           Matter[]
+  threads           MailThread[]
+
+  @@unique([tenantId, name])
+  @@index([status])
+}
+
+model Matter {
+  id                String   @id @default(cuid())
+  tenantId          String
+  clientId          String
+  title             String
+  referenceNo       String?
+  practiceArea      String?
+  status            String   @default("open")
+  description       String?
+  openedAt          DateTime @default(now())
+  closedAt          DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  deletedAt         DateTime?
+
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client            Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  contacts          MatterContact[]
+  messages          MatterMessage[]
+  tasks             Task[]
+  deadlines         Deadline[]
+  documents         Document[]
+  threads           MailThread[]
+
+  @@index([tenantId, status])
+  @@unique([tenantId, referenceNo])
+}
+
+model MatterContact {
+  id          String   @id @default(cuid())
+  tenantId    String
+  matterId    String
+  contactId   String
+  role        String?
+  createdAt   DateTime @default(now())
+
+  matter   Matter  @relation(fields: [matterId], references: [id], onDelete: Cascade)
+  contact  Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([matterId, contactId])
+  @@index([tenantId])
+}
+
+model MatterMessage {
+  id          String   @id @default(cuid())
+  tenantId    String
+  matterId    String
+  messageId   String?
+  threadId    String?
+  note        String?
+  linkedById  String?
+  createdAt   DateTime @default(now())
+
+  matter   Matter       @relation(fields: [matterId], references: [id], onDelete: Cascade)
+  message MailMessage?  @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  thread  MailThread?   @relation(fields: [threadId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, matterId])
+  @@index([messageId])
+  @@index([threadId])
+}
+
+model Task {
+  id              String     @id @default(cuid())
+  tenantId        String
+  matterId        String?
+  title           String
+  description     String?
+  status          TaskStatus @default(TODO)
+  priority        Priority   @default(MEDIUM)
+  assignedToId    String?
+  dueAt           DateTime?
+  sourceMessageId String?
+  createdById     String
+  completedAt     DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  deletedAt       DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  matter Matter? @relation(fields: [matterId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, dueAt])
+  @@index([assignedToId])
+}
+
+model Deadline {
+  id              String   @id @default(cuid())
+  tenantId        String
+  matterId        String?
+  title           String
+  dueAt           DateTime
+  reminderAt      DateTime?
+  createdById     String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  matter Matter? @relation(fields: [matterId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, dueAt])
+}
+
+model Document {
+  id               String   @id @default(cuid())
+  tenantId         String
+  matterId         String?
+  name             String
+  mimeType         String
+  sizeBytes        BigInt
+  storageKey       String
+  uploadedById     String
+  checksumSha256   String?
+  extractedText    String?
+  aiSummary        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deletedAt        DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  matter Matter? @relation(fields: [matterId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, matterId])
+  @@unique([tenantId, storageKey])
+}
+
+model AIConversation {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  createdById        String
+  title              String?
+  contextType        String?
+  contextId          String?
+  metadata           Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator  User        @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  messages AIMessage[]
+
+  @@index([tenantId, contextType, contextId])
+}
+
+model AIMessage {
+  id                String        @id @default(cuid())
+  tenantId          String
+  conversationId    String
+  userId            String?
+  role              AIMessageRole
+  content           String
+  promptTemplateKey String?
+  modelProvider     String?
+  modelName         String?
+  inputTokens       Int?
+  outputTokens      Int?
+  accepted          Boolean?
+  metadata          Json?
+  createdAt         DateTime      @default(now())
+
+  conversation AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, conversationId, createdAt])
+  @@index([promptTemplateKey])
+}
+
+model ProviderToken {
+  id                    String       @id @default(cuid())
+  tenantId              String
+  userId                String
+  provider              MailProvider
+  providerAccountId     String
+  accessTokenEncrypted  String
+  refreshTokenEncrypted String?
+  scopes                String[]
+  expiresAt             DateTime?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId, userId])
+  @@index([tenantId, expiresAt])
+}
+
+model Webhook {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  provider           MailProvider
+  endpointUrl        String
+  secretEncrypted    String
+  status             String   @default("active")
+  lastReceivedAt     DateTime?
+  consecutiveFails   Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, provider, status])
+}
+
+model BackgroundJob {
+  id              String    @id @default(cuid())
+  tenantId        String?
+  jobType         String
+  queueName       String
+  externalJobId   String?
+  status          JobStatus @default(QUEUED)
+  payload         Json?
+  result          Json?
+  error           String?
+  attempts        Int       @default(0)
+  maxAttempts     Int       @default(5)
+  runAt           DateTime?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  correlationId   String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([queueName, status, runAt])
+  @@index([tenantId, jobType])
+  @@unique([queueName, externalJobId])
+}
+
+model Notification {
+  id             String           @id @default(cuid())
+  tenantId       String
+  userId         String
+  type           NotificationType
+  title          String
+  body           String
+  readAt         DateTime?
+  actionUrl      String?
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId, readAt])
+}
+
+model FeatureFlag {
+  id          String   @id @default(cuid())
+  tenantId    String
+  key         String
+  enabled     Boolean  @default(false)
+  config      Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+}
+
+model SubscriptionPlan {
+  id                 String    @id @default(cuid())
+  code               String    @unique
+  name               String
+  tier               PlanTier
+  maxUsers           Int
+  maxMailboxes       Int
+  maxAiTokens        Int
+  priceMonthly       Decimal   @db.Decimal(10, 2)
+  currency           String    @default("USD")
+  active             Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  tenants            Tenant[]
+}
+
+model UsageRecord {
+  id                String   @id @default(cuid())
+  tenantId          String
+  metric            String
+  value             Int
+  periodStart       DateTime
+  periodEnd         DateTime
+  metadata          Json?
+  createdAt         DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, metric, periodStart])
+}

@@ -54,7 +54,7 @@ function parseSourceTypeFromUrl(url: string | null): SourceType {
 
 function parseAclTags(raw: string | null): string[] {
   const text = (raw ?? '').trim();
-  if (!text) return ['public'];
+  if (!text) return ['internal'];
   try {
     const parsed = JSON.parse(text);
     if (Array.isArray(parsed)) {
@@ -72,7 +72,7 @@ function parseAclTags(raw: string | null): string[] {
     .map((item) => item.trim())
     .filter((item) => item.length > 0)
     .slice(0, 16);
-  return csvTags.length > 0 ? csvTags : ['public'];
+  return csvTags.length > 0 ? csvTags : ['internal'];
 }
 
 function parseIsoDate(raw: string | null): string | undefined {
@@ -164,7 +164,7 @@ export async function GET(request: Request) {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from('rag_documents')
-    .select('id, title, source_type, source_id, metadata, created_at, updated_at')
+    .select('id, title, source_type, source_id, classification, metadata, created_at, updated_at')
     .eq('bureau_id', ctx.bureauId)
     .order('updated_at', { ascending: false })
     .limit(limit);
@@ -181,6 +181,7 @@ export async function GET(request: Request) {
     title?: string | null;
     source_type?: string | null;
     source_id?: string | null;
+    classification?: string | null;
     metadata?: unknown;
     created_at?: string | null;
     updated_at?: string | null;
@@ -214,6 +215,7 @@ export async function GET(request: Request) {
       court_level: string | null;
       norm_hierarchy: string | null;
       case_id: string | null;
+      classification: string;
       segment_count: number;
       latest_created_at: string | null;
       first_collected_at: string | null;
@@ -237,6 +239,9 @@ export async function GET(request: Request) {
     const courtLevel = typeof metadata.court_level === 'string' ? metadata.court_level : null;
     const normHierarchy = typeof metadata.norm_hierarchy === 'string' ? metadata.norm_hierarchy : null;
     const caseId = typeof metadata.case_id === 'string' ? metadata.case_id : null;
+    const classification = typeof row.classification === 'string' && row.classification.trim()
+      ? row.classification.trim().toUpperCase()
+      : 'INTERNAL';
     const segmentCount = chunkCountByDoc.get(row.id) ?? 0;
     const key = sourceUrl || row.id;
     const current = grouped.get(key);
@@ -250,6 +255,7 @@ export async function GET(request: Request) {
         court_level: courtLevel,
         norm_hierarchy: normHierarchy,
         case_id: caseId,
+        classification,
         segment_count: segmentCount,
         latest_created_at: rowCreatedAt,
         first_collected_at: row.created_at ?? null,
@@ -305,6 +311,7 @@ export async function POST(request: Request) {
   const fileUrlInput = String(formData.get('file_url') ?? '').trim();
   const sourceIdInput = String(formData.get('source_id') ?? '').trim();
   const jurisdictionInput = String(formData.get('jurisdiction') ?? '').trim();
+  const classificationInput = String(formData.get('classification') ?? '').trim().toUpperCase();
   const effectiveFromInput = String(formData.get('effective_from') ?? '').trim();
   const effectiveToInput = String(formData.get('effective_to') ?? '').trim();
   const aclTagsInput = String(formData.get('acl_tags') ?? '').trim();
@@ -363,7 +370,12 @@ export async function POST(request: Request) {
   const jurisdiction = jurisdictionInput || 'TR';
   const effectiveFrom = parseIsoDate(effectiveFromInput);
   const effectiveTo = parseIsoDate(effectiveToInput);
-  const aclTags = parseAclTags(aclTagsInput);
+  const classification = ['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'SENSITIVE'].includes(classificationInput)
+    ? classificationInput
+    : 'CONFIDENTIAL';
+  const aclTags = aclTagsInput
+    ? parseAclTags(aclTagsInput)
+    : (classification === 'PUBLIC' ? ['public'] : [classification.toLowerCase()]);
 
   const citation = [sourceTitle, citationInput || null].filter(Boolean).join(' | ');
   let upstream: Response;
@@ -374,6 +386,7 @@ export async function POST(request: Request) {
         'Content-Type': 'application/json',
         'X-Bureau-ID': ctx.bureauId,
         'X-User-ID': ctx.userId,
+        'X-Access-Level': 'OWNER',
       },
       body: JSON.stringify({
         title: sourceTitle,
@@ -381,6 +394,7 @@ export async function POST(request: Request) {
         source_id: sourceId,
         raw_text: extractedText,
         source_format: 'text',
+        classification,
         jurisdiction,
         effective_from: effectiveFrom,
         effective_to: effectiveTo,
@@ -463,4 +477,66 @@ export async function POST(request: Request) {
     },
     { status: 200 },
   );
+}
+
+export async function DELETE(request: Request) {
+  const ctx = await requireLawyerContext();
+  if (ctx instanceof NextResponse) return ctx;
+
+  let payload: { document_id?: string; source_id?: string; purge_raw_storage?: boolean } = {};
+  try {
+    payload = (await request.json()) as { document_id?: string; source_id?: string; purge_raw_storage?: boolean };
+  } catch {
+    payload = {};
+  }
+
+  const documentId = String(payload.document_id ?? '').trim();
+  const sourceId = String(payload.source_id ?? '').trim();
+  const purgeRawStorage = Boolean(payload.purge_raw_storage);
+  if ((documentId ? 1 : 0) + (sourceId ? 1 : 0) !== 1) {
+    return NextResponse.json(
+      { error: 'Tam olarak bir alan verilmeli: document_id veya source_id.' },
+      { status: 400 },
+    );
+  }
+
+  let upstream: Response;
+  try {
+    upstream = await fetchRagBackend('/api/v1/rag-v3/delete', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Bureau-ID': ctx.bureauId,
+        'X-User-ID': ctx.userId,
+        'X-Access-Level': 'OWNER',
+      },
+      body: JSON.stringify({
+        document_id: documentId || undefined,
+        source_id: sourceId || undefined,
+        purge_raw_storage: purgeRawStorage,
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+  } catch (error) {
+    console.error('[Admin corpus delete proxy]', error, { backendCandidates: getRagBackendForLogs() });
+    return NextResponse.json(
+      { error: 'Corpus delete servisine baglanilamadi.' },
+      { status: 502 },
+    );
+  }
+
+  let body: unknown = null;
+  try {
+    body = await upstream.json();
+  } catch {
+    body = null;
+  }
+
+  if (!upstream.ok) {
+    return NextResponse.json(
+      { error: pickErrorMessage(body) },
+      { status: upstream.status },
+    );
+  }
+  return NextResponse.json(body, { status: 200 });
 }

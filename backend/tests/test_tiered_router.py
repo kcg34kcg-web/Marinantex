@@ -25,6 +25,8 @@ Test coverage:
 
 from __future__ import annotations
 
+import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,6 +34,7 @@ import pytest
 from infrastructure.llm.tiered_router import (
     LLMTieredRouter,
     QueryTier,
+    TierDecision,
     classify_query_tier,
     estimate_tokens,
     has_tier3_keywords,
@@ -495,3 +498,183 @@ def test_decide_requested_tier_no_downgrade_when_primary_and_fallback_unavailabl
                 source_count=1,
                 requested_tier=3,
             )
+
+
+@pytest.mark.asyncio
+async def test_await_with_hard_timeout_marks_provider_cooldown() -> None:
+    router = _make_router(openai_key="sk-test", groq_key="gsk_test", anthropic_key="")
+    router._provider_timeout_s = 0.01
+
+    async def _slow() -> str:
+        await asyncio.sleep(0.2)
+        return "late"
+
+    with pytest.raises(RuntimeError, match="LLM_PROVIDER_TIMEOUT"):
+        await router._await_with_hard_timeout(provider="openai", awaitable=_slow())
+
+    assert router._provider_cooldown_remaining_s("openai") > 0
+
+
+@pytest.mark.asyncio
+async def test_generate_fails_fast_when_provider_in_cooldown() -> None:
+    router = _make_router(openai_key="sk-test", groq_key="gsk_test", anthropic_key="")
+    router._provider_cooldown_until_ts["openai"] = time.time() + 30.0
+    router.decide = MagicMock(
+        return_value=TierDecision(
+            tier=QueryTier.TIER2,
+            model_id="gpt-4o-mini",
+            provider="openai",
+            reason="forced",
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="LLM_PROVIDER_COOLDOWN_ACTIVE"):
+        await router.generate(
+            query="Basit soru",
+            context="kisa baglam",
+            source_count=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_generate_requested_tier_uses_emergency_fallback_when_provider_cooldown_active() -> None:
+    router = _make_router(openai_key="sk-test", groq_key="", anthropic_key="", google_key="google-key")
+    router._invoke = AsyncMock(return_value="cooldown bypass answer")
+    router._provider_cooldown_until_ts["google"] = time.time() + 120.0
+
+    with patch("infrastructure.llm.tiered_router.settings") as mock:
+        mock.google_api_key = "google-key"
+        mock.openai_api_key = "sk-test"
+        mock.groq_api_key = ""
+        mock.anthropic_api_key = ""
+        mock.ai_tier_dusunceli_provider = "google"
+        mock.ai_tier_dusunceli_model = "gemini-2.0-flash"
+        mock.ai_tier_dusunceli_fallback_provider = "google"
+        mock.ai_tier_dusunceli_fallback_model = "gemini-2.0-flash"
+        mock.llm_tier1_model = "llama-3.3-70b-versatile"
+        mock.llm_tier2_model = "gpt-4o-mini"
+        mock.llm_tier3_model = "gpt-4o"
+        mock.llm_tier4_model = "claude-3-5-sonnet-20241022"
+        mock.llm_tier4_use_reasoning = False
+        mock.llm_tier4_multi_agent_enabled = False
+
+        answer, model_label = await router.generate(
+            query="test",
+            context="kisa baglam",
+            source_count=1,
+            requested_tier=2,
+        )
+
+    assert answer == "cooldown bypass answer"
+    assert model_label == "openai/gpt-4o-mini+fallback"
+    decision = router._invoke.call_args.args[0]
+    assert decision.provider == "openai"
+    assert decision.model_id == "gpt-4o-mini"
+
+
+@pytest.mark.asyncio
+async def test_generate_requested_tier_retries_with_runtime_fallback_after_rate_limit() -> None:
+    router = _make_router(openai_key="sk-test", groq_key="", anthropic_key="", google_key="google-key")
+    router._invoke = AsyncMock(side_effect=[RuntimeError("ResourceExhausted/429"), "fallback answer"])
+
+    with patch("infrastructure.llm.tiered_router.settings") as mock:
+        mock.google_api_key = "google-key"
+        mock.openai_api_key = "sk-test"
+        mock.groq_api_key = ""
+        mock.anthropic_api_key = ""
+        mock.ai_tier_dusunceli_provider = "google"
+        mock.ai_tier_dusunceli_model = "gemini-2.0-flash"
+        mock.ai_tier_dusunceli_fallback_provider = "google"
+        mock.ai_tier_dusunceli_fallback_model = "gemini-2.0-flash"
+        mock.llm_tier1_model = "llama-3.3-70b-versatile"
+        mock.llm_tier2_model = "gpt-4o-mini"
+        mock.llm_tier3_model = "gpt-4o"
+        mock.llm_tier4_model = "claude-3-5-sonnet-20241022"
+        mock.llm_tier4_use_reasoning = False
+        mock.llm_tier4_multi_agent_enabled = False
+
+        answer, model_label = await router.generate(
+            query="test",
+            context="kisa baglam",
+            source_count=1,
+            requested_tier=2,
+        )
+
+    assert answer == "fallback answer"
+    assert model_label == "openai/gpt-4o-mini+fallback"
+    first_decision = router._invoke.call_args_list[0].args[0]
+    second_decision = router._invoke.call_args_list[1].args[0]
+    assert first_decision.provider == "google"
+    assert second_decision.provider == "openai"
+
+
+def test_decide_requested_tier_respects_allowed_providers() -> None:
+    router = _make_router(openai_key="sk-test", groq_key="gsk_test", anthropic_key="anthro-key")
+
+    with patch("infrastructure.llm.tiered_router.settings") as mock:
+        mock.google_api_key = ""
+        mock.openai_api_key = "sk-test"
+        mock.groq_api_key = "gsk_test"
+        mock.anthropic_api_key = "anthro-key"
+        mock.ai_tier_muazzam_provider = "anthropic"
+        mock.ai_tier_muazzam_model = "claude-3-5-sonnet-20241022"
+        mock.ai_tier_muazzam_fallback_provider = "openai"
+        mock.ai_tier_muazzam_fallback_model = "gpt-4o"
+
+        decision = router.decide(
+            query="test",
+            context="kisa baglam",
+            source_count=1,
+            requested_tier=4,
+            allowed_providers={"openai"},
+        )
+
+    assert decision.provider == "openai"
+    assert decision.model_id == "gpt-4o"
+    assert decision.fallback_used is True
+
+
+def test_decide_requested_tier_raises_when_allowed_providers_block_all() -> None:
+    router = _make_router(openai_key="sk-test", groq_key="gsk_test", anthropic_key="anthro-key")
+
+    with patch("infrastructure.llm.tiered_router.settings") as mock:
+        mock.google_api_key = ""
+        mock.openai_api_key = "sk-test"
+        mock.groq_api_key = "gsk_test"
+        mock.anthropic_api_key = "anthro-key"
+        mock.ai_tier_muazzam_provider = "anthropic"
+        mock.ai_tier_muazzam_model = "claude-3-5-sonnet-20241022"
+        mock.ai_tier_muazzam_fallback_provider = "openai"
+        mock.ai_tier_muazzam_fallback_model = "gpt-4o"
+
+        with pytest.raises(RuntimeError, match="REQUESTED_TIER_PROVIDER_BLOCKED"):
+            router.decide(
+                query="test",
+                context="kisa baglam",
+                source_count=1,
+                requested_tier=4,
+                allowed_providers={"google"},
+            )
+
+
+def test_decide_classifier_path_respects_allowed_providers() -> None:
+    router = _make_router(openai_key="sk-test", groq_key="gsk_test", anthropic_key="")
+
+    with patch("infrastructure.llm.tiered_router.settings") as mock:
+        mock.llm_tier1_max_context_tokens = 800
+        mock.llm_tier2_max_context_tokens = 2500
+        mock.llm_tier3_max_context_tokens = 5000
+        mock.llm_tier1_model = "llama-3.3-70b-versatile"
+        mock.llm_tier2_model = "gpt-4o-mini"
+        mock.llm_tier3_model = "gpt-4o"
+        mock.llm_tier4_model = "claude-3-5-sonnet-20241022"
+
+        decision = router.decide(
+            query="Basit soru",
+            context=_text_of_tokens(100),
+            source_count=1,
+            allowed_providers={"openai"},
+        )
+
+    assert decision.provider == "openai"
+    assert decision.tier == QueryTier.TIER2

@@ -17,8 +17,10 @@
     "build:web:editor": "npm run build -w @marinantex/web",
     "lint": "npm run lint -w @marinantex/web && npm run lint -w @marinantex/api",
     "test": "npm run test -w @marinantex/api",
+    "test:udf:compat": "node scripts/run-udf-compat-check.mjs",
     "smoke:test": "node scripts/smoke-tests.mjs",
     "eval:rag-v3": "node scripts/run-rag-v3-evals.mjs",
+    "eval:embeddings:tr": "node scripts/run-tr-embedding-benchmark.mjs",
     "import:tbmm:laws": "node scripts/import-tbmm-laws.mjs",
     "import:mevzuat:laws": "node scripts/import-mevzuat-laws.mjs",
     "docker:up": "docker compose up -d",
@@ -35,8 +37,13 @@
     "@ai-sdk/cohere": "^3.0.22",
     "@ai-sdk/google": "^3.0.34",
     "@ai-sdk/openai": "^3.0.37",
+    "@supabase/ssr": "^0.9.0",
+    "@tanstack/react-query": "^5.90.21",
     "ai": "^6.0.105",
+    "date-fns": "^4.1.0",
     "google-news-url-decoder": "^1.1.3",
-    "pdf-parse": "^2.4.5"
+    "lucide-react": "^0.577.0",
+    "pdf-parse": "^2.4.5",
+    "zustand": "^5.0.11"
   }
 }

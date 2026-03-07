@@ -34,7 +34,7 @@ export function DialogOverlay({ className, ...props }: React.HTMLAttributes<HTML
   const { onOpenChange } = React.useContext(DialogContext);
   return (
     <div
-      className={cn('fixed inset-0 z-50 bg-black/50', className)}
+      className={cn('fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px]', className)}
       onClick={() => onOpenChange?.(false)}
       {...props}
     />
@@ -53,7 +53,9 @@ export function DialogContent({ className, children, ...props }: React.HTMLAttri
           role="dialog"
           aria-modal="true"
           className={cn(
-            'relative w-full max-w-lg rounded-xl border border-slate-200 bg-white shadow-2xl',
+            'relative w-full max-w-lg rounded-[var(--radius-md)] border border-[var(--main-border,var(--border))]',
+            'bg-[color-mix(in_srgb,var(--main-surface-3,var(--surface)),transparent_4%)] shadow-[var(--shadow-elev-3)] backdrop-blur-[var(--blur-heavy)]',
+            'animate-fade-in-scale',
             className,
           )}
           {...props}
@@ -61,7 +63,7 @@ export function DialogContent({ className, children, ...props }: React.HTMLAttri
           <button
             type="button"
             onClick={() => onOpenChange?.(false)}
-            className="absolute right-3 top-3 rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+            className="absolute right-3 top-3 rounded-[var(--radius-xs)] p-1.5 text-[var(--main-muted,var(--secondary))] transition-colors hover:bg-[color-mix(in_srgb,var(--main-surface-2,var(--surface)),var(--primary)_10%)] hover:text-[var(--main-text,var(--text))]"
             aria-label="Close"
           >
             ×
@@ -82,11 +84,11 @@ export function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLD
 }
 
 export function DialogTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <h2 className={cn('text-lg font-semibold text-slate-900', className)} {...props} />;
+  return <h2 className={cn('text-lg font-semibold tracking-[-0.01em] text-[var(--main-text,var(--text))]', className)} {...props} />;
 }
 
 export function DialogDescription({ className, ...props }: React.HTMLAttributes<HTMLParagraphElement>) {
-  return <p className={cn('text-sm text-slate-500', className)} {...props} />;
+  return <p className={cn('text-sm text-[var(--main-muted,var(--secondary))]', className)} {...props} />;
 }
 
 export function DialogClose({ children }: { children: React.ReactNode }) {
@@ -97,4 +99,3 @@ export function DialogClose({ children }: { children: React.ReactNode }) {
     </button>
   );
 }
-

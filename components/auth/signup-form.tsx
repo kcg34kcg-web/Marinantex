@@ -53,7 +53,7 @@ export function SignupForm({ inviteToken, prefilledEmail, prefilledFullName, pre
         defaultValue={prefilledEmail ?? ''}
         readOnly={Boolean(prefilledEmail)}
       />
-      {prefilledEmail ? <p className="text-xs text-slate-500">Davet e-postası otomatik dolduruldu.</p> : null}
+      {prefilledEmail ? <p className="text-xs text-[var(--main-muted,var(--secondary))]">Davet e-postası otomatik dolduruldu.</p> : null}
       <Input
         name="username"
         placeholder="Kullanıcı adı (opsiyonel)"
@@ -63,11 +63,11 @@ export function SignupForm({ inviteToken, prefilledEmail, prefilledFullName, pre
         defaultValue={normalizedPrefilledUsername}
         readOnly={hasPrefilledUsername}
       />
-      {hasPrefilledUsername ? <p className="text-xs text-slate-500">Davet kullanıcı adı otomatik dolduruldu.</p> : null}
+      {hasPrefilledUsername ? <p className="text-xs text-[var(--main-muted,var(--secondary))]">Davet kullanıcı adı otomatik dolduruldu.</p> : null}
       <Input name="password" type="password" placeholder="Şifre" required minLength={8} />
       <input type="hidden" name="inviteToken" value={inviteToken} />
 
-      {state.error ? <p className="text-sm text-orange-600">{state.error}</p> : null}
+      {state.error ? <p className="text-sm text-[var(--warning)]">{state.error}</p> : null}
 
       <Button type="submit" variant="accent" className="w-full" disabled={isPending}>
         {isPending ? 'Kayıt oluşturuluyor...' : 'Kayıt Ol'}

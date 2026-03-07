@@ -1,0 +1,13 @@
+{
+  "name": "@lexoffice/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "files": ["*"],
+  "scripts": {
+    "lint": "echo 'no-op'",
+    "typecheck": "echo 'no-op'",
+    "test": "echo 'no-op'"
+  }
+}

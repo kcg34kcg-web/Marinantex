@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-03-06T14:27:59.245Z",
+  "bureau_id": "061bab08-4230-4b1f-878e-c50b95d3fc6c",
+  "user_id": "f8fceece-ef61-4a5d-96d1-35324a59c672",
+  "marker": "EE1AD595",
+  "source_id": "e2e-rag-smoke-2026-03-06T14-27-48-717Z",
+  "ingest_status": 201,
+  "ingest_ok": true,
+  "ingest_document_id": "3afc86f3-0376-403c-a9ce-2dd71420a360",
+  "ingest_chunk_count": 1,
+  "query_status": 200,
+  "query_ok": true,
+  "query_gate_decision": "answered",
+  "query_response_status": "ok",
+  "query_answer": "Model yaniti olusturulamadi; en guclu kanit parcasi donuluyor. Kaynak: E2E RAG Smoke 2026-03-06T14-27-48-717Z (e2e-rag-smoke-2026-03-06T14-27-48-717Z) | Madde 1.\n\nMADDE 1 - Marinantex E2E RAG Test Belgesi Bu belge yalnızca entegrasyon testleri içindir. TEST_KODU: EE1AD595. Belgedeki ana kural şudur: Deniz sigortası uyuşmazlığında zamanaşımı süresi 2 yıldır. Ayrıca faiz başlangıcı, ihtarnamenin tebliğ tarihidir. Bu cümleler doğrudan kaynak doğrulaması için hazırlanmıştır.",
+  "query_model_version": "fallback/extractive",
+  "citation_count": 1,
+  "citation_source_ids": [
+    "e2e-rag-smoke-2026-03-06T14-27-48-717Z"
+  ],
+  "direct_doc_hit": true,
+  "answer_matches_expected": true,
+  "pass": true
+}

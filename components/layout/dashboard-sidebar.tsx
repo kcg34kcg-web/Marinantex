@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import type { Route } from 'next';
 import {
   Briefcase,
@@ -25,6 +25,8 @@ import {
   Settings,
   Search,
   Newspaper,
+  CheckSquare,
+  Mail,
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui-store';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
@@ -37,10 +39,12 @@ const NAV_GROUPS = [
       { href: '/dashboard', label: 'Panel', icon: LayoutDashboard },
       { href: '/dashboard/calendar', label: 'Takvim', icon: CalendarDays },
       { href: '/dashboard/cases', label: 'Dosyalar', icon: Briefcase },
+      { href: '/dashboard/mail', label: 'Mail Projesi', icon: Mail },
+      { href: '/dashboard/tasks', label: 'Gorevler', icon: CheckSquare },
       { href: '/dashboard/clients', label: 'Muvekkiller', icon: Users },
       { href: '/dashboard/time-billing', label: 'Zaman ve Tahsilat', icon: Wallet },
-      { href: '/editor/local-demo-document', label: 'Belge Duzenleme', icon: FileText },
-      { href: '/office', label: 'Ofisim', icon: Building2 },
+      { href: '/editor', label: 'Belgeler', icon: FileText },
+      { href: '/office?tab=notifications', label: 'Ofisim', icon: Building2 },
       { href: '/social', label: 'Sosyal', icon: MessageSquare },
       { href: '/dashboard/news', label: 'Haberler', icon: Newspaper },
     ],
@@ -48,7 +52,7 @@ const NAV_GROUPS = [
   {
     label: 'Yapay Zeka',
     items: [
-      { href: '/tools/hukuk-ai', label: 'Hukuk Asistani', icon: BrainCircuit },
+      { href: '/tools/hukuk-ai', label: 'Hukuk AI Chat', icon: BrainCircuit },
       { href: '/tools/dilekce-sihirbazi', label: 'Dilekce Sihirbazi', icon: FileSignature },
       { href: '/tools/kaynak-ictihat-arama', label: 'Kaynak / Ictihat Arama', icon: Search },
     ],
@@ -75,6 +79,7 @@ const NAV_GROUPS = [
 export function DashboardSidebar() {
   const { isSidebarOpen, toggleSidebar } = useUiStore();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   return (
     <aside
@@ -172,8 +177,11 @@ export function DashboardSidebar() {
               <div className="space-y-1">
                 {group.items.map((item) => {
                   const Icon = item.icon;
-                  const isActive =
-                    pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
+                  const [itemPath, itemQueryRaw] = item.href.split('?');
+                  const itemTab = itemQueryRaw ? new URLSearchParams(itemQueryRaw).get('tab') : null;
+                  const currentTab = searchParams.get('tab') ?? (pathname === '/office' ? 'notifications' : null);
+                  const pathMatches = pathname === itemPath || (itemPath !== '/dashboard' && pathname.startsWith(itemPath));
+                  const isActive = itemTab ? pathMatches && currentTab === itemTab : pathMatches;
 
                   return (
                     <Link

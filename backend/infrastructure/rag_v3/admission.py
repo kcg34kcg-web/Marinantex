@@ -69,7 +69,7 @@ class RagV3AdmissionController:
         timeout_s = self._queue_timeout_ms / 1000.0
         try:
             await asyncio.wait_for(self._semaphore.acquire(), timeout=timeout_s)
-        except TimeoutError:
+        except (asyncio.TimeoutError, TimeoutError):
             return AdmissionDecision(
                 accepted=False,
                 reason="queue_timeout",

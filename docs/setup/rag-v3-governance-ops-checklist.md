@@ -79,3 +79,8 @@ Bu runbook, RAG v3 icin eksik kalan operasyonel basliklari tek yerde toplar.
 - Index activate/rollback dry-run tamamlandi.
 - Backup/restore drill sonucu `rag_v3_dr_events` tablosuna yazildi.
 - Feedback export scripti ile en az 1 batch JSONL uretildi.
+
+## 11) Snapshot + Revoke Deployment
+
+- Ayrintili adimlar:
+  - `docs/setup/rag-v3-step07-snapshot-revocation-runbook.md`

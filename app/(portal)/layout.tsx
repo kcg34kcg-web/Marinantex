@@ -8,8 +8,8 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
     <div className="app-glass-shell min-h-screen">
       <header className="app-glass-topbar border-b border-[var(--main-border,var(--border))] px-6 py-4">
         <div className="mx-auto flex max-w-5xl items-center justify-between">
-          <h1 className="text-lg font-semibold text-blue-600">Müvekkil Portalı</h1>
-          <Link href="/portal" className="text-sm text-slate-600 hover:text-slate-900">
+          <h1 className="text-lg font-semibold text-[var(--primary)]">Müvekkil Portalı</h1>
+          <Link href="/portal" className="text-sm text-[var(--main-muted,var(--secondary))] hover:text-[var(--main-text,var(--text))]">
             Ana Sayfa
           </Link>
         </div>

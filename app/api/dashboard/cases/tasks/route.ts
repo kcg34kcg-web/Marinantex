@@ -3,6 +3,28 @@ import { requireInternalOfficeUser } from '@/lib/office/team-access';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { logDashboardAudit } from '@/lib/dashboard/audit';
 
+const taskTypeSchema = z.enum([
+  'follow_up',
+  'petition_drafting',
+  'contract_review',
+  'precedent_research',
+  'hearing_preparation',
+  'client_meeting',
+  'service_tracking',
+  'uyap_control',
+]);
+
+const deadlineTypeSchema = z.enum([
+  'due_date',
+  'objection_deadline',
+  'response_deadline',
+  'hearing_date',
+  'service_control',
+]);
+
+const riskLevelSchema = z.enum(['low', 'medium', 'critical']);
+const confidentialitySchema = z.enum(['team', 'restricted']);
+
 const createCaseTaskSchema = z.object({
   caseId: z.string().uuid(),
   title: z.string().min(3).max(180),
@@ -10,6 +32,30 @@ const createCaseTaskSchema = z.object({
   priority: z.enum(['low', 'normal', 'high']).default('normal'),
   dueAt: z.string().datetime().optional(),
   assignedTo: z.string().uuid().optional(),
+  taskType: taskTypeSchema.optional(),
+  deadlineType: deadlineTypeSchema.optional(),
+  riskLevel: riskLevelSchema.optional(),
+  confidentiality: confidentialitySchema.optional(),
+  court: z.string().min(2).max(180).optional(),
+  fileNo: z.string().min(2).max(120).optional(),
+  opponent: z.string().min(2).max(180).optional(),
+  references: z.array(z.string().min(2).max(240)).max(50).optional(),
+  selectedDocumentIds: z.array(z.string().uuid()).max(25).optional(),
+  attachmentNotes: z.string().max(1500).optional(),
+  aiContext: z
+    .object({
+      subtasks: z.array(z.string().min(2).max(240)).max(20).optional(),
+      missingFields: z.array(z.string().min(2).max(240)).max(20).optional(),
+      reminderSuggestion: z.string().max(600).optional(),
+      templateSuggestion: z.string().max(1200).optional(),
+      model: z
+        .object({
+          provider: z.string().max(80),
+          id: z.string().max(120),
+        })
+        .optional(),
+    })
+    .optional(),
 });
 
 export async function POST(request: Request) {
@@ -37,28 +83,92 @@ export async function POST(request: Request) {
   }
 
   const taskDescription = payload.description ?? `Dosya: ${caseRow.title}`;
+  const normalizedReferences = (payload.references ?? []).map((item) => item.trim()).filter(Boolean);
+  const selectedDocumentIds = [...new Set(payload.selectedDocumentIds ?? [])];
 
-  const { data, error } = await admin
+  let relatedDocuments: Array<{ id: string; file_name: string; public_ref_code: string }> = [];
+  if (selectedDocumentIds.length > 0) {
+    const documentsResult = await admin
+      .from('case_documents')
+      .select('id, file_name, public_ref_code')
+      .eq('case_id', payload.caseId)
+      .is('deleted_at', null)
+      .in('id', selectedDocumentIds);
+
+    if (documentsResult.error) {
+      return Response.json({ error: 'Görev belgeleri doğrulanamadı.' }, { status: 500 });
+    }
+
+    relatedDocuments = documentsResult.data ?? [];
+    if (relatedDocuments.length !== selectedDocumentIds.length) {
+      return Response.json({ error: 'Seçilen belgelerin bir kısmı dosya ile eşleşmiyor.' }, { status: 400 });
+    }
+  }
+
+  const taskMetadata = {
+    taskType: payload.taskType ?? 'follow_up',
+    deadlineType: payload.deadlineType ?? 'due_date',
+    riskLevel: payload.riskLevel ?? 'medium',
+    confidentiality: payload.confidentiality ?? 'team',
+    legalContext: {
+      court: payload.court ?? null,
+      fileNo: payload.fileNo ?? null,
+      opponent: payload.opponent ?? null,
+    },
+    references: normalizedReferences,
+    attachmentNotes: payload.attachmentNotes ?? null,
+    relatedDocuments: relatedDocuments.map((item) => ({
+      id: item.id,
+      fileName: item.file_name,
+      publicRefCode: item.public_ref_code,
+    })),
+    aiContext: payload.aiContext ?? null,
+  };
+
+  const nowIso = new Date().toISOString();
+  const baseInsert = {
+    case_id: payload.caseId,
+    source_message_id: null,
+    thread_id: null,
+    title: payload.title,
+    description: taskDescription,
+    priority: payload.priority,
+    assigned_to: payload.assignedTo ?? access.userId,
+    created_by: access.userId,
+    due_at: payload.dueAt ?? null,
+    status: 'open' as const,
+    updated_at: nowIso,
+  };
+
+  const extendedInsert = {
+    ...baseInsert,
+    task_type: payload.taskType ?? 'follow_up',
+    deadline_type: payload.deadlineType ?? 'due_date',
+    risk_level: payload.riskLevel ?? 'medium',
+    confidentiality_level: payload.confidentiality ?? 'team',
+    metadata: taskMetadata,
+  };
+
+  const extendedInsertResult = await admin
     .from('office_tasks')
-    .insert({
-      case_id: payload.caseId,
-      source_message_id: null,
-      thread_id: null,
-      title: payload.title,
-      description: taskDescription,
-      priority: payload.priority,
-      assigned_to: payload.assignedTo ?? access.userId,
-      created_by: access.userId,
-      due_at: payload.dueAt ?? null,
-      status: 'open',
-      updated_at: new Date().toISOString(),
-    })
-    .select('id, title, status, priority, assigned_to, due_at, created_at')
+    .insert(extendedInsert)
+    .select('id, title, status, priority, assigned_to, due_at, created_at, task_type, deadline_type, risk_level, confidentiality_level, metadata')
     .single();
 
-  if (error || !data) {
+  const taskResult =
+    extendedInsertResult.error || !extendedInsertResult.data
+      ? await admin
+          .from('office_tasks')
+          .insert(baseInsert)
+          .select('id, title, status, priority, assigned_to, due_at, created_at')
+          .single()
+      : extendedInsertResult;
+
+  if (taskResult.error || !taskResult.data) {
     return Response.json({ error: 'Görev oluşturulamadı.' }, { status: 500 });
   }
+
+  const data = taskResult.data;
 
   await admin.from('case_timeline_events').insert({
     case_id: payload.caseId,
@@ -70,6 +180,12 @@ export async function POST(request: Request) {
       priority: payload.priority,
       dueAt: payload.dueAt ?? null,
       assignedTo: payload.assignedTo ?? access.userId,
+      taskType: payload.taskType ?? 'follow_up',
+      deadlineType: payload.deadlineType ?? 'due_date',
+      riskLevel: payload.riskLevel ?? 'medium',
+      confidentiality: payload.confidentiality ?? 'team',
+      references: normalizedReferences,
+      relatedDocumentIds: relatedDocuments.map((item) => item.id),
     },
     created_by: access.userId,
   });
@@ -83,6 +199,12 @@ export async function POST(request: Request) {
       caseId: payload.caseId,
       priority: payload.priority,
       dueAt: payload.dueAt ?? null,
+      taskType: payload.taskType ?? 'follow_up',
+      deadlineType: payload.deadlineType ?? 'due_date',
+      riskLevel: payload.riskLevel ?? 'medium',
+      confidentiality: payload.confidentiality ?? 'team',
+      references: normalizedReferences,
+      relatedDocumentIds: relatedDocuments.map((item) => item.id),
     },
   });
 

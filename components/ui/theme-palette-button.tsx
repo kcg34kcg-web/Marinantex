@@ -15,13 +15,10 @@ type ThemePaletteButtonProps = {
 };
 
 const THEME_ORDER = [
-  'ocean-cliff',
-  'emerald-bridge',
-  'starlit-lake',
-  'azure-cove',
-  'alpine-reflection',
-  'magenta-sunset',
-  'pure-white',
+  'light-mode',
+  'dark-mode',
+  'young-mode',
+  'reading-mode',
 ] as const;
 
 type ThemeId = (typeof THEME_ORDER)[number];
@@ -92,16 +89,15 @@ export function ThemePaletteButton({ className }: ThemePaletteButtonProps) {
       title={`Temayi degistir (sonraki: ${nextThemeLabel})`}
       aria-label={`Temayi degistir. Siradaki tema: ${nextThemeLabel}`}
       className={cn(
-        // ✅ Tam merkez + simetrik
-        'group relative grid h-10 w-10 shrink-0 place-items-center rounded-xl border leading-none',
+        'group relative grid h-10 w-10 shrink-0 place-items-center rounded-[var(--radius-sm)] border leading-none',
         'transition-all duration-200',
-        'border-[color-mix(in_srgb,var(--sidebar-border,var(--border)),white_10%)]',
-        'bg-[color-mix(in_srgb,var(--sidebar-bg-1,var(--surface)),white_8%)]',
+        'border-[var(--sidebar-border,var(--main-border,var(--border)))]',
+        'bg-[color-mix(in_srgb,var(--sidebar-bg-1,var(--surface)),transparent_8%)]',
         'text-[var(--sidebar-text,var(--text))]',
-        'hover:scale-[1.03] hover:border-[color-mix(in_srgb,var(--primary),white_15%)]',
-        'hover:bg-[color-mix(in_srgb,var(--sidebar-hover,color-mix(in_srgb,var(--surface),var(--primary)_8%)),white_8%)]',
+        'hover:scale-[1.03] hover:border-[color-mix(in_srgb,var(--primary),white_24%)]',
+        'hover:bg-[color-mix(in_srgb,var(--sidebar-hover,color-mix(in_srgb,var(--surface),var(--primary)_8%)),transparent_4%)]',
         'active:scale-[0.98]',
-        'shadow-[0_10px_24px_-18px_rgba(0,0,0,0.35)]',
+        'shadow-[var(--shadow-elev-0)]',
         className
       )}
     >
@@ -109,7 +105,7 @@ export function ThemePaletteButton({ className }: ThemePaletteButtonProps) {
       <span className="pointer-events-none absolute inset-1 rounded-lg opacity-80 [background:radial-gradient(circle_at_30%_25%,color-mix(in_srgb,var(--primary),white_10%),transparent_55%),radial-gradient(circle_at_75%_75%,color-mix(in_srgb,var(--accent),white_10%),transparent_55%)]" />
 
       {/* ✅ Chip artık dışarı taşmıyor -> görsel denge ortalanıyor */}
-      <span className="pointer-events-none absolute right-1 top-1 flex items-center gap-0.5 rounded-full border border-[color-mix(in_srgb,var(--sidebar-border,var(--border)),white_12%)] bg-[color-mix(in_srgb,var(--sidebar-bg-1,var(--surface)),white_10%)] px-1 py-0.5 shadow-sm">
+      <span className="pointer-events-none absolute right-1 top-1 flex items-center gap-0.5 rounded-full border border-[color-mix(in_srgb,var(--sidebar-border,var(--border)),white_12%)] bg-[color-mix(in_srgb,var(--sidebar-bg-1,var(--surface)),transparent_4%)] px-1 py-0.5 shadow-sm">
         <span className="h-1.5 w-1.5 rounded-full bg-[var(--primary)]" />
         <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
       </span>

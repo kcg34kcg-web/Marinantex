@@ -7,7 +7,7 @@ export function Skeleton({ className, style }: { className?: string; style?: CSS
     <div
       className={cn(
         'relative overflow-hidden rounded-lg',
-        'bg-slate-200 dark:bg-slate-700 sepia:bg-[#E8D5B5]',
+        'bg-[color-mix(in_srgb,var(--main-border,var(--border)),white_20%)]',
         className,
       )}
       style={style}
@@ -21,7 +21,7 @@ export function Skeleton({ className, style }: { className?: string; style?: CSS
 // Şeffaf Ajan yaklaşımı: yapıyı kurar, içi dolmayı bekler (sahte düşünme tiyatrosu YOK)
 export function LegalDocumentSkeleton({ label }: { label?: string }) {
   return (
-    <div className="w-full rounded-2xl border border-[var(--color-legal-border)] p-5 shadow-legal-sm space-y-4 bg-[var(--color-legal-surface)]">
+    <div className="w-full space-y-4 rounded-[var(--radius-md)] border border-[var(--main-border,var(--border))] bg-[color-mix(in_srgb,var(--main-surface-3,var(--surface)),transparent_4%)] p-5 shadow-[var(--shadow-elev-0)]">
       <div className="flex items-center gap-3">
         <Skeleton className="h-10 w-10 rounded-full flex-shrink-0" />
         <div className="flex-1 space-y-2">
@@ -39,7 +39,7 @@ export function LegalDocumentSkeleton({ label }: { label?: string }) {
         <Skeleton className="h-2 col-span-1" />
       </div>
       {label && (
-        <p className="text-xs text-[var(--color-legal-text-secondary,_var(--muted-foreground))] animate-pulse">
+        <p className="animate-pulse text-xs text-[var(--main-muted,var(--secondary))]">
           {label}
         </p>
       )}

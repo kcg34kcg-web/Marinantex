@@ -17,17 +17,17 @@ export function Tabs({ items }: TabsProps) {
   const [active, setActive] = useState(items[0]?.value ?? '');
 
   return (
-    <div>
-      <div className="mb-4 flex gap-2 border-b border-[var(--border)] pb-2">
+    <div className="space-y-4">
+      <div className="inline-flex w-full flex-wrap items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--main-border,var(--border))] bg-[color-mix(in_srgb,var(--main-surface-2,var(--surface)),transparent_6%)] p-1.5">
         {items.map((item) => (
           <button
             key={item.value}
             type="button"
             className={cn(
-              'rounded-md px-3 py-2 text-sm font-medium',
+              'rounded-[calc(var(--radius-sm)-4px)] px-3 py-2 text-sm font-medium transition-all duration-200',
               active === item.value
-                ? 'bg-[var(--primary)] text-white'
-                : 'text-[var(--secondary)] hover:bg-[color-mix(in_srgb,var(--surface),var(--primary)_8%)]'
+                ? 'bg-[linear-gradient(135deg,color-mix(in_srgb,var(--primary),white_10%),var(--primary))] text-white shadow-[var(--shadow-elev-0)]'
+                : 'text-[var(--main-muted,var(--secondary))] hover:bg-[color-mix(in_srgb,var(--main-surface-3,var(--surface)),var(--primary)_10%)] hover:text-[var(--main-text,var(--text))]'
             )}
             onClick={() => setActive(item.value)}
           >
@@ -35,7 +35,7 @@ export function Tabs({ items }: TabsProps) {
           </button>
         ))}
       </div>
-      <div>{items.find((item) => item.value === active)?.content}</div>
+      <div className="animate-fade-in">{items.find((item) => item.value === active)?.content}</div>
     </div>
   );
 }

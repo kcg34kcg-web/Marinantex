@@ -9,7 +9,7 @@ export default async function IntelligencePage({ params }: IntelligencePageProps
 
   return (
     <section className="space-y-4">
-      <h1 className="text-xl font-semibold text-slate-900">Litigation Intelligence Merkezi</h1>
+      <h1 className="text-xl font-semibold text-[var(--main-text,var(--text))]">Litigation Intelligence Merkezi</h1>
       <LitigationIntelligencePanel caseId={id} />
     </section>
   );

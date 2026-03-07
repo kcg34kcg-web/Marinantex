@@ -1,0 +1,359 @@
+[
+  {
+    "id": "scenario-01-plain-text-only",
+    "document": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            { "type": "text", "text": "Duz metin satiri bir" }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            { "type": "text", "text": "Duz metin satiri iki" }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "scenario-02-bold-italic-underline",
+    "document": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Kalin",
+              "marks": [{ "type": "bold" }]
+            },
+            { "type": "text", "text": " " },
+            {
+              "type": "text",
+              "text": "Egrik",
+              "marks": [{ "type": "italic" }]
+            },
+            { "type": "text", "text": " " },
+            {
+              "type": "text",
+              "text": "Altcizili",
+              "marks": [{ "type": "underline" }]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "scenario-03-font-family-size",
+    "document": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Bilinmeyen font",
+              "marks": [
+                {
+                  "type": "textStyle",
+                  "attrs": {
+                    "fontFamily": "X-Unsupported-Font",
+                    "fontSize": "19px"
+                  }
+                }
+              ]
+            },
+            { "type": "text", "text": " / " },
+            {
+              "type": "text",
+              "text": "Bilinen font",
+              "marks": [
+                {
+                  "type": "textStyle",
+                  "attrs": {
+                    "fontFamily": "Calibri, 'Segoe UI', sans-serif",
+                    "fontSize": "14px"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "scenario-04-alignments",
+    "document": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "attrs": { "textAlign": "left" },
+          "content": [{ "type": "text", "text": "Sola hizali" }]
+        },
+        {
+          "type": "paragraph",
+          "attrs": { "textAlign": "center" },
+          "content": [{ "type": "text", "text": "Ortali" }]
+        },
+        {
+          "type": "paragraph",
+          "attrs": { "textAlign": "right" },
+          "content": [{ "type": "text", "text": "Saga hizali" }]
+        },
+        {
+          "type": "paragraph",
+          "attrs": { "textAlign": "justify" },
+          "content": [{ "type": "text", "text": "Iki yana yasli uzun cumle ornegi." }]
+        }
+      ]
+    }
+  },
+  {
+    "id": "scenario-05-empty-lines",
+    "document": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [{ "type": "text", "text": "Ust satir" }]
+        },
+        { "type": "paragraph" },
+        { "type": "paragraph" },
+        {
+          "type": "paragraph",
+          "content": [{ "type": "text", "text": "Alt satir" }]
+        }
+      ]
+    }
+  },
+  {
+    "id": "scenario-06-tab-characters",
+    "document": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            { "type": "text", "text": "Kolon1\tKolon2\tKolon3" }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "scenario-07-simple-table",
+    "document": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "table",
+          "content": [
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableHeader",
+                  "content": [
+                    { "type": "paragraph", "content": [{ "type": "text", "text": "H1" }] }
+                  ]
+                },
+                {
+                  "type": "tableHeader",
+                  "content": [
+                    { "type": "paragraph", "content": [{ "type": "text", "text": "H2" }] }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableCell",
+                  "content": [
+                    { "type": "paragraph", "content": [{ "type": "text", "text": "A1" }] }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "content": [
+                    { "type": "paragraph", "content": [{ "type": "text", "text": "A2" }] }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "scenario-08-multiline-cell",
+    "document": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "table",
+          "content": [
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableCell",
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [{ "type": "text", "text": "Satir 1\nSatir 2\nSatir 3" }]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [{ "type": "text", "text": "Yanit hucre" }]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": "scenario-09-large-document",
+    "document": {
+      "type": "doc",
+      "content": [
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 01 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 02 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 03 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 04 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 05 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 06 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 07 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 08 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 09 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 10 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 11 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 12 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 13 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 14 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 15 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 16 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 17 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 18 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 19 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 20 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 21 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 22 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 23 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 24 - buyuk belge satiri" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Bolum 25 - buyuk belge satiri" }] }
+      ]
+    }
+  },
+  {
+    "id": "scenario-10-mixed-formatting-and-table",
+    "document": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "attrs": { "textAlign": "center" },
+          "content": [
+            {
+              "type": "text",
+              "text": "Baslik",
+              "marks": [
+                { "type": "bold" },
+                {
+                  "type": "textStyle",
+                  "attrs": { "fontFamily": "Cambria, Georgia, serif", "fontSize": "20px" }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Kalem\tTutar",
+              "marks": [{ "type": "italic" }]
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "content": [
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableHeader",
+                  "content": [
+                    { "type": "paragraph", "content": [{ "type": "text", "text": "Urun" }] }
+                  ]
+                },
+                {
+                  "type": "tableHeader",
+                  "content": [
+                    { "type": "paragraph", "content": [{ "type": "text", "text": "Deger" }] }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableCell",
+                  "content": [
+                    { "type": "paragraph", "content": [{ "type": "text", "text": "Satir A" }] }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": { "colspan": 2, "rowspan": 1 },
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "Deger A",
+                          "marks": [{ "type": "underline" }]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "attrs": { "textAlign": "justify" },
+          "content": [
+            { "type": "text", "text": "Karisik format ile kapanis paragrafi." }
+          ]
+        }
+      ]
+    }
+  }
+]

@@ -9,7 +9,7 @@ export default async function CaseFinancePage({ params }: CaseFinancePageProps) 
 
   return (
     <section className="space-y-4">
-      <h1 className="text-xl font-semibold text-slate-900">Stratejik Hukuki Finans Zekâsı</h1>
+      <h1 className="text-xl font-semibold text-[var(--main-text,var(--text))]">Stratejik Hukuki Finans Zekâsı</h1>
       <CaseFinancePanel caseId={id} />
     </section>
   );

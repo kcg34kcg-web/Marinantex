@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from infrastructure.rag_v3.admission import RagV3AdmissionController
@@ -39,3 +41,15 @@ async def test_reserve_rejects_very_large_query() -> None:
     async with controller.reserve(query=huge, requested_tier=2) as decision:
         assert decision.accepted is False
         assert decision.reason == "query_too_large"
+
+
+@pytest.mark.asyncio
+async def test_reserve_queue_timeout_returns_rejection_instead_of_exception() -> None:
+    controller = RagV3AdmissionController()
+    controller._queue_timeout_ms = 5
+    controller._semaphore = asyncio.Semaphore(0)
+
+    async with controller.reserve(query="normal query", requested_tier=3) as decision:
+        assert decision.accepted is False
+        assert decision.reason == "queue_timeout"
+        assert decision.degraded is True

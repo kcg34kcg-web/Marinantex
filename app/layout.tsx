@@ -1,16 +1,17 @@
 import type { Metadata } from 'next';
 import Script from 'next/script';
-import { Inter, Playfair_Display } from 'next/font/google';
+import { Manrope, Source_Serif_4 } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/providers';
+import { FloatingGavelButton } from '@/components/layout/floating-gavel-button';
 
-const inter = Inter({
+const manrope = Manrope({
   subsets: ['latin'],
   variable: '--font-sans',
   display: 'swap',
 });
 
-const playfair = Playfair_Display({
+const sourceSerif = Source_Serif_4({
   subsets: ['latin'],
   variable: '--font-serif',
   display: 'swap',
@@ -29,9 +30,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html
       lang="tr"
       suppressHydrationWarning
-      className={`${inter.variable} ${playfair.variable}`}
+      className={`${manrope.variable} ${sourceSerif.variable}`}
       // fallback (JS çalışmazsa)
-      data-theme="ocean-cliff"
+      data-theme="light-mode"
       data-font-family="system"
       data-font-size="medium"
       data-line-height="normal"
@@ -55,44 +56,52 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 var root = document.documentElement;
                 var themeRaw = localStorage.getItem('${THEME_STORAGE_KEY}') || parsed.theme;
                 var themeMap = {
-                  natureCalm: 'ocean-cliff',
-                  modernCitrus: 'azure-cove',
-                  warmPro: 'emerald-bridge',
-                  youthPop: 'azure-cove',
-                  luxAggressive: 'starlit-lake',
-                  aquaWave: 'alpine-reflection',
-                  roseDream: 'magenta-sunset',
-                  graphiteDark: 'starlit-lake',
-                  neoContrast: 'azure-cove',
-                  pureWhite: 'pure-white',
-                  'nature-calm': 'ocean-cliff',
-                  'modern-citrus': 'azure-cove',
-                  'warm-pro': 'emerald-bridge',
-                  'youth-pop': 'azure-cove',
-                  'lux-aggressive': 'starlit-lake',
-                  'aqua-wave': 'alpine-reflection',
-                  'rose-dream': 'magenta-sunset',
-                  'graphite-dark': 'starlit-lake',
-                  'neo-contrast': 'azure-cove'
+                  dark: 'dark-mode',
+                  light: 'light-mode',
+                  young: 'young-mode',
+                  reading: 'reading-mode',
+                  natureCalm: 'light-mode',
+                  modernCitrus: 'young-mode',
+                  warmPro: 'reading-mode',
+                  youthPop: 'young-mode',
+                  luxAggressive: 'dark-mode',
+                  aquaWave: 'light-mode',
+                  roseDream: 'young-mode',
+                  graphiteDark: 'dark-mode',
+                  neoContrast: 'young-mode',
+                  pureWhite: 'light-mode',
+                  'nature-calm': 'light-mode',
+                  'modern-citrus': 'young-mode',
+                  'warm-pro': 'reading-mode',
+                  'youth-pop': 'young-mode',
+                  'lux-aggressive': 'dark-mode',
+                  'aqua-wave': 'light-mode',
+                  'rose-dream': 'young-mode',
+                  'graphite-dark': 'dark-mode',
+                  'neo-contrast': 'young-mode',
+                  'ocean-cliff': 'dark-mode',
+                  'emerald-bridge': 'light-mode',
+                  'starlit-lake': 'dark-mode',
+                  'azure-cove': 'young-mode',
+                  'alpine-reflection': 'light-mode',
+                  'magenta-sunset': 'young-mode',
+                  'pure-white': 'reading-mode'
                 };
                 var allowedThemes = {
-                  'ocean-cliff': true,
-                  'emerald-bridge': true,
-                  'starlit-lake': true,
-                  'azure-cove': true,
-                  'alpine-reflection': true,
-                  'magenta-sunset': true,
-                  'pure-white': true
+                  'dark-mode': true,
+                  'light-mode': true,
+                  'young-mode': true,
+                  'reading-mode': true
                 };
-                var normalizedTheme = themeMap[themeRaw] || themeRaw || 'ocean-cliff';
-                if (!allowedThemes[normalizedTheme]) normalizedTheme = 'ocean-cliff';
+                var normalizedTheme = themeMap[themeRaw] || themeRaw || 'light-mode';
+                if (!allowedThemes[normalizedTheme]) normalizedTheme = 'light-mode';
                 var pathname = window.location.pathname || '';
                 var isThemeLockedRoute =
                   pathname === '/editor' ||
                   pathname.indexOf('/editor/') === 0 ||
                   pathname === '/social' ||
                   pathname.indexOf('/social/') === 0;
-                var effectiveTheme = isThemeLockedRoute ? 'pure-white' : normalizedTheme;
+                var effectiveTheme = isThemeLockedRoute ? 'reading-mode' : normalizedTheme;
 
                 root.setAttribute('data-theme', effectiveTheme);
                 localStorage.setItem('${THEME_STORAGE_KEY}', normalizedTheme);
@@ -112,7 +121,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 if (fs && fontSizeMap[fs]) root.style.fontSize = fontSizeMap[fs];
 
                 // dark class (provider ile tutarlı)
-                var darkThemes = { 'starlit-lake': true, 'magenta-sunset': true };
+                var darkThemes = { 'dark-mode': true };
                 if (darkThemes[effectiveTheme]) root.classList.add('dark');
                 else root.classList.remove('dark');
               } catch (e) {}
@@ -120,7 +129,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           `}
         </Script>
 
-        <Providers>{children}</Providers>
+        <Providers>
+          {children}
+          <FloatingGavelButton />
+        </Providers>
       </body>
     </html>
   );

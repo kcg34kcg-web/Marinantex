@@ -161,6 +161,26 @@ create table if not exists public.office_tasks (
   thread_id uuid references public.office_threads(id) on delete set null,
   title text not null,
   description text,
+  task_type text not null default 'follow_up' check (task_type in (
+    'follow_up',
+    'petition_drafting',
+    'contract_review',
+    'precedent_research',
+    'hearing_preparation',
+    'client_meeting',
+    'service_tracking',
+    'uyap_control'
+  )),
+  deadline_type text not null default 'due_date' check (deadline_type in (
+    'due_date',
+    'objection_deadline',
+    'response_deadline',
+    'hearing_date',
+    'service_control'
+  )),
+  risk_level text not null default 'medium' check (risk_level in ('low', 'medium', 'critical')),
+  confidentiality_level text not null default 'team' check (confidentiality_level in ('team', 'restricted')),
+  metadata jsonb not null default '{}'::jsonb,
   status text not null default 'open' check (status in ('open', 'in_progress', 'done')),
   priority text not null default 'normal' check (priority in ('low', 'normal', 'high')),
   assigned_to uuid references public.profiles(id) on delete set null,
@@ -171,6 +191,11 @@ create table if not exists public.office_tasks (
 );
 
 alter table public.office_tasks add column if not exists case_id uuid references public.cases(id) on delete set null;
+alter table public.office_tasks add column if not exists task_type text not null default 'follow_up';
+alter table public.office_tasks add column if not exists deadline_type text not null default 'due_date';
+alter table public.office_tasks add column if not exists risk_level text not null default 'medium';
+alter table public.office_tasks add column if not exists confidentiality_level text not null default 'team';
+alter table public.office_tasks add column if not exists metadata jsonb not null default '{}'::jsonb;
 
 create index if not exists idx_office_threads_created_by on public.office_threads (created_by);
 create index if not exists idx_office_threads_last_message_at on public.office_threads (last_message_at desc);

@@ -19,23 +19,35 @@ interface BadgeProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 const variantClasses: Record<BadgeVariant, string> = {
-  blue: 'bg-[color-mix(in_srgb,var(--primary),white_86%)] text-[var(--primary)]',
-  orange: 'bg-[color-mix(in_srgb,var(--warning),white_86%)] text-[var(--warning)]',
-  muted: 'bg-[color-mix(in_srgb,var(--border),white_45%)] text-[var(--secondary)]',
-  outline: 'border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]',
-  success: 'bg-[color-mix(in_srgb,var(--success),white_86%)] text-[var(--success)]',
-  warning: 'bg-[color-mix(in_srgb,var(--warning),white_86%)] text-[var(--warning)]',
-  critical: 'bg-[color-mix(in_srgb,var(--error),white_87%)] text-[var(--error)]',
-  'tier-1': 'bg-[color-mix(in_srgb,var(--success),white_86%)] text-[var(--success)]',
-  'tier-2': 'bg-[color-mix(in_srgb,var(--primary),white_86%)] text-[var(--primary)]',
-  'tier-3': 'bg-[color-mix(in_srgb,var(--accent),white_86%)] text-[var(--accent)]',
-  'tier-4': 'bg-[color-mix(in_srgb,var(--warning),white_86%)] text-[var(--warning)]',
+  blue: 'border border-[color-mix(in_srgb,var(--primary),white_55%)] bg-[color-mix(in_srgb,var(--primary),white_88%)] text-[var(--primary)]',
+  orange:
+    'border border-[color-mix(in_srgb,var(--warning),white_52%)] bg-[color-mix(in_srgb,var(--warning),white_88%)] text-[var(--warning)]',
+  muted: 'border border-[var(--main-border,var(--border))] bg-[color-mix(in_srgb,var(--main-surface-2,var(--surface)),var(--border)_28%)] text-[var(--main-muted,var(--secondary))]',
+  outline: 'border border-[var(--main-border,var(--border))] bg-[color-mix(in_srgb,var(--main-surface-3,var(--surface)),transparent_4%)] text-[var(--main-text,var(--text))]',
+  success:
+    'border border-[color-mix(in_srgb,var(--success),white_52%)] bg-[color-mix(in_srgb,var(--success),white_88%)] text-[var(--success)]',
+  warning:
+    'border border-[color-mix(in_srgb,var(--warning),white_52%)] bg-[color-mix(in_srgb,var(--warning),white_88%)] text-[var(--warning)]',
+  critical:
+    'border border-[color-mix(in_srgb,var(--error),white_52%)] bg-[color-mix(in_srgb,var(--error),white_89%)] text-[var(--error)]',
+  'tier-1':
+    'border border-[color-mix(in_srgb,var(--success),white_52%)] bg-[color-mix(in_srgb,var(--success),white_88%)] text-[var(--success)]',
+  'tier-2':
+    'border border-[color-mix(in_srgb,var(--primary),white_55%)] bg-[color-mix(in_srgb,var(--primary),white_88%)] text-[var(--primary)]',
+  'tier-3':
+    'border border-[color-mix(in_srgb,var(--accent),white_52%)] bg-[color-mix(in_srgb,var(--accent),white_88%)] text-[var(--accent)]',
+  'tier-4':
+    'border border-[color-mix(in_srgb,var(--warning),white_52%)] bg-[color-mix(in_srgb,var(--warning),white_88%)] text-[var(--warning)]',
 };
 
 export function Badge({ className, variant = 'muted', ...props }: BadgeProps) {
   return (
     <div
-      className={cn('inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold', variantClasses[variant], className)}
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.01em]',
+        variantClasses[variant],
+        className,
+      )}
       {...props}
     />
   );

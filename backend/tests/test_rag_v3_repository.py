@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
@@ -104,6 +104,47 @@ class _FakeTable:
         raise AssertionError(f"Unhandled fake operation: table={self._name} op={self._op}")
 
 
+class _FakeRpcCall:
+    def __init__(self, client: "_FakeRpcClient", name: str, params: dict[str, Any]) -> None:
+        self._client = client
+        self._name = name
+        self._params = dict(params)
+
+    def execute(self) -> SimpleNamespace:
+        self._client.calls.append({"rpc": self._name, "params": dict(self._params)})
+        return self._client.execute_rpc(self._name, self._params)
+
+
+class _FakeRpcClient:
+    def __init__(self, mode: str) -> None:
+        self.mode = mode
+        self.calls: list[dict[str, Any]] = []
+
+    def rpc(self, name: str, params: dict[str, Any]) -> _FakeRpcCall:
+        return _FakeRpcCall(self, name, params)
+
+    def execute_rpc(self, name: str, params: dict[str, Any]) -> SimpleNamespace:
+        if self.mode == "allowed_only":
+            if "p_allowed_classifications" in params:
+                raise RuntimeError("unexpected parameter p_allowed_classifications")
+            if "allowed_classifications" in params:
+                return SimpleNamespace(data=[])
+            raise RuntimeError("missing required parameter allowed_classifications")
+        if self.mode == "none_only":
+            if "p_allowed_classifications" in params:
+                raise RuntimeError("unexpected parameter p_allowed_classifications")
+            if "allowed_classifications" in params:
+                raise RuntimeError("unexpected parameter allowed_classifications")
+            return SimpleNamespace(data=[])
+        if self.mode == "none_404":
+            if "p_allowed_classifications" in params:
+                raise RuntimeError(f"404 Could not find function public.{name}")
+            if "allowed_classifications" in params:
+                raise RuntimeError(f"404 Could not find function public.{name}")
+            return SimpleNamespace(data=[])
+        raise AssertionError(f"Unsupported fake rpc mode: {self.mode}")
+
+
 def _chunk(chunk_hash: str, text: str) -> RagV3ChunkUpsert:
     return RagV3ChunkUpsert(
         article_no="1",
@@ -147,6 +188,7 @@ async def test_upsert_keeps_existing_chunk_id_and_deletes_only_stale_hashes() ->
             source_type="legislation",
             source_id="kanun-4857",
             jurisdiction="TR",
+            classification="PUBLIC",
             effective_from=date(2024, 1, 1),
             effective_to=None,
             doc_hash=doc_hash,
@@ -182,6 +224,7 @@ async def test_reingest_same_chunks_keeps_chunk_ids_stable() -> None:
             source_type="legislation",
             source_id="kanun-4857",
             jurisdiction="TR",
+            classification="PUBLIC",
             effective_from=date(2024, 1, 1),
             effective_to=None,
             doc_hash=doc_hash,
@@ -201,6 +244,7 @@ async def test_reingest_same_chunks_keeps_chunk_ids_stable() -> None:
             source_type="legislation",
             source_id="kanun-4857",
             jurisdiction="TR",
+            classification="PUBLIC",
             effective_from=date(2024, 1, 1),
             effective_to=None,
             doc_hash=doc_hash,
@@ -215,3 +259,165 @@ async def test_reingest_same_chunks_keeps_chunk_ids_stable() -> None:
         }
 
     assert first_ids == second_ids
+
+
+@pytest.mark.asyncio
+async def test_match_chunks_dense_falls_back_to_allowed_classifications_alias() -> None:
+    repo = SupabaseRagV3Repository()
+    fake_rpc = _FakeRpcClient(mode="allowed_only")
+
+    with patch("infrastructure.rag_v3.repository.get_supabase_client", return_value=fake_rpc):
+        await repo.match_chunks_dense(
+            query_embedding=[0.1] * 1536,
+            top_k=8,
+            jurisdiction="TR",
+            as_of_date=None,
+            acl_tags=["internal"],
+            allowed_classifications=["PUBLIC", "INTERNAL"],
+            bureau_id=None,
+        )
+        await repo.match_chunks_dense(
+            query_embedding=[0.1] * 1536,
+            top_k=8,
+            jurisdiction="TR",
+            as_of_date=None,
+            acl_tags=["internal"],
+            allowed_classifications=["PUBLIC", "INTERNAL"],
+            bureau_id=None,
+        )
+
+    assert len(fake_rpc.calls) == 3
+    assert "p_allowed_classifications" in fake_rpc.calls[0]["params"]
+    assert "allowed_classifications" in fake_rpc.calls[1]["params"]
+    assert "p_allowed_classifications" not in fake_rpc.calls[2]["params"]
+    assert "allowed_classifications" in fake_rpc.calls[2]["params"]
+
+
+@pytest.mark.asyncio
+async def test_match_chunks_dense_falls_back_to_no_classification_param_signature() -> None:
+    repo = SupabaseRagV3Repository()
+    fake_rpc = _FakeRpcClient(mode="none_only")
+
+    with patch("infrastructure.rag_v3.repository.get_supabase_client", return_value=fake_rpc):
+        await repo.match_chunks_dense(
+            query_embedding=[0.1] * 1536,
+            top_k=8,
+            jurisdiction="TR",
+            as_of_date=None,
+            acl_tags=["internal"],
+            allowed_classifications=["PUBLIC", "INTERNAL"],
+            bureau_id=None,
+        )
+        await repo.match_chunks_dense(
+            query_embedding=[0.1] * 1536,
+            top_k=8,
+            jurisdiction="TR",
+            as_of_date=None,
+            acl_tags=["internal"],
+            allowed_classifications=["PUBLIC", "INTERNAL"],
+            bureau_id=None,
+        )
+
+    assert len(fake_rpc.calls) == 4
+    assert "p_allowed_classifications" in fake_rpc.calls[0]["params"]
+    assert "allowed_classifications" in fake_rpc.calls[1]["params"]
+    assert "p_allowed_classifications" not in fake_rpc.calls[2]["params"]
+    assert "allowed_classifications" not in fake_rpc.calls[2]["params"]
+    assert "p_allowed_classifications" not in fake_rpc.calls[3]["params"]
+    assert "allowed_classifications" not in fake_rpc.calls[3]["params"]
+
+
+@pytest.mark.asyncio
+async def test_match_chunks_sparse_reuses_dense_cached_mode_after_404_signature_mismatch() -> None:
+    repo = SupabaseRagV3Repository()
+    fake_rpc = _FakeRpcClient(mode="none_404")
+
+    with patch("infrastructure.rag_v3.repository.get_supabase_client", return_value=fake_rpc):
+        await repo.match_chunks_dense(
+            query_embedding=[0.1] * 1536,
+            top_k=8,
+            jurisdiction="TR",
+            as_of_date=None,
+            acl_tags=["internal"],
+            allowed_classifications=["PUBLIC", "INTERNAL"],
+            bureau_id=None,
+        )
+        await repo.match_chunks_sparse(
+            query_text="kidem tazminati",
+            top_k=8,
+            jurisdiction="TR",
+            as_of_date=None,
+            acl_tags=["internal"],
+            allowed_classifications=["PUBLIC", "INTERNAL"],
+            bureau_id=None,
+        )
+
+    assert len(fake_rpc.calls) == 4
+    dense_calls = [item for item in fake_rpc.calls if item["rpc"] == "rag_v3_match_chunks_dense"]
+    sparse_calls = [item for item in fake_rpc.calls if item["rpc"] == "rag_v3_match_chunks_sparse"]
+    assert len(dense_calls) == 3
+    assert len(sparse_calls) == 1
+    assert "p_allowed_classifications" not in sparse_calls[0]["params"]
+    assert "allowed_classifications" not in sparse_calls[0]["params"]
+
+
+@pytest.mark.asyncio
+async def test_append_query_trace_retries_on_ssl_bad_record_mac() -> None:
+    repo = SupabaseRagV3Repository()
+
+    class _TraceTable:
+        def __init__(self, parent: "_TraceClient") -> None:
+            self._parent = parent
+
+        def upsert(self, payload: dict[str, Any], on_conflict: str | None = None) -> "_TraceTable":
+            self._parent.payloads.append(dict(payload))
+            return self
+
+        def execute(self) -> SimpleNamespace:
+            self._parent.execute_calls += 1
+            if self._parent.execute_calls < 3:
+                raise RuntimeError("SSLV3_ALERT_BAD_RECORD_MAC")
+            return SimpleNamespace(data=[{"request_id": "req-1"}])
+
+    class _TraceClient:
+        def __init__(self) -> None:
+            self.execute_calls = 0
+            self.payloads: list[dict[str, Any]] = []
+
+        def table(self, name: str) -> _TraceTable:
+            assert name == "rag_v3_query_traces"
+            return _TraceTable(self)
+
+    fake_client = _TraceClient()
+    sleep_mock = AsyncMock(return_value=None)
+
+    with (
+        patch("infrastructure.rag_v3.repository.get_supabase_client", return_value=fake_client),
+        patch("infrastructure.rag_v3.repository.asyncio.sleep", sleep_mock),
+    ):
+        await repo.append_query_trace(
+            request_id="req-1",
+            bureau_id=None,
+            query="Kidem tazminati nedir?",
+            response_status="ok",
+            gate_decision="answered",
+            requested_tier=2,
+            effective_tier=2,
+            top_k=8,
+            jurisdiction="TR",
+            as_of_date=None,
+            admission_reason="accepted",
+            retrieved_count=1,
+            retrieved_chunk_ids=["chunk-1"],
+            retrieval_trace=[],
+            citations=[],
+            fingerprint={},
+            warnings=[],
+            contract_version="v1",
+            schema_version="v1",
+            latency_ms=100,
+            metadata={},
+        )
+
+    assert fake_client.execute_calls == 3
+    assert sleep_mock.await_count == 2

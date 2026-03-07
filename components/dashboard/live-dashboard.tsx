@@ -2,154 +2,452 @@
 
 import Link from 'next/link';
 import type { Route } from 'next';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { differenceInDays, parseISO } from 'date-fns';
+import { differenceInCalendarDays, parseISO } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { LegalDocumentSkeleton } from '@/components/ui/skeleton';
-import Badge from '../../Badge'; // Corrected path to use our custom Badge
-import { fetchDashboardData } from '@/lib/queries';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { fetchDashboardCases, fetchDashboardData, type DashboardCaseItem } from '@/lib/queries';
 import { formatDateTR } from '@/lib/date';
-import { BrainCircuit, ArrowRight, AlertTriangle, Clock, CheckCircle2, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import type { CaseStatus } from '@/types';
 
-function DeadlineUrgency({ date }: { date: string }) {
-  const days = differenceInDays(parseISO(date), new Date());
-  if (days < 0) return <Badge variant="danger">Geçti</Badge>;
-  if (days <= 3) return <Badge variant="danger">{days} gün kaldı</Badge>;
-  if (days <= 7) return <Badge variant="warning">{days} gün kaldı</Badge>;
-  return <Badge variant="success">{days} gün kaldı</Badge>;
+const QUICK_ACTIONS: Array<{ title: string; description: string; href: Route; cta: string }> = [
+  {
+    title: 'Yeni Dosya Akışı',
+    description: 'Yeni dosya sürecini düzenli adımlarla başlatın.',
+    href: '/dashboard/cases' as Route,
+    cta: 'Dosyalara Git',
+  },
+  {
+    title: 'Belge İnceleme',
+    description: 'Devam eden belge incelemelerini tek bakışta yönetin.',
+    href: '/editor' as Route,
+    cta: 'Editörü Aç',
+  },
+  {
+    title: 'Süre ve Takvim',
+    description: 'Yaklaşan süreleri ve kritik tarihleri doğrulayın.',
+    href: '/dashboard/calendar' as Route,
+    cta: 'Takvimi Gör',
+  },
+  {
+    title: 'Hukuk AI Araştırması',
+    description: 'Dosya odaklı araştırma ve risk taramasını başlatın.',
+    href: '/tools/hukuk-ai' as Route,
+    cta: 'Analize Başla',
+  },
+];
+
+type RowTone = 'critical' | 'warning' | 'success' | 'neutral';
+
+function getRowToneClass(tone: RowTone): string {
+  if (tone === 'critical') {
+    return 'border-[#e8cfd0] bg-[#fcf5f5] text-[#8f2d31]';
+  }
+
+  if (tone === 'warning') {
+    return 'border-[#e7ddcb] bg-[#fdf9f2] text-[#8c6526]';
+  }
+
+  if (tone === 'success') {
+    return 'border-[#d7e8de] bg-[#f3f9f5] text-[#215e42]';
+  }
+
+  return 'border-slate-200 bg-white text-[#14314a]';
 }
 
-function deadlineRowClass(date: string): string {
-  const days = differenceInDays(parseISO(date), new Date());
-  if (days <= 3) return 'border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-900';
-  if (days <= 7) return 'border-yellow-200 bg-yellow-50 dark:bg-yellow-950/20 dark:border-yellow-900';
-  return 'border-legal-success/20 bg-green-50/50 dark:bg-green-950/20 dark:border-green-900';
+function toDaysUntil(dateValue: string): number {
+  const parsedDate = parseISO(dateValue);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return differenceInCalendarDays(parsedDate, new Date());
+}
+
+function toDaysSince(dateValue: string): number {
+  const parsedDate = parseISO(dateValue);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return differenceInCalendarDays(new Date(), parsedDate);
+}
+
+function getStatusLabel(status: CaseStatus): string {
+  if (status === 'open') return 'Açık';
+  if (status === 'in_progress') return 'İlerliyor';
+  if (status === 'closed') return 'Kapalı';
+  return 'Arşiv';
+}
+
+function getStatusVariant(status: CaseStatus): 'blue' | 'orange' | 'muted' {
+  if (status === 'open') return 'blue';
+  if (status === 'in_progress') return 'orange';
+  return 'muted';
+}
+
+function getLatestActivityDate(item: DashboardCaseItem): string {
+  const candidates = [item.updatedAt, item.lastTaskAt, item.lastNoteAt].filter(Boolean) as string[];
+  if (candidates.length === 0) return item.updatedAt;
+
+  return candidates.reduce((latest, current) => {
+    if (new Date(current).getTime() > new Date(latest).getTime()) {
+      return current;
+    }
+    return latest;
+  });
 }
 
 export function LiveDashboard() {
-  const { data, isLoading, isError, error } = useQuery({
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    setIsReady(true);
+  }, []);
+
+  const {
+    data: overviewData,
+    isLoading: isOverviewLoading,
+    isError: isOverviewError,
+    error: overviewError,
+  } = useQuery({
     queryKey: ['dashboard', 'overview'],
     queryFn: fetchDashboardData,
   });
 
-  const urgentCount = data?.deadlines.filter((d) => differenceInDays(parseISO(d.date), new Date()) <= 3).length ?? 0;
+  const {
+    data: casesData,
+    isLoading: isCasesLoading,
+    isError: isCasesError,
+    error: casesError,
+  } = useQuery({
+    queryKey: ['dashboard', 'home-cases'],
+    queryFn: () =>
+      fetchDashboardCases({
+        page: 1,
+        pageSize: 6,
+        quickView: 'active',
+        sortBy: 'updated_desc',
+      }),
+  });
+
+  const summary = useMemo(() => {
+    const deadlines = overviewData?.deadlines ?? [];
+    const caseItems = casesData?.items ?? [];
+    const activeCases = caseItems.filter((item) => item.status === 'open' || item.status === 'in_progress');
+
+    const criticalDeadlineCount = deadlines.filter((item) => {
+      const days = toDaysUntil(item.date);
+      return days >= 0 && days <= 3;
+    }).length;
+
+    const upcomingDeadlineCount = deadlines.filter((item) => {
+      const days = toDaysUntil(item.date);
+      return days >= 0 && days <= 7;
+    }).length;
+
+    const staleCaseCount = activeCases.filter((item) => toDaysSince(item.updatedAt) >= 10).length;
+    const missingContextCount = activeCases.filter((item) => !item.lastNoteAt && !item.lastTaskAt).length;
+    const attentionCount = criticalDeadlineCount + staleCaseCount;
+
+    const nextDeadline = deadlines
+      .filter((item) => toDaysUntil(item.date) >= 0)
+      .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime())[0];
+
+    const todayRows = [
+      {
+        title: 'Yaklaşan Süreler',
+        detail:
+          upcomingDeadlineCount > 0
+            ? 'Önümüzdeki 7 gün içinde takip edilmesi gereken süreler.'
+            : 'Yakın vadede planlanmış süre görünmüyor.',
+        value: upcomingDeadlineCount,
+        tone: upcomingDeadlineCount > 0 ? ('warning' as const) : ('success' as const),
+      },
+      {
+        title: 'Kritik Aksiyonlar',
+        detail:
+          criticalDeadlineCount > 0
+            ? '3 gün ve altındaki işlemler bugün öncelikli.'
+            : 'Bugün kritik aksiyon görünmüyor.',
+        value: criticalDeadlineCount,
+        tone: criticalDeadlineCount > 0 ? ('critical' as const) : ('success' as const),
+      },
+      {
+        title: 'Bekleyen İncelemeler',
+        detail:
+          activeCases.length > 0
+            ? 'Açık veya ilerleyen dosyalar inceleme bekliyor.'
+            : 'Aktif dosya görünmüyor.',
+        value: activeCases.length,
+        tone: activeCases.length > 0 ? ('neutral' as const) : ('success' as const),
+      },
+      {
+        title: 'Eksik Belge Kontrolü',
+        detail:
+          missingContextCount > 0
+            ? 'Son not veya görev kaydı bulunmayan dosyalar var.'
+            : 'Eksik belge/ek sinyali görünmüyor.',
+        value: missingContextCount,
+        tone: missingContextCount > 0 ? ('warning' as const) : ('success' as const),
+      },
+    ];
+
+    const insightRows = [
+      {
+        title: 'Yüksek Riskli Dosya',
+        value: `${attentionCount} dosya`,
+        note:
+          attentionCount > 0
+            ? 'Kritik süre ve geciken güncelleme birleşik riski.'
+            : 'Bugün yüksek riskli dosya görünmüyor.',
+      },
+      {
+        title: 'Eksik Ek / Not Tespiti',
+        value: `${missingContextCount} dosya`,
+        note: 'Aktif dosyalarda son not ve görev izi kontrolü.',
+      },
+      {
+        title: 'En Yakın Kritik Tarih',
+        value: nextDeadline ? formatDateTR(nextDeadline.date) : 'Planlı kritik tarih yok',
+        note: nextDeadline ? nextDeadline.title : 'Takvim sakin ilerliyor.',
+      },
+    ];
+
+    return {
+      todayRows,
+      insightRows,
+      staleCaseCount,
+    };
+  }, [overviewData, casesData]);
+
+  const revealClass = isReady ? 'translate-y-0 opacity-100' : 'translate-y-1.5 opacity-0';
+  const ongoingCases = casesData?.items ?? [];
+  const briefingText =
+    overviewData?.briefingText ??
+    'Bugünün öncelikleri, süre yönetimi ve dosya incelemeleri için tek panelde özetlenir.';
+  const summaryError = isOverviewError
+    ? overviewError instanceof Error
+      ? overviewError.message
+      : 'Özet verisi alınamadı.'
+    : null;
+  const caseWarning =
+    isCasesError && !isCasesLoading
+      ? casesError instanceof Error
+        ? casesError.message
+        : 'Dosya verisinin bir bölümü yüklenemedi.'
+      : null;
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* ── Outcome-First Hero: kritik son tarihleri öne al ────────── */}
-      {!isLoading && urgentCount > 0 && (
-        <div className="flex items-center gap-3 rounded-2xl border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-800 p-4">
-          <AlertTriangle className="h-5 w-5 flex-shrink-0 text-red-600 dark:text-red-400" />
-          <p className="text-sm font-semibold text-red-700 dark:text-red-300">
-            {urgentCount} kritik son tarih — 3 gün veya daha az kaldı
-          </p>
-        </div>
-      )}
+    <div className="space-y-7">
+      <section
+        className={cn(
+          'rounded-[24px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] px-6 py-8 shadow-[0_10px_30px_-28px_rgba(15,23,42,0.55)] transition-all duration-500',
+          revealClass,
+        )}
+      >
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Hukuk Çalışma Paneli</p>
+        <h1 className="mt-2 max-w-3xl font-serif text-[clamp(1.75rem,2.4vw,2.3rem)] leading-tight tracking-[-0.015em] text-[#10233a]">
+          Bugünün hukuki öncelikleri tek bakışta netleşsin.
+        </h1>
+        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-600">
+          Süreler, belge incelemeleri ve dikkat gerektiren aksiyonlar sade bir iş akışında düzenlendi.
+        </p>
+      </section>
 
-      {/* ── Hukuk AI shortcut ──────────────────────────────────────── */}
-      <Card className="overflow-hidden border-legal-action/20 bg-gradient-to-br from-legal-primary via-[#1e3a8a] to-legal-action dark:from-slate-900 dark:to-slate-800 shadow-legal-lg">
-        <CardContent className="flex items-center justify-between p-5">
-          <div className="flex items-center gap-4">
-            <div className="rounded-xl bg-white/10 p-3 backdrop-blur-sm ring-1 ring-white/20">
-              <BrainCircuit className="h-6 w-6 text-white" />
-            </div>
-            <div>
-              <p className="font-serif text-base font-semibold text-white">Hukuk AI Araştırması</p>
-              <p className="text-xs text-blue-200/80">Sıfır Halüsinasyonlu · Zero-Trust RAG v2.1</p>
-            </div>
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {QUICK_ACTIONS.map((action, index) => (
+          <Link
+            key={action.title}
+            href={action.href}
+            className={cn(
+              'group rounded-[18px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_-24px_rgba(15,23,42,0.55)] transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#12354f]/30',
+              revealClass,
+            )}
+            style={{ transitionDelay: `${70 + index * 55}ms` }}
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Hızlı Aksiyon</p>
+            <h2 className="mt-2 text-base font-semibold tracking-[-0.01em] text-[#11263d]">{action.title}</h2>
+            <p className="mt-2 text-sm leading-relaxed text-slate-600">{action.description}</p>
+            <span className="mt-4 inline-flex text-xs font-semibold tracking-[0.01em] text-[#12354f] transition-colors group-hover:text-[#0c2539]">
+              {action.cta}
+            </span>
+          </Link>
+        ))}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <Card
+          className={cn(
+            'rounded-[22px] border-slate-200 bg-white shadow-[0_10px_28px_-26px_rgba(15,23,42,0.5)] transition-all duration-500',
+            revealClass,
+          )}
+          style={{ transitionDelay: '180ms' }}
+        >
+          <CardHeader>
+            <CardTitle className="font-serif text-2xl tracking-[-0.01em] text-[#12263e]">Bugün</CardTitle>
+            <CardDescription className="max-w-2xl leading-relaxed text-slate-600">{briefingText}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {summaryError ? (
+              <div className="rounded-xl border border-[#e8d6c9] bg-[#fff8f2] px-4 py-3 text-sm text-[#8b5e32]">{summaryError}</div>
+            ) : isOverviewLoading ? (
+              <div className="space-y-3">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <Skeleton key={`today-skeleton-${index}`} className="h-[74px] w-full rounded-xl" />
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {caseWarning ? (
+                  <p className="rounded-xl border border-[#ebdfcf] bg-[#fdf9f2] px-4 py-2.5 text-xs leading-relaxed text-[#8c6526]">
+                    {caseWarning}
+                  </p>
+                ) : null}
+                <ul className="space-y-3">
+                  {summary.todayRows.map((row) => (
+                    <li
+                      key={row.title}
+                      className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[#132b44]">{row.title}</p>
+                        <p className="mt-1 text-xs leading-relaxed text-slate-500">{row.detail}</p>
+                      </div>
+                      <span
+                        className={cn(
+                          'inline-flex min-w-10 items-center justify-center rounded-lg border px-2.5 py-1 text-xs font-semibold',
+                          getRowToneClass(row.tone),
+                        )}
+                      >
+                        {row.value}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card
+          className={cn(
+            'rounded-[22px] border-slate-200 bg-white shadow-[0_10px_28px_-26px_rgba(15,23,42,0.5)] transition-all duration-500',
+            revealClass,
+          )}
+          style={{ transitionDelay: '220ms' }}
+        >
+          <CardHeader>
+            <CardTitle className="font-serif text-xl tracking-[-0.01em] text-[#12263e]">Hızlı İçgörü</CardTitle>
+            <CardDescription className="text-slate-600">İş akışını etkileyen kısa özetler.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {isOverviewLoading ? (
+              <>
+                <Skeleton className="h-16 w-full rounded-xl" />
+                <Skeleton className="h-16 w-full rounded-xl" />
+                <Skeleton className="h-16 w-full rounded-xl" />
+              </>
+            ) : (
+              <>
+                {caseWarning ? (
+                  <p className="rounded-xl border border-[#ebdfcf] bg-[#fdf9f2] px-4 py-2.5 text-xs leading-relaxed text-[#8c6526]">
+                    {caseWarning}
+                  </p>
+                ) : null}
+                {summary.insightRows.map((item) => (
+                  <div key={item.title} className="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.11em] text-slate-500">{item.title}</p>
+                    <p className="mt-1 text-sm font-semibold text-[#11263d]">{item.value}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-500">{item.note}</p>
+                  </div>
+                ))}
+                <p className="text-[11px] leading-relaxed text-slate-500">
+                  {summary.staleCaseCount > 0
+                    ? `${summary.staleCaseCount} dosya 10+ gündür güncellenmedi; kısa kontrol önerilir.`
+                    : 'Güncel çalışma akışı dengeli ilerliyor.'}
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section
+        className={cn('space-y-4 transition-all duration-500', revealClass)}
+        style={{ transitionDelay: '260ms' }}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-serif text-2xl tracking-[-0.01em] text-[#12263e]">Devam Edenler</h2>
+            <p className="mt-1 text-sm text-slate-600">Açık dosyalar ve son çalışmaların kısa listesi.</p>
           </div>
           <Link
-            href={'/tools/hukuk-ai' as Route}
-            className="inline-flex items-center gap-1.5 rounded-xl min-h-[44px] bg-white px-4 py-2 text-sm font-semibold text-legal-primary shadow-legal-sm transition-all hover:bg-white/90 hover:shadow-legal-md hover:-translate-y-0.5"
+            href={'/dashboard/cases' as Route}
+            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold tracking-[0.01em] text-[#12354f] transition-colors hover:border-slate-300 hover:text-[#0d273c]"
           >
-            Araştırma Yap
-            <ArrowRight className="h-3.5 w-3.5" />
+            Tüm Dosyaları Gör
           </Link>
-        </CardContent>
-      </Card>
+        </div>
 
-      {/* ── Günaydın Özeti ─────────────────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="font-serif">Günaydın Özeti</CardTitle>
-          <CardDescription>Bugünkü çalışma özeti ve önemli notlar</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <LegalDocumentSkeleton label="Yükleniyor..." />
-          ) : isError ? (
-            <div className="flex items-center gap-2 text-sm text-orange-600">
-              <AlertTriangle className="h-4 w-4" />
-              {error instanceof Error ? error.message : 'Veri alınamadı.'}
-            </div>
-          ) : (
-            <p className="text-sm leading-relaxed text-legal-primary/80 dark:text-slate-300">{data?.briefingText}</p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ── Yaklaşan Son Tarihler ───────────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="font-serif">Yaklaşan Son Tarihler</CardTitle>
-              <CardDescription>Takvim görünümü — renkler aciliyeti gösterir</CardDescription>
-            </div>
-            <div className="flex items-center gap-3 text-xs text-legal-primary/50 dark:text-slate-500">
-              <span className="inline-flex items-center gap-1">
-                <CheckCircle2 className="h-3 w-3 text-green-500" /> güvenli
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Clock className="h-3 w-3 text-yellow-500" /> yaklaşıyor
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <AlertTriangle className="h-3 w-3 text-red-500" /> kritik
-              </span>
-            </div>
+        {isCasesError ? (
+          <div className="rounded-xl border border-[#e8d6c9] bg-[#fff8f2] px-4 py-3 text-sm text-[#8b5e32]">
+            {casesError instanceof Error ? casesError.message : 'Devam eden dosyalar yüklenemedi.'}
           </div>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-3">
-              <LegalDocumentSkeleton label="Takvim yükleniyor..." />
-              <LegalDocumentSkeleton label="Takvim yükleniyor..." />
-              <LegalDocumentSkeleton label="Takvim yükleniyor..." />
-            </div>
-          ) : isError ? (
-            <div className="flex items-center gap-2 text-sm text-orange-600">
-              <AlertTriangle className="h-4 w-4" />
-              Takvim verileri yüklenemedi.
-            </div>
-          ) : data && data.deadlines.length > 0 ? (
-            <ul className="space-y-2">
-              {data.deadlines.map((item) => (
-                <li
+        ) : isCasesLoading ? (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <Skeleton key={`ongoing-skeleton-${index}`} className="h-[154px] w-full rounded-xl" />
+            ))}
+          </div>
+        ) : ongoingCases.length === 0 ? (
+          <div className="rounded-xl border border-slate-200 bg-white px-5 py-6 text-sm text-slate-600">
+            Devam eden dosya bulunamadı. Yeni çalışma başlatmak için dosya ekranına geçebilirsiniz.
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {ongoingCases.map((item, index) => {
+              const activityDate = getLatestActivityDate(item);
+              return (
+                <article
                   key={item.id}
                   className={cn(
-                    'flex items-center justify-between rounded-xl border p-3 text-sm transition-all',
-                    deadlineRowClass(item.date),
+                    'rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-[0_8px_22px_-24px_rgba(15,23,42,0.65)] transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300',
+                    revealClass,
                   )}
+                  style={{ transitionDelay: `${320 + index * 40}ms` }}
                 >
-                  <span className="font-medium text-legal-primary dark:text-slate-200">{item.title}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-legal-primary/50 dark:text-slate-400" suppressHydrationWarning>
-                      {formatDateTR(item.date)}
-                    </span>
-                    <DeadlineUrgency date={item.date} />
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-[#132b44]">{item.title}</h3>
+                    <Badge variant={getStatusVariant(item.status)} className="shrink-0">
+                      {getStatusLabel(item.status)}
+                    </Badge>
                   </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="flex items-center gap-2 py-4 text-sm text-legal-primary/50">
-              <Sparkles className="h-4 w-4 text-legal-success" />
-              Yaklaşan son tarih görünmüyor — harika!
-            </div>
-          )}
-        </CardContent>
-      </Card>
+
+                  <p className="mt-3 text-xs text-slate-500">{item.clientName || 'Müvekkil bilgisi eklenmedi.'}</p>
+                  <p className="mt-1 text-xs text-slate-500" suppressHydrationWarning>
+                    Son aktivite: {formatDateTR(activityDate)}
+                  </p>
+
+                  <div className="mt-4 flex items-center justify-between">
+                    <span className="text-[11px] font-medium uppercase tracking-[0.09em] text-slate-400">Çalışma kartı</span>
+                    <Link
+                      href={`/dashboard/cases/${item.id}` as Route}
+                      className="text-xs font-semibold tracking-[0.01em] text-[#12354f] transition-colors hover:text-[#0d273c]"
+                    >
+                      Detaya Git
+                    </Link>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

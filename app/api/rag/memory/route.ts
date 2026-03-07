@@ -60,13 +60,13 @@ const createSchema = z.discriminatedUnion('kind', [
     source_type: z.string().min(1).max(64).optional(),
     source_message_id: z.string().uuid().optional(),
     source_saved_output_id: z.string().uuid().optional(),
-    metadata: z.record(z.unknown()).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
   }),
   z.object({
     kind: z.literal('preference'),
     pref_key: z.string().min(1).max(120),
     pref_value: z.string().min(1).max(2000),
-    metadata: z.record(z.unknown()).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
   }),
   z.object({
     kind: z.literal('edge'),
@@ -74,7 +74,7 @@ const createSchema = z.discriminatedUnion('kind', [
     to_fact_id: z.string().uuid(),
     relation_type: z.string().min(1).max(120).optional(),
     weight: z.number().min(0).max(1).optional(),
-    metadata: z.record(z.unknown()).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
   }),
 ]);
 
@@ -137,7 +137,7 @@ async function resolveContext() {
   const supabase = await createClient();
   let context;
   try {
-    context = await resolveBureauContext(supabase);
+    context = await resolveBureauContext(supabase, { requireClaimMatch: true });
   } catch {
     return { error: NextResponse.json({ error: 'Oturum bulunamadi.' }, { status: 401 }) };
   }

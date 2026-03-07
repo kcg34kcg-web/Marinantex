@@ -1,0 +1,38 @@
+{
+  "name": "lexoffice-ai-platform",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "dev": "corepack pnpm --parallel --filter @lexoffice/web --filter @lexoffice/worker dev",
+    "build": "corepack pnpm -r build",
+    "lint": "corepack pnpm -r lint",
+    "typecheck": "corepack pnpm -r typecheck",
+    "test": "corepack pnpm -r test",
+    "test:unit": "corepack pnpm -r test",
+    "e2e:smoke": "./scripts/run-e2e-smoke.sh",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "prepare": "husky install",
+    "db:generate": "pnpm --filter @lexoffice/db prisma:generate",
+    "db:migrate": "pnpm --filter @lexoffice/db prisma:migrate",
+    "db:seed": "pnpm --filter @lexoffice/db prisma:seed",
+    "ci": "corepack pnpm --filter @lexoffice/db prisma:generate && corepack pnpm -r typecheck && corepack pnpm -r test && corepack pnpm build && corepack pnpm e2e:smoke"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.46.3",
+    "@typescript-eslint/parser": "^8.46.3",
+    "@types/node": "^22.13.8",
+    "eslint": "^9.22.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.0",
+    "prettier": "^3.5.2",
+    "turbo": "^2.4.2",
+    "typescript": "^5.8.2"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,json,md}": [
+      "prettier --write"
+    ]
+  }
+}

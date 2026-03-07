@@ -31,10 +31,13 @@ in tests.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from dataclasses import dataclass, field
+import time
+from contextlib import suppress
+from dataclasses import dataclass, field, replace
 from enum import IntEnum
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Awaitable, Dict, List, Optional, Set, Tuple
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
@@ -71,6 +74,21 @@ _TIER3_KEYWORDS: List[str] = [
     "genel kurul",
     "bölge adliye",
 ]
+
+_PROVIDER_ALIAS_MAP: Dict[str, str] = {
+    "gemini": "google",
+    "google": "google",
+    "qwen": "openai",
+    "qwen_core": "openai",
+    "qwen_deep": "openai",
+    "self_host": "openai",
+    "openai": "openai",
+    "gpt": "openai",
+    "chatgpt": "openai",
+    "anthropic": "anthropic",
+    "claude": "anthropic",
+    "groq": "groq",
+}
 
 
 # ============================================================================
@@ -356,9 +374,125 @@ class LLMTieredRouter:
 
     def __init__(self) -> None:
         self._available: Set[QueryTier] = self._discover_available_tiers()
+        self._provider_cooldown_until_ts: Dict[str, float] = {}
+        self._provider_timeout_s = max(
+            1.0,
+            float(getattr(settings, "llm_provider_timeout_s", 12.0) or 12.0),
+        )
+        self._provider_quota_cooldown_s = max(
+            0,
+            int(getattr(settings, "llm_provider_quota_cooldown_s", 300) or 0),
+        )
         logger.info(
-            "LLMTieredRouter ready | available_tiers=%s",
+            "LLMTieredRouter ready | available_tiers=%s | timeout_s=%.1f | quota_cooldown_s=%d",
             sorted(int(t) for t in self._available),
+            self._provider_timeout_s,
+            self._provider_quota_cooldown_s,
+        )
+
+    def _provider_cooldown_remaining_s(self, provider: str) -> int:
+        token = str(provider or "").strip().lower()
+        if not token:
+            return 0
+        until_ts = float(self._provider_cooldown_until_ts.get(token) or 0.0)
+        if until_ts <= 0.0:
+            return 0
+        remaining = int(max(0.0, until_ts - time.time()))
+        if remaining <= 0:
+            self._provider_cooldown_until_ts.pop(token, None)
+            return 0
+        return remaining
+
+    def _mark_provider_quota_exhausted(self, provider: str, exc: Exception) -> None:
+        token = str(provider or "").strip().lower()
+        if not token or self._provider_quota_cooldown_s <= 0:
+            return
+        until_ts = time.time() + float(self._provider_quota_cooldown_s)
+        self._provider_cooldown_until_ts[token] = until_ts
+        logger.warning(
+            "LLM_PROVIDER_QUOTA_COOLDOWN | provider=%s | cooldown_s=%d | reason=%s",
+            token,
+            self._provider_quota_cooldown_s,
+            exc,
+        )
+
+    def _mark_provider_transient_cooldown(self, provider: str, *, reason: str) -> None:
+        token = str(provider or "").strip().lower()
+        if not token:
+            return
+        cooldown_s = 60
+        if self._provider_quota_cooldown_s > 0:
+            cooldown_s = min(cooldown_s, self._provider_quota_cooldown_s)
+        until_ts = time.time() + float(cooldown_s)
+        current_until = float(self._provider_cooldown_until_ts.get(token) or 0.0)
+        if until_ts <= current_until:
+            return
+        self._provider_cooldown_until_ts[token] = until_ts
+        logger.warning(
+            "LLM_PROVIDER_TRANSIENT_COOLDOWN | provider=%s | cooldown_s=%d | reason=%s",
+            token,
+            cooldown_s,
+            reason,
+        )
+
+    @staticmethod
+    def _provider_retry_budget() -> int:
+        try:
+            raw = getattr(settings, "llm_provider_max_retries", 1)
+            if raw is None:
+                return 1
+            return max(0, int(raw))
+        except Exception:
+            return 1
+
+    async def _await_with_hard_timeout(self, *, provider: str, awaitable: Awaitable[object]) -> object:
+        task = asyncio.create_task(awaitable)
+        done, _ = await asyncio.wait({task}, timeout=self._provider_timeout_s)
+        if task in done:
+            return await task
+        task.cancel()
+
+        def _consume_result(t: asyncio.Task[object]) -> None:
+            with suppress(asyncio.CancelledError, Exception):
+                _ = t.exception()
+
+        task.add_done_callback(_consume_result)
+        self._mark_provider_transient_cooldown(
+            provider,
+            reason=f"timeout_s={self._provider_timeout_s:.1f}",
+        )
+        raise RuntimeError(
+            "LLM_PROVIDER_TIMEOUT | "
+            f"provider={provider} | timeout_s={self._provider_timeout_s:.1f}"
+        )
+
+    @staticmethod
+    def _is_quota_exhausted_error(exc: Exception) -> bool:
+        lowered = str(exc).strip().lower()
+        return any(
+            token in lowered
+            for token in (
+                "insufficient_quota",
+                "quota exceeded",
+                "exceeded your current quota",
+                "resource_exhausted",
+                "limit: 0",
+            )
+        )
+
+    @staticmethod
+    def _is_rate_limited_error(exc: Exception) -> bool:
+        lowered = str(exc).strip().lower()
+        return any(
+            token in lowered
+            for token in (
+                "429",
+                "rate limit",
+                "resource exhausted",
+                "resource_exhausted",
+                "resourceexhausted",
+                "too many requests",
+            )
         )
 
     # ── Tier discovery ────────────────────────────────────────────────────────
@@ -487,11 +621,34 @@ class LLMTieredRouter:
             logger.warning("Invalid requested_tier=%r; falling back to classifier.", requested_tier)
             return None
 
+    @staticmethod
+    def _normalise_allowed_providers(
+        allowed_providers: Optional[Set[str] | List[str] | Tuple[str, ...]],
+    ) -> Optional[Set[str]]:
+        if not allowed_providers:
+            return None
+        parsed: Set[str] = set()
+        for item in allowed_providers:
+            token = str(item or "").strip().lower()
+            if not token:
+                continue
+            mapped = _PROVIDER_ALIAS_MAP.get(token)
+            if mapped:
+                parsed.add(mapped)
+        return parsed
+
+    @staticmethod
+    def _is_provider_allowed(provider: str, allowed_providers: Optional[Set[str]]) -> bool:
+        if not allowed_providers:
+            return True
+        return str(provider or "").strip().lower() in allowed_providers
+
     def _resolve_requested_model(
         self,
         desired: QueryTier,
         context: str,
         source_count: int,
+        allowed_providers: Optional[Set[str]] = None,
     ) -> TierDecision:
         """
         Resolves explicit user-selected tier to configured primary/fallback model.
@@ -520,7 +677,12 @@ class LLMTieredRouter:
                 fallback_provider = ""
                 fallback_model = ""
 
-        if primary_provider and primary_model and self._provider_has_key(primary_provider):
+        if (
+            primary_provider
+            and primary_model
+            and self._provider_has_key(primary_provider)
+            and self._is_provider_allowed(primary_provider, allowed_providers)
+        ):
             return TierDecision(
                 tier=desired,
                 model_id=primary_model,
@@ -531,7 +693,12 @@ class LLMTieredRouter:
                 ),
             )
 
-        if fallback_provider and fallback_model and self._provider_has_key(fallback_provider):
+        if (
+            fallback_provider
+            and fallback_model
+            and self._provider_has_key(fallback_provider)
+            and self._is_provider_allowed(fallback_provider, allowed_providers)
+        ):
             logger.warning(
                 "REQUESTED_TIER_FALLBACK_MODEL | tier=%d | primary=%s/%s unavailable | fallback=%s/%s",
                 desired,
@@ -552,6 +719,15 @@ class LLMTieredRouter:
                 original_tier=desired,
             )
 
+        if allowed_providers:
+            raise RuntimeError(
+                "REQUESTED_TIER_PROVIDER_BLOCKED | "
+                f"tier={int(desired)} | "
+                f"primary={primary_provider}/{primary_model} | "
+                f"fallback={fallback_provider}/{fallback_model} | "
+                f"allowed_providers={sorted(allowed_providers)}"
+            )
+
         # Step 22 contract: final generation tier can NEVER be downgraded
         # below user-requested tier. If same-tier primary/fallback are both
         # unavailable, fail fast instead of walking down to lower tiers.
@@ -563,6 +739,99 @@ class LLMTieredRouter:
             "Configure provider keys or same-tier fallback mapping."
         )
 
+    def _runtime_fallback_decision(
+        self,
+        *,
+        failed_decision: TierDecision,
+        requested: Optional[QueryTier],
+        query: str,
+        context: str,
+        source_count: int,
+        reason: str,
+        allowed_providers: Optional[Set[str]] = None,
+    ) -> Optional[TierDecision]:
+        candidates: list[TierDecision] = []
+        original_tier = failed_decision.original_tier or failed_decision.tier
+
+        if requested is not None:
+            conf = _REQUESTED_TIER_MODEL_MAP[requested]
+            fallback_provider = str(getattr(settings, conf["fallback_provider_key"], "") or "").strip().lower()
+            fallback_model = str(getattr(settings, conf["fallback_model_key"], "") or "").strip()
+            if fallback_provider and fallback_model:
+                candidates.append(
+                    TierDecision(
+                        tier=requested,
+                        model_id=fallback_model,
+                        provider=fallback_provider,
+                        reason=(
+                            f"requested_tier={int(requested)} | runtime_fallback={reason} | "
+                            f"from={failed_decision.provider}/{failed_decision.model_id}"
+                        ),
+                        fallback_used=True,
+                        original_tier=original_tier,
+                        is_reasoning_model=is_reasoning_model(fallback_model),
+                    )
+                )
+
+            # Emergency lane: preserve requested tier without forcing Step-21 provider.
+            try:
+                emergency = self._resolve(
+                    requested,
+                    query=query,
+                    context=context,
+                    source_count=source_count,
+                    allowed_providers=allowed_providers,
+                )
+            except Exception:
+                emergency = None
+            if emergency is not None and int(emergency.tier) >= int(requested):
+                candidates.append(
+                    replace(
+                        emergency,
+                        fallback_used=True,
+                        original_tier=original_tier,
+                    )
+                )
+        else:
+            try:
+                emergency = self._resolve(
+                    failed_decision.tier,
+                    query=query,
+                    context=context,
+                    source_count=source_count,
+                    allowed_providers=allowed_providers,
+                )
+            except Exception:
+                emergency = None
+            if emergency is not None:
+                candidates.append(
+                    replace(
+                        emergency,
+                        fallback_used=True,
+                        original_tier=original_tier,
+                    )
+                )
+
+        seen: set[tuple[str, str, int]] = set()
+        for candidate in candidates:
+            key = (candidate.provider, candidate.model_id, int(candidate.tier))
+            if key in seen:
+                continue
+            seen.add(key)
+            if (
+                candidate.provider == failed_decision.provider
+                and candidate.model_id == failed_decision.model_id
+            ):
+                continue
+            if not self._provider_has_key(candidate.provider):
+                continue
+            if not self._is_provider_allowed(candidate.provider, allowed_providers):
+                continue
+            if self._provider_cooldown_remaining_s(candidate.provider) > 0:
+                continue
+            return candidate
+        return None
+
     # ── Decision logic ────────────────────────────────────────────────────────
 
     def decide(
@@ -571,6 +840,7 @@ class LLMTieredRouter:
         context: str,
         source_count: int,
         requested_tier: Optional[int] = None,
+        allowed_providers: Optional[Set[str] | List[str] | Tuple[str, ...]] = None,
     ) -> TierDecision:
         """
         Classifies the query and applies fallback to produce a TierDecision.
@@ -586,16 +856,24 @@ class LLMTieredRouter:
         Returns:
             TierDecision with final tier, model_id, provider, reason.
         """
+        normalized_allowed = self._normalise_allowed_providers(allowed_providers)
         requested = self._normalise_requested_tier(requested_tier)
         if requested is not None:
             return self._resolve_requested_model(
                 desired=requested,
                 context=context,
                 source_count=source_count,
+                allowed_providers=normalized_allowed,
             )
 
         classified = classify_query_tier(query, context, source_count)
-        return self._resolve(classified, query, context, source_count)
+        return self._resolve(
+            classified,
+            query,
+            context,
+            source_count,
+            allowed_providers=normalized_allowed,
+        )
 
     def _resolve(
         self,
@@ -603,6 +881,7 @@ class LLMTieredRouter:
         query: str,
         context: str,
         source_count: int,
+        allowed_providers: Optional[Set[str]] = None,
     ) -> TierDecision:
         """
         Resolves a desired tier to an available tier, applying fallbacks.
@@ -616,6 +895,7 @@ class LLMTieredRouter:
             desired == QueryTier.TIER4
             and settings.llm_tier4_use_reasoning
             and desired in self._available
+            and self._is_provider_allowed("openai", allowed_providers)
         ):
             model_id = settings.llm_tier4_reasoning_model
             ctx_tokens = estimate_tokens(context)
@@ -641,23 +921,33 @@ class LLMTieredRouter:
         # If desired tier is available → use it directly
         if desired in self._available:
             meta = _TIER_META[desired]
-            model_id: str = getattr(settings, meta["model_key"])
-            ctx_tokens = estimate_tokens(context)
-            reason = (
-                f"tier={desired} | ctx_tokens≈{ctx_tokens} | "
-                f"sources={source_count}"
-            )
-            return TierDecision(
-                tier=desired,
-                model_id=model_id,
-                provider=meta["provider"],
-                reason=reason,
-            )
+            if not self._is_provider_allowed(meta["provider"], allowed_providers):
+                logger.info(
+                    "TIER_PROVIDER_BLOCKED | desired=%d | provider=%s | allowed=%s",
+                    desired,
+                    meta["provider"],
+                    sorted(allowed_providers) if allowed_providers else [],
+                )
+            else:
+                model_id: str = getattr(settings, meta["model_key"])
+                ctx_tokens = estimate_tokens(context)
+                reason = (
+                    f"tier={desired} | ctx_tokens≈{ctx_tokens} | "
+                    f"sources={source_count}"
+                )
+                return TierDecision(
+                    tier=desired,
+                    model_id=model_id,
+                    provider=meta["provider"],
+                    reason=reason,
+                )
 
         # Apply fallback chain
         for unavailable, fallback_tier in _FALLBACK_ORDER:
             if desired == unavailable and fallback_tier in self._available:
                 meta = _TIER_META[fallback_tier]
+                if not self._is_provider_allowed(meta["provider"], allowed_providers):
+                    continue
                 model_id = getattr(settings, meta["model_key"])
                 reason = (
                     f"FALLBACK Tier {desired}→Tier {fallback_tier}: "
@@ -682,6 +972,8 @@ class LLMTieredRouter:
         for candidate in [QueryTier.TIER3, QueryTier.TIER2, QueryTier.TIER1]:
             if candidate in self._available and candidate <= desired:
                 meta = _TIER_META[candidate]
+                if not self._is_provider_allowed(meta["provider"], allowed_providers):
+                    continue
                 model_id = getattr(settings, meta["model_key"])
                 reason = (
                     f"FALLBACK Tier {desired}→Tier {candidate}: "
@@ -700,6 +992,13 @@ class LLMTieredRouter:
                     fallback_used=True,
                     original_tier=desired,
                 )
+
+        if allowed_providers:
+            raise RuntimeError(
+                "LLM_PROVIDER_BLOCKED_BY_POLICY | "
+                f"desired={int(desired)} | "
+                f"allowed_providers={sorted(allowed_providers)}"
+            )
 
         raise RuntimeError(
             f"LLMTieredRouter: No LLM provider keys configured or no available tier "
@@ -748,6 +1047,7 @@ class LLMTieredRouter:
         source_count: int,
         history: Optional[List[Dict[str, str]]] = None,
         requested_tier: Optional[int] = None,
+        allowed_providers: Optional[Set[str] | List[str] | Tuple[str, ...]] = None,
     ) -> Tuple[str, str]:
         """
         Full pipeline: classify → decide (with fallback) → invoke LLM.
@@ -772,7 +1072,9 @@ class LLMTieredRouter:
             context=context,
             source_count=source_count,
             requested_tier=requested_tier,
+            allowed_providers=allowed_providers,
         )
+        normalized_allowed = self._normalise_allowed_providers(allowed_providers)
         requested = self._normalise_requested_tier(requested_tier)
         if requested is not None and int(decision.tier) < int(requested):
             raise RuntimeError(
@@ -780,6 +1082,32 @@ class LLMTieredRouter:
                 f"requested_tier={int(requested)} | "
                 f"final_generation_tier={int(decision.tier)}"
             )
+        cooldown_remaining = self._provider_cooldown_remaining_s(decision.provider)
+        if cooldown_remaining > 0:
+            fallback = self._runtime_fallback_decision(
+                failed_decision=decision,
+                requested=requested,
+                query=query,
+                context=context,
+                source_count=source_count,
+                reason=f"cooldown_remaining_s={cooldown_remaining}",
+                allowed_providers=normalized_allowed,
+            )
+            if fallback is None:
+                raise RuntimeError(
+                    "LLM_PROVIDER_COOLDOWN_ACTIVE | "
+                    f"provider={decision.provider} | "
+                    f"remaining_s={cooldown_remaining}"
+                )
+            logger.warning(
+                "LLM_PROVIDER_COOLDOWN_FALLBACK | from=%s/%s | to=%s/%s | remaining_s=%d",
+                decision.provider,
+                decision.model_id,
+                fallback.provider,
+                fallback.model_id,
+                cooldown_remaining,
+            )
+            decision = fallback
 
         logger.info(
             "LLM call | tier=%d | model=%s | provider=%s | fallback=%s",
@@ -789,17 +1117,42 @@ class LLMTieredRouter:
             decision.fallback_used,
         )
 
-        fallback_suffix = "+fallback" if decision.fallback_used else ""
-
         if decision.tier == QueryTier.TIER4 and settings.llm_tier4_multi_agent_enabled:
             answer = await self._invoke_multi_agent(decision, query, context)
+            fallback_suffix = "+fallback" if decision.fallback_used else ""
             model_label = (
                 f"{decision.provider}/{decision.model_id}"
                 f"{fallback_suffix}+multi-agent"
             )
         else:
             messages = self._build_messages(query, context, history=history)
-            answer = await self._invoke(decision, messages)
+            try:
+                answer = await self._invoke(decision, messages)
+            except Exception as exc:
+                fallback: Optional[TierDecision] = None
+                if self._is_rate_limited_error(exc):
+                    fallback = self._runtime_fallback_decision(
+                        failed_decision=decision,
+                        requested=requested,
+                        query=query,
+                        context=context,
+                        source_count=source_count,
+                        reason=f"rate_limited={exc}",
+                        allowed_providers=normalized_allowed,
+                    )
+                if fallback is None:
+                    raise
+                logger.warning(
+                    "LLM_PROVIDER_RUNTIME_FALLBACK | from=%s/%s | to=%s/%s | reason=%s",
+                    decision.provider,
+                    decision.model_id,
+                    fallback.provider,
+                    fallback.model_id,
+                    exc,
+                )
+                decision = fallback
+                answer = await self._invoke(decision, messages)
+            fallback_suffix = "+fallback" if decision.fallback_used else ""
             model_label = f"{decision.provider}/{decision.model_id}{fallback_suffix}"
 
         return answer, model_label
@@ -826,13 +1179,7 @@ class LLMTieredRouter:
             reasoning_msgs = _build_reasoning_messages(messages)
             return await self._invoke_reasoning(decision, reasoning_msgs)
 
-        try:
-            _provider_max_retries = max(
-                0,
-                int(getattr(settings, "llm_provider_max_retries", 1) or 1),
-            )
-        except Exception:
-            _provider_max_retries = 1
+        _provider_max_retries = self._provider_retry_budget()
 
         try:
             if decision.provider == "google":
@@ -895,17 +1242,38 @@ class LLMTieredRouter:
             else:
                 raise RuntimeError(f"Unknown provider: {decision.provider!r}")
 
-            response = await llm.ainvoke(messages)
+            response = await self._await_with_hard_timeout(
+                provider=decision.provider,
+                awaitable=llm.ainvoke(messages),
+            )
             return str(response.content)
 
         except Exception as exc:
-            logger.error(
-                "LLM invocation failed | tier=%d | model=%s | error=%s",
-                decision.tier,
-                decision.model_id,
-                exc,
-                exc_info=True,
-            )
+            quota_exhausted = self._is_quota_exhausted_error(exc)
+            rate_limited = self._is_rate_limited_error(exc)
+            if quota_exhausted:
+                self._mark_provider_quota_exhausted(decision.provider, exc)
+            elif rate_limited:
+                self._mark_provider_transient_cooldown(
+                    decision.provider,
+                    reason=f"rate_limited:{exc}",
+                )
+            if quota_exhausted or rate_limited:
+                logger.warning(
+                    "LLM_PROVIDER_RATE_LIMITED | tier=%d | provider=%s | model=%s | error=%s",
+                    decision.tier,
+                    decision.provider,
+                    decision.model_id,
+                    exc,
+                )
+            else:
+                logger.error(
+                    "LLM invocation failed | tier=%d | model=%s | error=%s",
+                    decision.tier,
+                    decision.model_id,
+                    exc,
+                    exc_info=True,
+                )
             raise
 
     async def _invoke_reasoning(
@@ -935,13 +1303,7 @@ class LLMTieredRouter:
         try:
             from langchain_openai import ChatOpenAI
 
-            try:
-                _provider_max_retries = max(
-                    0,
-                    int(getattr(settings, "llm_provider_max_retries", 1) or 1),
-                )
-            except Exception:
-                _provider_max_retries = 1
+            _provider_max_retries = self._provider_retry_budget()
 
             model_kwargs: dict = {
                 "max_completion_tokens": settings.llm_max_response_tokens,
@@ -969,16 +1331,35 @@ class LLMTieredRouter:
                 sum(len(str(m.content)) for m in messages),
             )
 
-            response = await llm.ainvoke(messages)
+            response = await self._await_with_hard_timeout(
+                provider="openai",
+                awaitable=llm.ainvoke(messages),
+            )
             return str(response.content)
 
         except Exception as exc:
-            logger.error(
-                "Reasoning LLM invocation failed | model=%s | error=%s",
-                decision.model_id,
-                exc,
-                exc_info=True,
-            )
+            quota_exhausted = self._is_quota_exhausted_error(exc)
+            rate_limited = self._is_rate_limited_error(exc)
+            if quota_exhausted:
+                self._mark_provider_quota_exhausted("openai", exc)
+            elif rate_limited:
+                self._mark_provider_transient_cooldown(
+                    "openai",
+                    reason=f"rate_limited:{exc}",
+                )
+            if quota_exhausted or rate_limited:
+                logger.warning(
+                    "REASONING_LLM_RATE_LIMITED | model=%s | error=%s",
+                    decision.model_id,
+                    exc,
+                )
+            else:
+                logger.error(
+                    "Reasoning LLM invocation failed | model=%s | error=%s",
+                    decision.model_id,
+                    exc,
+                    exc_info=True,
+                )
             raise
 
 

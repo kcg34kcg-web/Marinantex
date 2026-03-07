@@ -24,6 +24,7 @@ from api.schemas import RAGQueryRequest
 from domain.entities.tenant import AccessLevel, Bureau, TenantContext
 from infrastructure.security.kvkk_redactor import KVKKRedactor, RedactionRecord
 from infrastructure.security.tenant_context import (
+    extract_access_level_from_headers,
     extract_bureau_id_from_headers,
     validate_bureau_id,
 )
@@ -249,6 +250,18 @@ class TestValidateBureauId:
         result = extract_bureau_id_from_headers({})
         assert result is None
 
+    def test_extract_access_level_from_explicit_header(self) -> None:
+        level = extract_access_level_from_headers({"X-Access-Level": "READ_ONLY"})
+        assert level == AccessLevel.READ_ONLY
+
+    def test_extract_access_level_maps_role_header(self) -> None:
+        level = extract_access_level_from_headers({"x-user-role": "lawyer"})
+        assert level == AccessLevel.OWNER
+
+    def test_extract_access_level_defaults_to_member_for_unknown_value(self) -> None:
+        level = extract_access_level_from_headers({"x-access-level": "unknown-role"})
+        assert level == AccessLevel.MEMBER
+
 
 # ============================================================================
 # D — TenantMiddleware HTTP enforcement
@@ -273,6 +286,7 @@ def _make_test_app() -> FastAPI:
         return {
             "bureau_id": tenant.bureau_id if tenant else None,
             "is_isolated": tenant.is_isolated if tenant else False,
+            "access_level": getattr(getattr(tenant, "access_level", None), "value", None),
         }
 
     @app.get("/health")
@@ -378,6 +392,23 @@ class TestTenantMiddleware:
             resp = client.get("/ping", headers={"x-bureau-id": _VALID_UUID4})
         assert resp.status_code == 200
         assert resp.json()["bureau_id"] == _VALID_UUID4
+
+    def test_access_level_header_is_applied(self) -> None:
+        app = _make_test_app()
+        with patch(_SETTINGS_PATH) as s:
+            s.multi_tenancy_enabled = True
+            s.is_production = False
+            s.tenant_enforce_in_dev = False
+            client = TestClient(app, raise_server_exceptions=False)
+            resp = client.get(
+                "/ping",
+                headers={
+                    "X-Bureau-ID": _VALID_UUID4,
+                    "X-Access-Level": "READ_ONLY",
+                },
+            )
+        assert resp.status_code == 200
+        assert resp.json()["access_level"] == "READ_ONLY"
 
 
 # ============================================================================

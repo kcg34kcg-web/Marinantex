@@ -6,6 +6,7 @@ import asyncio
 import logging
 import math
 import re
+import threading
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
@@ -59,6 +60,8 @@ class RagV3Reranker:
         self._model_name = settings.rag_v3_reranker_model
         self._enabled = bool(settings.rag_v3_reranker_enabled)
         self._init_done = False
+        self._init_inflight = False
+        self._init_lock = threading.Lock()
         self._cross_encoder: Optional[object] = None
 
     async def rerank(
@@ -72,8 +75,10 @@ class RagV3Reranker:
         if not self._enabled:
             return {item.chunk_id: _lexical_score(query, item.text) for item in candidates}
 
-        self._ensure_model()
         if self._cross_encoder is None:
+            # First load can be slow (model download). Start warmup in background
+            # and keep request path non-blocking to avoid timeout-based fallback.
+            self._kickoff_model_init()
             return {item.chunk_id: _lexical_score(query, item.text) for item in candidates}
 
         try:
@@ -85,11 +90,20 @@ class RagV3Reranker:
             )
             return {item.chunk_id: _lexical_score(query, item.text) for item in candidates}
 
-    def _ensure_model(self) -> None:
-        if self._init_done:
+    def _kickoff_model_init(self) -> None:
+        if self._init_done or self._init_inflight:
             return
-        self._init_done = True
+        with self._init_lock:
+            if self._init_done or self._init_inflight:
+                return
+            self._init_inflight = True
+        threading.Thread(target=self._ensure_model, name="rag-v3-reranker-init", daemon=True).start()
 
+    def _ensure_model(self) -> None:
+        with self._init_lock:
+            if self._init_done:
+                self._init_inflight = False
+                return
         try:
             from sentence_transformers import CrossEncoder  # type: ignore[import-untyped]
 
@@ -102,6 +116,10 @@ class RagV3Reranker:
                 self._model_name,
                 exc,
             )
+        finally:
+            with self._init_lock:
+                self._init_done = True
+                self._init_inflight = False
 
     def _predict_scores(
         self,
@@ -153,4 +171,3 @@ def _normalize_tokens(text: str) -> set[str]:
 
 
 rag_v3_reranker = RagV3Reranker()
-

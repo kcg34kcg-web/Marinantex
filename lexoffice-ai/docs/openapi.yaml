@@ -1,0 +1,165 @@
+openapi: 3.0.3
+info:
+  title: LexOffice AI API
+  version: 0.2.0
+  description: Multi-tenant hukuk ofisi çalışma platformu API sözleşmeleri.
+servers:
+  - url: http://localhost:3000/api/v1
+paths:
+  /auth/login:
+    post:
+      summary: Kullanıcı girişi
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+                tenantSlug: { type: string }
+      responses:
+        "200":
+          description: Login başarılı
+        "401":
+          description: Yetkisiz
+  /domains:
+    get:
+      summary: Tenant domain listesi
+      parameters:
+        - in: query
+          name: tenantId
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Başarılı }
+    post:
+      summary: Domain ekle
+      responses:
+        "200": { description: Domain eklendi }
+  /domains/{domainId}/verify:
+    post:
+      summary: Domain DNS doğrulaması
+      parameters:
+        - in: path
+          name: domainId
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Doğrulama sonucu }
+  /mailboxes:
+    get:
+      summary: Mailbox listesi
+      responses:
+        "200": { description: Başarılı }
+    post:
+      summary: Mailbox bağlama
+      responses:
+        "200": { description: Mailbox connected }
+  /integrations/mail/oauth/start:
+    get:
+      summary: Mail provider OAuth başlat
+      parameters:
+        - in: query
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: provider
+          required: true
+          schema:
+            type: string
+            enum: [GMAIL, MICROSOFT_365, YANDEX]
+        - in: query
+          name: emailHint
+          required: false
+          schema: { type: string, format: email }
+      responses:
+        "200": { description: OAuth authorize URL üretildi }
+  /integrations/mail/oauth/callback:
+    get:
+      summary: Mail OAuth callback
+      parameters:
+        - in: query
+          name: code
+          required: false
+          schema: { type: string }
+        - in: query
+          name: state
+          required: true
+          schema: { type: string }
+        - in: query
+          name: error
+          required: false
+          schema: { type: string }
+      responses:
+        "302":
+          description: Tenant ayarlar ekranına yönlendirme
+  /mail/threads:
+    get:
+      summary: Thread listesi
+      responses:
+        "200": { description: Başarılı }
+  /mail/threads/{threadId}:
+    get:
+      summary: Thread detay
+      parameters:
+        - in: path
+          name: threadId
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Başarılı }
+  /mail/threads/{threadId}/matter:
+    post:
+      summary: Thread'i matter ile ilişkilendir
+      parameters:
+        - in: path
+          name: threadId
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: İlişkilendirme başarılı }
+  /mail/sync/trigger:
+    post:
+      summary: Sync job kuyruğa al
+      responses:
+        "200": { description: Queue edildi }
+  /drafts:
+    post:
+      summary: Draft autosave
+      responses:
+        "200": { description: Kaydedildi }
+  /mail/send:
+    post:
+      summary: Mail gönder
+      responses:
+        "200": { description: Gönderildi }
+  /ai/mail-actions:
+    post:
+      summary: Mail AI aksiyonu çalıştır
+      responses:
+        "200": { description: Suggestion üretildi }
+  /ai/feedback:
+    post:
+      summary: AI suggestion feedback
+      responses:
+        "200": { description: Feedback kaydedildi }
+  /settings/tenant:
+    post:
+      summary: Tenant profil ayarlarını güncelle
+      responses:
+        "200": { description: Güncellendi }
+  /webhooks/mail/{provider}:
+    post:
+      summary: Provider webhook ingest ve incremental sync trigger
+      parameters:
+        - in: path
+          name: provider
+          required: true
+          schema:
+            type: string
+            enum: [GMAIL, MICROSOFT_365, YANDEX, IMAP_SMTP]
+      responses:
+        "200": { description: Webhook işlendi }

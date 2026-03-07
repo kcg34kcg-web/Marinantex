@@ -36,9 +36,13 @@ FAILURE POLICY:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import math
+import re
 import time
+from pathlib import Path
 from typing import List
 
 from fastapi import HTTPException, status
@@ -47,6 +51,7 @@ from openai import AsyncOpenAI, RateLimitError, APIError
 from infrastructure.config import settings
 
 logger = logging.getLogger("babylexit.embedder")
+_TOKEN_RE = re.compile(r"[A-Za-z0-9_\u00c0-\u024f]+")
 
 
 # ============================================================================
@@ -99,6 +104,102 @@ def assert_dimensions(vector: List[float], expected: int) -> None:
         )
 
 
+def _hash_embedding_fallback(text: str, dims: int) -> List[float]:
+    """
+    Deterministic local embedding used only when provider fail-open is active.
+
+    Keeps retrieval path operational under hard quota/cooldown events.
+    """
+    size = max(8, int(dims))
+    vector = [0.0] * size
+    tokens = _TOKEN_RE.findall((text or "").lower())
+    if not tokens:
+        vector[0] = 1.0
+        return vector
+    for token in tokens[:5000]:
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        idx = int.from_bytes(digest[0:4], "big") % size
+        sign = 1.0 if (digest[4] % 2 == 0) else -1.0
+        weight = 1.0 + (digest[5] / 255.0) * 0.25
+        vector[idx] += sign * weight
+    norm = math.sqrt(sum(v * v for v in vector))
+    if norm <= 1e-12:
+        vector[0] = 1.0
+        return vector
+    return [v / norm for v in vector]
+
+
+def _embedding_lock_file_candidates(lock_path: str) -> list[Path]:
+    raw = (lock_path or "").strip()
+    if not raw:
+        return []
+
+    path = Path(raw)
+    if path.is_absolute():
+        return [path]
+
+    here = Path(__file__).resolve()
+    backend_root = here.parents[2]
+    workspace_root = here.parents[3]
+    return [
+        Path.cwd() / path,
+        backend_root / path,
+        workspace_root / path,
+    ]
+
+
+def _read_locked_model_from_file(lock_path: str) -> tuple[str | None, str | None]:
+    for candidate in _embedding_lock_file_candidates(lock_path):
+        if not candidate.exists():
+            continue
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise EmbeddingError(
+                f"Embedding lock file okunamadi: {candidate}. reason={exc}"
+            ) from exc
+
+        if not isinstance(payload, dict):
+            raise EmbeddingError(f"Embedding lock file gecersiz formatta: {candidate}")
+
+        locked_model = str(
+            payload.get("locked_model")
+            or payload.get("winner_model")
+            or ""
+        ).strip()
+        if not locked_model:
+            raise EmbeddingError(
+                f"Embedding lock file `locked_model` alanini icermiyor: {candidate}"
+            )
+        return locked_model, str(candidate)
+    return None, None
+
+
+def _enforce_embedding_model_lock(selected_model: str) -> None:
+    if not bool(getattr(settings, "embedding_model_lock_enforced", False)):
+        return
+
+    lock_path = str(getattr(settings, "embedding_model_lock_file", "") or "").strip()
+    locked_model, resolved_path = _read_locked_model_from_file(lock_path)
+    if not locked_model:
+        raise EmbeddingError(
+            "Embedding model lock dosyasi bulunamadi. "
+            f"EMBEDDING_MODEL_LOCK_FILE={lock_path!r}"
+        )
+
+    if selected_model.strip() != locked_model:
+        raise EmbeddingError(
+            "Embedding model lock ihlali: "
+            f"configured={selected_model!r} locked={locked_model!r} file={resolved_path}"
+        )
+
+    logger.info(
+        "Embedding model lock aktif | model=%s | lock_file=%s",
+        selected_model,
+        resolved_path,
+    )
+
+
 # ============================================================================
 # QueryEmbedder
 # ============================================================================
@@ -139,11 +240,16 @@ class QueryEmbedder:
                 "Set EMBEDDING_BASE_URL (or OPENAI_BASE_URL) and credentials in backend/.env."
             )
 
-        client_kwargs: dict[str, str] = {"api_key": api_key or "local-not-required"}
+        client_kwargs: dict[str, object] = {
+            "api_key": api_key or "local-not-required",
+            # Let our own retry/cooldown policy control behavior deterministically.
+            "max_retries": 0,
+        }
         if base_url:
             client_kwargs["base_url"] = base_url
         self._client = AsyncOpenAI(**client_kwargs)
         self._model: str = settings.embedding_model
+        _enforce_embedding_model_lock(self._model)
         self._dimensions: int = settings.embedding_dimensions
         self._send_dimensions: bool = bool(getattr(settings, "embedding_send_dimensions_param", True))
         self._batch_size: int = settings.embedding_batch_size
@@ -153,6 +259,9 @@ class QueryEmbedder:
             max(0, getattr(settings, "embedding_quota_cooldown_s", 300) or 0)
         )
         self._quota_block_until_ts: float = 0.0
+        self._provider_fail_open_enabled: bool = bool(
+            getattr(settings, "embedding_fail_open_enabled", False)
+        )
 
         logger.info(
             "QueryEmbedder initialised | model=%s | dims=%d | send_dims=%s | batch=%d | retries=%d",
@@ -162,6 +271,9 @@ class QueryEmbedder:
             self._batch_size,
             self._max_retries,
         )
+
+    def _local_fallback_embeddings(self, texts: List[str]) -> List[List[float]]:
+        return [_hash_embedding_fallback(text, self._dimensions) for text in texts]
 
     async def embed_query(self, query: str) -> List[float]:
         """
@@ -294,6 +406,12 @@ class QueryEmbedder:
         now = time.time()
         if self._quota_block_until_ts > now:
             remaining = int(max(1, self._quota_block_until_ts - now))
+            if self._provider_fail_open_enabled:
+                logger.warning(
+                    "EMBED_COOLDOWN_FAIL_OPEN_LOCAL | remaining_s=%d",
+                    remaining,
+                )
+                return self._local_fallback_embeddings(texts)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={
@@ -325,6 +443,13 @@ class QueryEmbedder:
                 if self._is_hard_quota_exhausted(exc):
                     if self._quota_cooldown_s > 0:
                         self._quota_block_until_ts = time.time() + float(self._quota_cooldown_s)
+                    if self._provider_fail_open_enabled:
+                        logger.warning(
+                            "EMBED_QUOTA_FAIL_OPEN_LOCAL | cooldown_s=%d | err=%s",
+                            self._quota_cooldown_s,
+                            exc,
+                        )
+                        return self._local_fallback_embeddings(texts)
                     logger.error(
                         "EMBED_QUOTA_EXHAUSTED | cooldown_s=%d | err=%s",
                         self._quota_cooldown_s,

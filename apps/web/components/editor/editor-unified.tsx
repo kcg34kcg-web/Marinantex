@@ -29,13 +29,19 @@ import {
 } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { LAW_DATA } from "@/lib/laws";
+import {
+  copyInternalUdfFragment,
+  copyUyapCompatible,
+  pasteInternalUdfFragment,
+} from "../../lib/editor/clipboard";
+import { downloadUdfFromEditorJson, importUdfFile } from "../../lib/editor/udf";
 
 type Layout = "embedded" | "full";
 type DocStatus = "DRAFT" | "REVIEW" | "FINAL" | "ARCHIVED";
 type ExportStatus = "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED" | "EXPIRED";
 type SharePermission = "VIEW" | "COMMENT";
-type Tab = "search" | "library" | "exports" | "share" | "tools" | "outline";
 type SaveState = "idle" | "saving" | "saved" | "error" | "offline";
 type ToolbarMenu = "typography" | "color" | "table" | "insert" | null;
 
@@ -118,6 +124,21 @@ interface DynamicFieldDef {
   defaultValue?: string;
 }
 
+interface DocumentListItem {
+  id: string;
+  title: string;
+  status: DocStatus;
+  updatedAt: string;
+  source: "local" | "remote";
+}
+
+interface LocalDocumentRecord {
+  id: string;
+  title: string;
+  status?: DocStatus;
+  updatedAt?: string;
+}
+
 export interface EditorUnifiedProps {
   documentId?: string;
   layout?: Layout;
@@ -164,6 +185,64 @@ const LOCAL_DYNAMIC_FIELDS: DynamicFieldDef[] = [
   { fieldKey: "client_name", label: "Muvekkil Adi" },
   { fieldKey: "case_no", label: "Dosya No" },
 ];
+const QUICK_COLORS = [
+  "#000000", "#434343", "#666666", "#999999", "#CCCCCC",
+  "#C00000", "#E67E22", "#F1C40F", "#2E7D32", "#1ABC9C",
+  "#1976D2", "#283593", "#6A1B9A", "#AD1457", "#FFFFFF",
+];
+const LOCAL_DOCUMENT_INDEX_KEY = "editor-unified:document-index";
+
+function toSafeDate(input?: string): number {
+  if (!input) return 0;
+  const parsed = Date.parse(input);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function fallbackDocumentTitle(docId: string): string {
+  if (!docId || docId === DEFAULT_DOC_ID || docId === "new") return "Yeni Belge";
+  if (docId.startsWith("local-")) return `Yerel Belge ${docId.slice(6, 10)}`;
+  return `Belge ${docId.slice(0, 8)}`;
+}
+
+function deriveDocumentTitle(text: string, docId: string): string {
+  const firstLine = text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine || firstLine === "Belge metnini yazin...") return fallbackDocumentTitle(docId);
+  return firstLine.slice(0, 80);
+}
+
+function normalizePickerColor(color: string, fallback: string): string {
+  return /^#(?:[0-9a-fA-F]{3}){1,2}$/.test(color) ? color : fallback;
+}
+
+function readLocalDocumentIndex(): LocalDocumentRecord[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(LOCAL_DOCUMENT_INDEX_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as LocalDocumentRecord[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => ({
+        id: String(item.id || ""),
+        title: String(item.title || "").trim(),
+        status: item.status,
+        updatedAt: item.updatedAt,
+      }))
+      .filter((item) => item.id)
+      .map((item) => ({
+        id: item.id,
+        title: item.title || fallbackDocumentTitle(item.id),
+        status: item.status && ["DRAFT", "REVIEW", "FINAL", "ARCHIVED"].includes(item.status) ? item.status : "DRAFT",
+        updatedAt: item.updatedAt || new Date(0).toISOString(),
+      }))
+      .sort((a, b) => toSafeDate(b.updatedAt) - toSafeDate(a.updatedAt));
+  } catch {
+    return [];
+  }
+}
 
 function readApiCtx() {
   if (typeof window === "undefined") return null;
@@ -236,15 +315,6 @@ function mentionUi(editor: Editor, source: MentionItem[]): MentionUi | null {
     selected: 0,
     items,
   };
-}
-
-function formatSession(seconds: number): string {
-  const safe = Math.max(0, seconds);
-  const hour = Math.floor(safe / 3600);
-  const minute = Math.floor((safe % 3600) / 60);
-  const second = safe % 60;
-  if (hour > 0) return `${hour}s ${String(minute).padStart(2, "0")}d`;
-  return `${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
 }
 
 declare module "@tiptap/core" {
@@ -375,7 +445,7 @@ function Button({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "inline-flex h-9 items-center justify-center rounded-lg border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+        "inline-flex h-9 shrink-0 items-center justify-center rounded-lg border px-3 text-xs font-medium leading-none whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
         variantClass,
         disabled ? "cursor-not-allowed opacity-45" : "",
         className,
@@ -402,7 +472,6 @@ export default function EditorUnified({
   const [status, setStatus] = useState<DocStatus>("DRAFT");
   const [wordCount, setWordCount] = useState(0);
   const [message, setMessage] = useState("");
-  const [tab, setTab] = useState<Tab>("search");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [remoteMentionItems, setRemoteMentionItems] = useState<MentionItem[]>([]);
@@ -411,6 +480,9 @@ export default function EditorUnified({
   const [clauses, setClauses] = useState<ClauseItem[]>(LOCAL_CLAUSES);
   const [exports, setExports] = useState<ExportItem[]>([]);
   const [links, setLinks] = useState<ShareLinkItem[]>([]);
+  const [localDocuments, setLocalDocuments] = useState<DocumentListItem[]>([]);
+  const [remoteDocuments, setRemoteDocuments] = useState<DocumentListItem[]>([]);
+  const [creatingDocument, setCreatingDocument] = useState(false);
   const [newLink, setNewLink] = useState("");
   const [permission, setPermission] = useState<SharePermission>("VIEW");
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
@@ -419,16 +491,13 @@ export default function EditorUnified({
   const [mentionPreview, setMentionPreview] = useState<MentionPreview | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
-  const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
-  const [isOverflowMenuOpen, setIsOverflowMenuOpen] = useState(false);
   const [isFindBarOpen, setIsFindBarOpen] = useState(false);
   const [openToolbarMenu, setOpenToolbarMenu] = useState<ToolbarMenu>(null);
   const [hasWriteLease, setHasWriteLease] = useState(true);
   const [apiAvailable, setApiAvailable] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [wordGoal, setWordGoal] = useState(900);
-  const [sessionSeconds, setSessionSeconds] = useState(0);
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [findQuery, setFindQuery] = useState("");
   const [findMatches, setFindMatches] = useState<FindMatch[]>([]);
@@ -437,9 +506,9 @@ export default function EditorUnified({
   const autosaveRef = useRef<number | null>(null);
   const lockRefreshRef = useRef<number | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const udfInputRef = useRef<HTMLInputElement | null>(null);
   const findInputRef = useRef<HTMLInputElement | null>(null);
   const findQueryRef = useRef("");
-  const sessionStartedAtRef = useRef<number>(Date.now());
   const hydratedDraftRef = useRef(false);
   const lastToastRef = useRef<{ text: string; at: number } | null>(null);
   const mentionSource = useMemo(
@@ -453,13 +522,63 @@ export default function EditorUnified({
 
   const updateMention = useCallback((value: MentionUi | null) => { mentionRef.current = value; setMention(value); }, []);
 
-  const saveStateMeta = useMemo(() => {
-    if (saveState === "saving") return { label: "Kaydediliyor...", className: "text-amber-700" };
-    if (saveState === "saved") return { label: "Kaydedildi", className: "text-slate-500" };
-    if (saveState === "error") return { label: "! Kaydetme hatasi", className: "text-red-700" };
-    if (saveState === "offline") return { label: "Yerel taslak", className: "text-orange-700" };
-    return { label: "Hazir", className: "text-slate-500" };
-  }, [saveState]);
+  const syncLocalDocument = useCallback((next: {
+    id: string;
+    title?: string;
+    status?: DocStatus;
+    updatedAt?: string;
+  }) => {
+    if (typeof window === "undefined") return;
+    setLocalDocuments((prev) => {
+      const now = next.updatedAt || new Date().toISOString();
+      const index = prev.findIndex((item) => item.id === next.id);
+      const existing = index >= 0 ? prev[index] : null;
+      const merged: DocumentListItem = {
+        id: next.id,
+        title: (next.title || existing?.title || fallbackDocumentTitle(next.id)).trim(),
+        status: next.status || existing?.status || "DRAFT",
+        updatedAt: now,
+        source: "local",
+      };
+      const updated = index >= 0
+        ? prev.map((item, idx) => (idx === index ? merged : item))
+        : [...prev, merged];
+      updated.sort((a, b) => toSafeDate(b.updatedAt) - toSafeDate(a.updatedAt));
+      const trimmed = updated.slice(0, 60);
+      window.localStorage.setItem(
+        LOCAL_DOCUMENT_INDEX_KEY,
+        JSON.stringify(trimmed.map((item) => ({
+          id: item.id,
+          title: item.title,
+          status: item.status,
+          updatedAt: item.updatedAt,
+        }))),
+      );
+      return trimmed;
+    });
+  }, []);
+
+  const documentItems = useMemo(() => {
+    const merged = new Map<string, DocumentListItem>();
+    remoteDocuments.forEach((item) => {
+      merged.set(item.id, item);
+    });
+    localDocuments.forEach((item) => {
+      if (merged.has(item.id)) {
+        const existing = merged.get(item.id);
+        if (existing) {
+          merged.set(item.id, {
+            ...existing,
+            updatedAt: toSafeDate(item.updatedAt) > toSafeDate(existing.updatedAt) ? item.updatedAt : existing.updatedAt,
+            title: existing.title || item.title,
+          });
+        }
+      } else {
+        merged.set(item.id, item);
+      }
+    });
+    return Array.from(merged.values()).sort((a, b) => toSafeDate(b.updatedAt) - toSafeDate(a.updatedAt));
+  }, [localDocuments, remoteDocuments]);
 
   const collectOutlineItems = useCallback((instance: Editor): OutlineItem[] => {
     const next: OutlineItem[] = [];
@@ -506,21 +625,6 @@ export default function EditorUnified({
 
   useEffect(() => {
     if (layout !== "full" || typeof window === "undefined") return;
-    const key = `editor:right-panel-open:${docId}`;
-    const raw = window.sessionStorage.getItem(key);
-    if (raw === "1") {
-      setIsRightPanelOpen(true);
-    }
-  }, [docId, layout]);
-
-  useEffect(() => {
-    if (layout !== "full" || typeof window === "undefined") return;
-    const key = `editor:right-panel-open:${docId}`;
-    window.sessionStorage.setItem(key, isRightPanelOpen ? "1" : "0");
-  }, [docId, isRightPanelOpen, layout]);
-
-  useEffect(() => {
-    if (layout !== "full" || typeof window === "undefined") return;
     const goalKey = `editor:word-goal:${docId}`;
     const focusKey = `editor:focus-mode:${docId}`;
     const rawGoal = window.localStorage.getItem(goalKey);
@@ -544,34 +648,20 @@ export default function EditorUnified({
 
   useEffect(() => {
     if (!isFocusMode) return;
-    setIsRightPanelOpen(false);
-    setIsOverflowMenuOpen(false);
     setIsExportMenuOpen(false);
     setOpenToolbarMenu(null);
   }, [isFocusMode]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      const elapsed = Math.floor((Date.now() - sessionStartedAtRef.current) / 1000);
-      setSessionSeconds(elapsed);
-    }, 1_000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  useEffect(() => {
     const onMouseDown = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
       if (!target) return;
-      if (!target.closest("[data-export-menu]")) setIsExportMenuOpen(false);
-      if (!target.closest("[data-overflow-menu]")) setIsOverflowMenuOpen(false);
-      if (!target.closest("[data-toolbar-menu]")) setOpenToolbarMenu(null);
+      if (!target.closest("[data-export-menu]") && !target.closest("[data-export-floating]")) setIsExportMenuOpen(false);
+      if (!target.closest("[data-toolbar-menu]") && !target.closest("[data-toolbar-floating]")) setOpenToolbarMenu(null);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setIsExportMenuOpen(false);
-      setIsOverflowMenuOpen(false);
       setOpenToolbarMenu(null);
     };
     window.addEventListener("mousedown", onMouseDown);
@@ -610,6 +700,58 @@ export default function EditorUnified({
     };
   }, []);
 
+  const refreshDocumentList = useCallback(async () => {
+    const local = readLocalDocumentIndex().map((item) => ({
+      id: item.id,
+      title: item.title,
+      status: item.status || "DRAFT",
+      updatedAt: item.updatedAt || new Date(0).toISOString(),
+      source: "local" as const,
+    }));
+    setLocalDocuments(local);
+
+    if (!apiAvailable) {
+      setRemoteDocuments([]);
+      return;
+    }
+
+    const list = await apiRequest<Array<{
+      id: string;
+      title: string;
+      status: DocStatus;
+      updatedAt: string;
+    }>>("/documents?limit=40").catch(() => null);
+
+    if (!list) {
+      setRemoteDocuments([]);
+      return;
+    }
+
+    setRemoteDocuments(
+      list.map((item) => ({
+        id: item.id,
+        title: item.title || fallbackDocumentTitle(item.id),
+        status: item.status || "DRAFT",
+        updatedAt: item.updatedAt || new Date(0).toISOString(),
+        source: "remote" as const,
+      })),
+    );
+  }, [apiAvailable]);
+
+  useEffect(() => {
+    void refreshDocumentList();
+  }, [docId, refreshDocumentList]);
+
+  useEffect(() => {
+    if (localDocuments.some((item) => item.id === docId)) return;
+    syncLocalDocument({
+      id: docId,
+      title: fallbackDocumentTitle(docId),
+      status,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [docId, localDocuments, status, syncLocalDocument]);
+
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
@@ -637,7 +779,28 @@ export default function EditorUnified({
         return false;
       },
       handlePaste: (_view, event) => {
-        const items = Array.from(event.clipboardData?.items ?? []);
+        const clipboardData = event.clipboardData;
+        if (clipboardData && editor) {
+          const internalPaste = pasteInternalUdfFragment(editor, clipboardData);
+          if (internalPaste.handled) {
+            const modeLabel =
+              internalPaste.mode === "custom"
+                ? "UDF iç yapıştırma"
+                : internalPaste.mode === "html"
+                  ? "HTML fallback yapıştırma"
+                  : "text fallback yapıştırma";
+            const firstWarning = internalPaste.warnings[0];
+            setMessage(
+              firstWarning
+                ? `${modeLabel} uygulandi. ${firstWarning}`
+                : `${modeLabel} uygulandi.`,
+            );
+            event.preventDefault();
+            return true;
+          }
+        }
+
+        const items = Array.from(clipboardData?.items ?? []);
         const imageItem = items.find((item) => item.type.startsWith("image/"));
         if (!imageItem) return false;
         const file = imageItem.getAsFile();
@@ -780,11 +943,13 @@ export default function EditorUnified({
         if (autosaveRef.current) window.clearTimeout(autosaveRef.current);
         autosaveRef.current = window.setTimeout(async () => {
           setSaveState("saving");
+          const nowIso = new Date().toISOString();
           const canonical = {
             type: "tiptap_doc",
             schemaVersion: 1,
             content: editor.getJSON() as Record<string, unknown>,
           };
+          const currentTitle = deriveDocumentTitle(editor.getText(), docId);
           const saved = await apiRequest(`/documents/${docId}/autosave`, {
             method: "POST",
             body: JSON.stringify({
@@ -796,12 +961,24 @@ export default function EditorUnified({
           if (saved) {
             window.localStorage.removeItem(draftKey);
             setSaveState("saved");
+            syncLocalDocument({
+              id: docId,
+              title: currentTitle,
+              status,
+              updatedAt: nowIso,
+            });
           } else {
             window.localStorage.setItem(
               draftKey,
-              JSON.stringify({ canonical, updatedAt: new Date().toISOString() }),
+              JSON.stringify({ canonical, updatedAt: nowIso }),
             );
             setSaveState(apiAvailable ? "error" : "offline");
+            syncLocalDocument({
+              id: docId,
+              title: currentTitle,
+              status,
+              updatedAt: nowIso,
+            });
           }
         }, 1200);
       }
@@ -828,7 +1005,7 @@ export default function EditorUnified({
       editor.off("update", handleUpdate);
       editor.off("selectionUpdate", handleSelectionUpdate);
     };
-  }, [apiAvailable, collectFindMatches, collectOutlineItems, docId, draftKey, editor, mentionSource, mode, onChange, readOnly, status, updateMention]);
+  }, [apiAvailable, collectFindMatches, collectOutlineItems, docId, draftKey, editor, mentionSource, mode, onChange, readOnly, status, syncLocalDocument, updateMention]);
 
   useEffect(() => {
     if (!editor) return;
@@ -1158,10 +1335,83 @@ export default function EditorUnified({
     window.location.assign(`/editor/${next.id}`);
   }, [apiAvailable, docId]);
 
+  const openDocumentFromList = useCallback((nextDocId: string) => {
+    if (!nextDocId || nextDocId === docId) return;
+    window.location.assign(`/editor/${nextDocId}`);
+  }, [docId]);
+
+  const createNewDocument = useCallback(async () => {
+    if (creatingDocument) return;
+    setCreatingDocument(true);
+    const nowIso = new Date().toISOString();
+    const title = `Belge ${new Date().toLocaleDateString("tr-TR")} ${new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}`;
+
+    try {
+      if (apiAvailable) {
+        const created = await apiRequest<{ id?: string; title?: string; status?: DocStatus; updatedAt?: string }>("/documents", {
+          method: "POST",
+          body: JSON.stringify({
+            title,
+            type: "PETITION",
+            schemaVersion: 1,
+            canonicalJson: {
+              type: "tiptap_doc",
+              schemaVersion: 1,
+              content: INITIAL_CONTENT,
+            },
+          }),
+        }).catch(() => null);
+
+        if (!created?.id) {
+          setMessage("Yeni belge olusturulamadi.");
+          return;
+        }
+
+        syncLocalDocument({
+          id: created.id,
+          title: created.title || title,
+          status: created.status || "DRAFT",
+          updatedAt: created.updatedAt || nowIso,
+        });
+        void refreshDocumentList();
+        window.location.assign(`/editor/${created.id}`);
+        return;
+      }
+
+      const localId = `local-${Date.now().toString(36)}`;
+      const localDraftKey = `editor-unified:draft:${localId}`;
+      window.localStorage.setItem(
+        localDraftKey,
+        JSON.stringify({
+          canonical: {
+            type: "tiptap_doc",
+            schemaVersion: 1,
+            content: INITIAL_CONTENT,
+          },
+          updatedAt: nowIso,
+        }),
+      );
+      syncLocalDocument({
+        id: localId,
+        title,
+        status: "DRAFT",
+        updatedAt: nowIso,
+      });
+      window.location.assign(`/editor/${localId}`);
+    } finally {
+      setCreatingDocument(false);
+    }
+  }, [apiAvailable, creatingDocument, refreshDocumentList, syncLocalDocument]);
+
   const updateDocumentStatus = useCallback(
     async (nextStatus: DocStatus) => {
       if (!apiAvailable) {
         setStatus(nextStatus);
+        syncLocalDocument({
+          id: docId,
+          status: nextStatus,
+          updatedAt: new Date().toISOString(),
+        });
         if (nextStatus === "FINAL" || nextStatus === "ARCHIVED") {
           setMode("preview");
         }
@@ -1177,13 +1427,23 @@ export default function EditorUnified({
         return;
       }
       setStatus(updated.status);
+      syncLocalDocument({
+        id: docId,
+        status: updated.status,
+        updatedAt: new Date().toISOString(),
+      });
     },
-    [apiAvailable, docId],
+    [apiAvailable, docId, syncLocalDocument],
   );
 
   const finalizeDocument = useCallback(async () => {
     if (!apiAvailable) {
       setStatus("FINAL");
+      syncLocalDocument({
+        id: docId,
+        status: "FINAL",
+        updatedAt: new Date().toISOString(),
+      });
       setMode("preview");
       setMessage("Yerel modda finalize simulasyonu yapildi.");
       return;
@@ -1197,7 +1457,12 @@ export default function EditorUnified({
       return;
     }
     setStatus(finalized.status);
-  }, [apiAvailable, docId]);
+    syncLocalDocument({
+      id: docId,
+      status: finalized.status,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [apiAvailable, docId, syncLocalDocument]);
 
   const insertMentionText = useCallback(() => {
     if (!editor || !mentionPreview) return;
@@ -1215,48 +1480,93 @@ export default function EditorUnified({
     setMentionPreview(null);
   }, [editor, mentionPreview, mentionSource]);
 
-  const copyTextValue = useCallback(async (value: string, okMessage = "Panoya kopyalandi.") => {
-    if (!value.trim()) return;
-    if (!navigator.clipboard) {
-      setMessage("Pano API desteklenmiyor.");
+  const copyInternalUdf = useCallback(async () => {
+    if (!editor) return;
+    const result = await copyInternalUdfFragment(editor);
+    const warning = result.warnings[0];
+    if (!result.ok) {
+      setMessage(warning ? `UDF iç kopyala başarısız. ${warning}` : "UDF iç kopyala başarısız.");
       return;
     }
-    try {
-      await navigator.clipboard.writeText(value);
-      setMessage(okMessage);
-    } catch {
-      setMessage("Kopyalama basarisiz. Tarayici izinlerini kontrol edin.");
+    if (result.mode === "rich") {
+      setMessage(warning ? `UDF iç kopyala tamamlandı. ${warning}` : "UDF iç kopyala tamamlandı.");
+      return;
     }
-  }, []);
+    if (result.mode === "html") {
+      setMessage(warning ? `UDF iç kopyala HTML fallback ile tamamlandı. ${warning}` : "UDF iç kopyala HTML fallback ile tamamlandı.");
+      return;
+    }
+    setMessage(warning ? `UDF iç kopyala text fallback ile tamamlandı. ${warning}` : "UDF iç kopyala text fallback ile tamamlandı.");
+  }, [editor]);
 
   const copyForUyap = useCallback(async () => {
     if (!editor) return;
-    const html = editor.getHTML();
-    const text = editor.getText();
-    if (!navigator.clipboard) {
-      setMessage("Pano API desteklenmiyor.");
+    const result = await copyUyapCompatible(editor);
+    const warning = result.warnings[0];
+    if (!result.ok) {
+      setMessage(warning ? `UYAP uyumlu kopyalama başarısız. ${warning}` : "UYAP uyumlu kopyalama başarısız.");
       return;
     }
-    if ("ClipboardItem" in window) {
-      try {
-        const item = new ClipboardItem({
-          "text/plain": new Blob([text], { type: "text/plain" }),
-          "text/html": new Blob([html], { type: "text/html" }),
-        });
-        await navigator.clipboard.write([item]);
-        setMessage("UYAP uyumlu kopyalandi.");
-        return;
-      } catch {
-        // fallback below
-      }
+    if (result.mode === "html") {
+      setMessage(warning ? `UYAP uyumlu kopyala tamamlandı. ${warning}` : "UYAP uyumlu kopyala tamamlandı.");
+      return;
     }
-    try {
-      await navigator.clipboard.writeText(text);
-      setMessage("Metin kopyalandi.");
-    } catch {
-      setMessage("Kopyalama basarisiz. Tarayici izinlerini kontrol edin.");
-    }
+    setMessage(warning ? `UYAP uyumlu kopyala text fallback ile tamamlandı. ${warning}` : "UYAP uyumlu kopyala text fallback ile tamamlandı.");
   }, [editor]);
+
+  const downloadUdf = useCallback(() => {
+    if (!editor) return;
+    try {
+      const result = downloadUdfFromEditorJson(editor.getJSON() as JSONContent, {
+        documentId: docId,
+        fileBaseName: `belge-${docId}`,
+      });
+      const validationErrorCount = result.validation.issues.filter(
+        (item) => item.severity === "error",
+      ).length;
+      if (validationErrorCount > 0) {
+        setMessage(
+          `UDF indirildi fakat ${validationErrorCount} doğrulama hatası bulundu. Arşivi hedef ortamda kontrol edin.`,
+        );
+      } else if (result.warnings.length) {
+        setMessage(`UDF indirildi (best effort). ${result.warnings.length} uyarı var.`);
+      } else {
+        setMessage("UDF indirildi.");
+      }
+    } catch {
+      setMessage("UDF dosyası oluşturulamadı.");
+    }
+  }, [docId, editor]);
+
+  const importUdf = useCallback(
+    async (file: File) => {
+      if (!editor) return;
+
+      try {
+        const imported = await importUdfFile(file);
+        editor.commands.setContent(imported.editorJson);
+
+        if (imported.parserWarnings.length) {
+          setMessage(
+            `UDF yüklendi fakat ${imported.parserWarnings.length} parser uyarısı var.`,
+          );
+          return;
+        }
+
+        if (imported.docModel.warnings.length) {
+          setMessage(
+            `UDF yüklendi (best effort). ${imported.docModel.warnings.length} model uyarısı var.`,
+          );
+          return;
+        }
+
+        setMessage("UDF başarıyla yüklendi.");
+      } catch {
+        setMessage("UDF dosyası yüklenemedi.");
+      }
+    },
+    [editor],
+  );
 
   const exportWordLocal = useCallback(() => {
     if (!editor) return;
@@ -1274,6 +1584,8 @@ export default function EditorUnified({
 
   const saveCurrentDocument = useCallback(async () => {
     if (!editor) return;
+    const nowIso = new Date().toISOString();
+    const currentTitle = deriveDocumentTitle(editor.getText(), docId);
     const canonical = {
       type: "tiptap_doc",
       schemaVersion: 1,
@@ -1292,6 +1604,12 @@ export default function EditorUnified({
       if (saved) {
         window.localStorage.removeItem(draftKey);
         setSaveState("saved");
+        syncLocalDocument({
+          id: docId,
+          title: currentTitle,
+          status,
+          updatedAt: nowIso,
+        });
         setMessage("Belge sunucuya kaydedildi.");
         return;
       }
@@ -1299,11 +1617,17 @@ export default function EditorUnified({
     }
     window.localStorage.setItem(
       draftKey,
-      JSON.stringify({ canonical, updatedAt: new Date().toISOString() }),
+      JSON.stringify({ canonical, updatedAt: nowIso }),
     );
     setSaveState("offline");
+    syncLocalDocument({
+      id: docId,
+      title: currentTitle,
+      status,
+      updatedAt: nowIso,
+    });
     setMessage("Taslak yerel olarak kaydedildi.");
-  }, [apiAvailable, docId, draftKey, editor, status]);
+  }, [apiAvailable, docId, draftKey, editor, status, syncLocalDocument]);
 
   useEffect(() => {
     const handleShortcuts = (event: KeyboardEvent) => {
@@ -1349,12 +1673,22 @@ export default function EditorUnified({
         document.execCommand("cut");
         return;
       }
-      if (!event.shiftKey && key === "c") {
+      if (event.altKey && key === "c") {
+        event.preventDefault();
+        void copyInternalUdf();
+        return;
+      }
+      if (event.altKey && key === "u") {
+        event.preventDefault();
+        void copyForUyap();
+        return;
+      }
+      if (!event.shiftKey && !event.altKey && key === "c") {
         event.preventDefault();
         document.execCommand("copy");
         return;
       }
-      if (!event.shiftKey && key === "v") {
+      if (!event.shiftKey && !event.altKey && key === "v") {
         // Native paste behavior is preserved intentionally.
         return;
       }
@@ -1397,7 +1731,7 @@ export default function EditorUnified({
     return () => {
       window.removeEventListener("keydown", handleShortcuts);
     };
-  }, [editor, saveCurrentDocument]);
+  }, [copyForUyap, copyInternalUdf, editor, saveCurrentDocument]);
 
   const insertPageBreak = useCallback(() => {
     if (!editor) return;
@@ -1476,35 +1810,116 @@ export default function EditorUnified({
     (layout === "full" && !hasWriteLease);
   useEffect(() => { editor?.setEditable(!editorReadOnly); }, [editor, editorReadOnly]);
 
-  const shortDocId = docId.length > 14 ? `${docId.slice(0, 14)}...` : docId;
   const canEnterEdit = status !== "FINAL" && status !== "ARCHIVED" && hasWriteLease;
   const readingMinutes = Math.max(1, Math.ceil(wordCount / 220));
-  const sessionLabel = formatSession(sessionSeconds);
   const wordGoalProgress = wordGoal > 0 ? Math.min(100, Math.round((wordCount / wordGoal) * 100)) : 0;
   const findProgressLabel = findMatches.length && activeFindMatch >= 0 ? `${activeFindMatch + 1}/${findMatches.length}` : `0/${findMatches.length}`;
   const toolbarMenuTriggerClass =
-    "inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2";
+    "inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-3 text-xs font-medium leading-none whitespace-nowrap text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2";
   const toolbarMenuPanelClass =
-    "absolute left-0 top-[calc(100%+8px)] z-40 w-[290px] rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.16)]";
-  const panelTabs: Array<{ key: Tab; label: string }> = [
-    { key: "search", label: "Ara" },
-    { key: "library", label: "Lib" },
-    { key: "outline", label: "Plan" },
-    { key: "exports", label: "Exp" },
-    { key: "share", label: "Share" },
-    { key: "tools", label: "Tools" },
-  ];
+    "fixed right-3 top-24 hidden w-[330px] rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.16)] md:block";
+  const toolbarMenuPanelStyle = {
+    zIndex: 320,
+    top: 96,
+    right: 12,
+  } as const;
+  const selectedTextColor = normalizePickerColor(String(editor?.getAttributes("textStyle").color || "").trim(), "#000000");
+  const selectedHighlightColor = normalizePickerColor(String(editor?.getAttributes("highlight").color || "").trim(), "#F1C40F");
 
-  const openPanelWithTab = useCallback((nextTab: Tab) => {
-    if (isFocusMode) setIsFocusMode(false);
-    setTab(nextTab);
-    setIsRightPanelOpen(true);
-  }, [isFocusMode]);
+  const colorMenuContent = (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Yazi Rengi</p>
+          <button
+            type="button"
+            className="text-[11px] font-medium text-slate-500 hover:text-slate-700"
+            onClick={() => editor?.chain().focus().unsetColor().run()}
+            disabled={editorReadOnly}
+          >
+            Otomatik
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {QUICK_COLORS.map((color) => {
+            const active = color.toUpperCase() === selectedTextColor.toUpperCase();
+            return (
+              <button
+                key={`text-${color}`}
+                type="button"
+                disabled={editorReadOnly}
+                onClick={() => editor?.chain().focus().setColor(color).run()}
+                className={cn(
+                  "h-6 w-6 rounded-full border-2 transition-transform hover:scale-105",
+                  active ? "border-slate-900 ring-2 ring-blue-200" : "border-white shadow-sm",
+                )}
+                style={{ backgroundColor: color }}
+                aria-label={`Yazi rengi ${color}`}
+                title={color}
+              />
+            );
+          })}
+        </div>
+        <label className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-700">
+          Sonsuz Renk
+          <input
+            type="color"
+            value={selectedTextColor}
+            disabled={editorReadOnly}
+            onChange={(event) => editor?.chain().focus().setColor(event.target.value).run()}
+          />
+        </label>
+      </div>
+
+      <div className="space-y-2 border-t border-slate-100 pt-2">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Vurgu Rengi</p>
+          <button
+            type="button"
+            className="text-[11px] font-medium text-slate-500 hover:text-slate-700"
+            onClick={() => editor?.chain().focus().unsetHighlight().run()}
+            disabled={editorReadOnly}
+          >
+            Otomatik
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {QUICK_COLORS.map((color) => {
+            const active = color.toUpperCase() === selectedHighlightColor.toUpperCase();
+            return (
+              <button
+                key={`highlight-${color}`}
+                type="button"
+                disabled={editorReadOnly}
+                onClick={() => editor?.chain().focus().setHighlight({ color }).run()}
+                className={cn(
+                  "h-6 w-6 rounded-full border-2 transition-transform hover:scale-105",
+                  active ? "border-slate-900 ring-2 ring-blue-200" : "border-white shadow-sm",
+                )}
+                style={{ backgroundColor: color }}
+                aria-label={`Vurgu rengi ${color}`}
+                title={color}
+              />
+            );
+          })}
+        </div>
+        <label className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-700">
+          Sonsuz Renk
+          <input
+            type="color"
+            value={selectedHighlightColor}
+            disabled={editorReadOnly}
+            onChange={(event) => editor?.chain().focus().setHighlight({ color: event.target.value }).run()}
+          />
+        </label>
+      </div>
+    </div>
+  );
 
   const canvas = (
     <div
       className={cn(
-        "mx-auto w-full max-w-[900px] rounded-[20px] border border-slate-200/80 bg-white/95 shadow-[0_18px_40px_rgba(15,23,42,0.08)]",
+        "relative z-0 mx-auto w-full max-w-[900px] rounded-[20px] border border-slate-200/80 bg-white/95 shadow-[0_18px_40px_rgba(15,23,42,0.08)]",
         isFocusMode ? "max-w-[820px] border-slate-200 shadow-[0_20px_42px_rgba(15,23,42,0.12)]" : "",
       )}
     >
@@ -1527,9 +1942,12 @@ export default function EditorUnified({
   );
 
   const toolbar = (
-    <div className={cn("sticky z-20 border-b border-slate-200/70 bg-white/90 backdrop-blur", isFocusMode ? "top-0" : "top-16")}>
+    <div
+      className="sticky top-0 border-b border-slate-200/70 bg-white/90 backdrop-blur"
+      style={{ zIndex: 210 }}
+    >
       <div className="mx-auto flex max-w-[1280px] flex-wrap items-center gap-2 px-2 py-2 md:px-6">
-        <div className="hidden min-w-0 items-center gap-2 md:flex">
+        <div className="hidden min-w-0 flex-1 flex-wrap items-center gap-2 pb-1 pr-1 md:flex">
           <Button label="Undo" onClick={() => editor?.chain().focus().undo().run()} disabled={editorReadOnly} className="h-8 px-2.5" />
           <Button label="Redo" onClick={() => editor?.chain().focus().redo().run()} disabled={editorReadOnly} className="h-8 px-2.5" />
           <span className="h-5 w-px bg-slate-200" />
@@ -1571,52 +1989,57 @@ export default function EditorUnified({
               Tipografi
             </button>
             {openToolbarMenu === "typography" ? (
-              <div className={toolbarMenuPanelClass}>
-                <div className="space-y-2">
-                  <select
-                    className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
-                    defaultValue="'Times New Roman',serif"
-                    disabled={editorReadOnly}
-                    onChange={(event) => editor?.chain().focus().setFontFamily(event.target.value).run()}
-                  >
-                    <option value="'Times New Roman',serif">Times New Roman</option>
-                    <option value="Arial,Helvetica,sans-serif">Arial</option>
-                    <option value="Calibri,'Segoe UI',sans-serif">Calibri</option>
-                    <option value="Georgia,serif">Georgia</option>
-                  </select>
-                  <select
-                    className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
-                    defaultValue="16px"
-                    disabled={editorReadOnly}
-                    onChange={(event) => editor?.chain().focus().setMark("textStyle", { fontSize: event.target.value }).run()}
-                  >
-                    <option value="10px">10px</option>
-                    <option value="11px">11px</option>
-                    <option value="12px">12px</option>
-                    <option value="14px">14px</option>
-                    <option value="16px">16px</option>
-                    <option value="18px">18px</option>
-                    <option value="20px">20px</option>
-                    <option value="24px">24px</option>
-                  </select>
-                  <div className="grid grid-cols-4 gap-2">
-                    <Button label="Sola" onClick={() => editor?.chain().focus().setTextAlign("left").run()} active={Boolean(editor?.isActive({ textAlign: "left" }))} disabled={editorReadOnly} className="h-8 px-1.5" />
-                    <Button label="Ortala" onClick={() => editor?.chain().focus().setTextAlign("center").run()} active={Boolean(editor?.isActive({ textAlign: "center" }))} disabled={editorReadOnly} className="h-8 px-1.5" />
-                    <Button label="Saga" onClick={() => editor?.chain().focus().setTextAlign("right").run()} active={Boolean(editor?.isActive({ textAlign: "right" }))} disabled={editorReadOnly} className="h-8 px-1.5" />
-                    <Button label="Yasla" onClick={() => editor?.chain().focus().setTextAlign("justify").run()} active={Boolean(editor?.isActive({ textAlign: "justify" }))} disabled={editorReadOnly} className="h-8 px-1.5" />
-                  </div>
-                  <div className="grid grid-cols-4 gap-2">
-                    <Button label="S" onClick={() => editor?.chain().focus().toggleStrike().run()} active={Boolean(editor?.isActive("strike"))} disabled={editorReadOnly} className="h-8 px-2" />
-                    <Button label="Sub" onClick={() => editor?.chain().focus().toggleSubscript().run()} active={Boolean(editor?.isActive("subscript"))} disabled={editorReadOnly} className="h-8 px-2" />
-                    <Button label="Sup" onClick={() => editor?.chain().focus().toggleSuperscript().run()} active={Boolean(editor?.isActive("superscript"))} disabled={editorReadOnly} className="h-8 px-2" />
-                    <Button label="Task" onClick={() => editor?.chain().focus().toggleTaskList().run()} active={Boolean(editor?.isActive("taskList"))} disabled={editorReadOnly} className="h-8 px-2" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button label="Link Sil" onClick={() => editor?.chain().focus().unsetLink().run()} disabled={editorReadOnly} className="h-8 px-2" />
-                    <Button label="Temizle" onClick={() => editor?.chain().focus().clearNodes().unsetAllMarks().run()} disabled={editorReadOnly} className="h-8 px-2" />
-                  </div>
-                </div>
-              </div>
+              typeof document !== "undefined"
+                ? createPortal(
+                    <div data-toolbar-floating className={toolbarMenuPanelClass} style={{ ...toolbarMenuPanelStyle, zIndex: 9999 }}>
+                      <div className="space-y-2">
+                        <select
+                          className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
+                          defaultValue="'Times New Roman',serif"
+                          disabled={editorReadOnly}
+                          onChange={(event) => editor?.chain().focus().setFontFamily(event.target.value).run()}
+                        >
+                          <option value="'Times New Roman',serif">Times New Roman</option>
+                          <option value="Arial,Helvetica,sans-serif">Arial</option>
+                          <option value="Calibri,'Segoe UI',sans-serif">Calibri</option>
+                          <option value="Georgia,serif">Georgia</option>
+                        </select>
+                        <select
+                          className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
+                          defaultValue="16px"
+                          disabled={editorReadOnly}
+                          onChange={(event) => editor?.chain().focus().setMark("textStyle", { fontSize: event.target.value }).run()}
+                        >
+                          <option value="10px">10px</option>
+                          <option value="11px">11px</option>
+                          <option value="12px">12px</option>
+                          <option value="14px">14px</option>
+                          <option value="16px">16px</option>
+                          <option value="18px">18px</option>
+                          <option value="20px">20px</option>
+                          <option value="24px">24px</option>
+                        </select>
+                        <div className="grid grid-cols-4 gap-2">
+                          <Button label="Sola" onClick={() => editor?.chain().focus().setTextAlign("left").run()} active={Boolean(editor?.isActive({ textAlign: "left" }))} disabled={editorReadOnly} className="h-8 px-1.5" />
+                          <Button label="Ortala" onClick={() => editor?.chain().focus().setTextAlign("center").run()} active={Boolean(editor?.isActive({ textAlign: "center" }))} disabled={editorReadOnly} className="h-8 px-1.5" />
+                          <Button label="Saga" onClick={() => editor?.chain().focus().setTextAlign("right").run()} active={Boolean(editor?.isActive({ textAlign: "right" }))} disabled={editorReadOnly} className="h-8 px-1.5" />
+                          <Button label="Yasla" onClick={() => editor?.chain().focus().setTextAlign("justify").run()} active={Boolean(editor?.isActive({ textAlign: "justify" }))} disabled={editorReadOnly} className="h-8 px-1.5" />
+                        </div>
+                        <div className="grid grid-cols-4 gap-2">
+                          <Button label="S" onClick={() => editor?.chain().focus().toggleStrike().run()} active={Boolean(editor?.isActive("strike"))} disabled={editorReadOnly} className="h-8 px-2" />
+                          <Button label="Sub" onClick={() => editor?.chain().focus().toggleSubscript().run()} active={Boolean(editor?.isActive("subscript"))} disabled={editorReadOnly} className="h-8 px-2" />
+                          <Button label="Sup" onClick={() => editor?.chain().focus().toggleSuperscript().run()} active={Boolean(editor?.isActive("superscript"))} disabled={editorReadOnly} className="h-8 px-2" />
+                          <Button label="Task" onClick={() => editor?.chain().focus().toggleTaskList().run()} active={Boolean(editor?.isActive("taskList"))} disabled={editorReadOnly} className="h-8 px-2" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button label="Link Sil" onClick={() => editor?.chain().focus().unsetLink().run()} disabled={editorReadOnly} className="h-8 px-2" />
+                          <Button label="Temizle" onClick={() => editor?.chain().focus().clearNodes().unsetAllMarks().run()} disabled={editorReadOnly} className="h-8 px-2" />
+                        </div>
+                      </div>
+                    </div>,
+                    document.body,
+                  )
+                : null
             ) : null}
           </div>
 
@@ -1629,30 +2052,14 @@ export default function EditorUnified({
               Renk
             </button>
             {openToolbarMenu === "color" ? (
-              <div className={toolbarMenuPanelClass}>
-                <div className="space-y-2">
-                  <label className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-700">
-                    Yazi
-                    <input
-                      type="color"
-                      disabled={editorReadOnly}
-                      onChange={(event) => editor?.chain().focus().setColor(event.target.value).run()}
-                    />
-                  </label>
-                  <label className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-700">
-                    Vurgu
-                    <input
-                      type="color"
-                      disabled={editorReadOnly}
-                      onChange={(event) => editor?.chain().focus().setHighlight({ color: event.target.value }).run()}
-                    />
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button label="Renk Sifirla" onClick={() => editor?.chain().focus().unsetColor().run()} disabled={editorReadOnly} className="h-8 px-2" />
-                    <Button label="Vurgu Sil" onClick={() => editor?.chain().focus().unsetHighlight().run()} disabled={editorReadOnly} className="h-8 px-2" />
-                  </div>
-                </div>
-              </div>
+              typeof document !== "undefined"
+                ? createPortal(
+                    <div data-toolbar-floating className={toolbarMenuPanelClass} style={{ ...toolbarMenuPanelStyle, zIndex: 9999 }}>
+                      {colorMenuContent}
+                    </div>,
+                    document.body,
+                  )
+                : null
             ) : null}
           </div>
 
@@ -1665,18 +2072,23 @@ export default function EditorUnified({
               Tablo
             </button>
             {openToolbarMenu === "table" ? (
-              <div className={toolbarMenuPanelClass}>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button label="Tablo +" onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="Tablo Sil" onClick={() => editor?.chain().focus().deleteTable().run()} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="Satir +" onClick={() => editor?.chain().focus().addRowAfter().run()} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="Satir -" onClick={() => editor?.chain().focus().deleteRow().run()} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="Sutun +" onClick={() => editor?.chain().focus().addColumnAfter().run()} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="Sutun -" onClick={() => editor?.chain().focus().deleteColumn().run()} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="Birlestir" onClick={() => editor?.chain().focus().mergeCells().run()} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="Ayir" onClick={() => editor?.chain().focus().splitCell().run()} disabled={editorReadOnly} className="h-8 px-2" />
-                </div>
-              </div>
+              typeof document !== "undefined"
+                ? createPortal(
+                    <div data-toolbar-floating className={toolbarMenuPanelClass} style={{ ...toolbarMenuPanelStyle, zIndex: 9999 }}>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button label="Tablo +" onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Tablo Sil" onClick={() => editor?.chain().focus().deleteTable().run()} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Satir +" onClick={() => editor?.chain().focus().addRowAfter().run()} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Satir -" onClick={() => editor?.chain().focus().deleteRow().run()} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Sutun +" onClick={() => editor?.chain().focus().addColumnAfter().run()} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Sutun -" onClick={() => editor?.chain().focus().deleteColumn().run()} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Birlestir" onClick={() => editor?.chain().focus().mergeCells().run()} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Ayir" onClick={() => editor?.chain().focus().splitCell().run()} disabled={editorReadOnly} className="h-8 px-2" />
+                      </div>
+                    </div>,
+                    document.body,
+                  )
+                : null
             ) : null}
           </div>
 
@@ -1689,20 +2101,28 @@ export default function EditorUnified({
               Ekle
             </button>
             {openToolbarMenu === "insert" ? (
-              <div className={toolbarMenuPanelClass}>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button label="Gorsel URL" onClick={() => { const src = window.prompt("Gorsel URL", "https://"); if (src) editor?.chain().focus().setImage({ src }).run(); }} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="Gorsel Yukle" onClick={() => imageInputRef.current?.click()} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="Dipnot" onClick={() => { const note = window.prompt("Dipnot"); if (note) editor?.chain().focus().insertFootnote(note).run(); }} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="Sayfa Sonu" onClick={insertPageBreak} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="Oto Sayfala" onClick={autoFormatPages} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="Ayirici" onClick={() => editor?.chain().focus().setHorizontalRule().run()} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="UYAP Kopya" onClick={() => { void copyForUyap(); }} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="Word" onClick={exportWordLocal} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="Lexge Kaydet" onClick={saveLexgeLocal} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label={isFullscreen ? "Kucult" : "Tam Ekran"} onClick={() => setIsFullscreen((v) => !v)} className="h-8 px-2" />
-                </div>
-              </div>
+              typeof document !== "undefined"
+                ? createPortal(
+                    <div data-toolbar-floating className={toolbarMenuPanelClass} style={{ ...toolbarMenuPanelStyle, zIndex: 9999 }}>
+                      <div className="grid grid-cols-1 gap-2">
+                        <Button label="Gorsel URL" onClick={() => { const src = window.prompt("Gorsel URL", "https://"); if (src) editor?.chain().focus().setImage({ src }).run(); }} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Gorsel Yukle" onClick={() => imageInputRef.current?.click()} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Dipnot" onClick={() => { const note = window.prompt("Dipnot"); if (note) editor?.chain().focus().insertFootnote(note).run(); }} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Sayfa Sonu" onClick={insertPageBreak} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Oto Sayfala" onClick={autoFormatPages} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Ayirici" onClick={() => editor?.chain().focus().setHorizontalRule().run()} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="UDF indir" onClick={downloadUdf} className="h-8 px-2" />
+                        <Button label="UDF yükle" onClick={() => udfInputRef.current?.click()} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="UDF iç kopyala" onClick={() => { void copyInternalUdf(); }} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="UYAP uyumlu kopyala" onClick={() => { void copyForUyap(); }} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Word" onClick={exportWordLocal} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Lexge Kaydet" onClick={saveLexgeLocal} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label={isFullscreen ? "Kucult" : "Tam Ekran"} onClick={() => setIsFullscreen((v) => !v)} className="h-8 px-2" />
+                      </div>
+                    </div>,
+                    document.body,
+                  )
+                : null
             ) : null}
           </div>
 
@@ -1720,58 +2140,164 @@ export default function EditorUnified({
           <Button label={isFocusMode ? "Odak Cik" : "Odak"} onClick={() => setIsFocusMode((prev) => !prev)} className="h-8 px-2.5" />
         </div>
 
-        <div className="flex w-full items-center gap-2 md:hidden">
+        <div className="flex w-full flex-wrap items-center gap-2 md:hidden">
           <Button label="Undo" onClick={() => editor?.chain().focus().undo().run()} disabled={editorReadOnly} className="h-9 flex-1 px-2" />
           <Button label="Redo" onClick={() => editor?.chain().focus().redo().run()} disabled={editorReadOnly} className="h-9 flex-1 px-2" />
           <Button label="Bicim" onClick={() => setOpenToolbarMenu((prev) => (prev === "typography" ? null : "typography"))} className="h-9 flex-1 px-2" />
-          <Button label="More" onClick={() => setOpenToolbarMenu((prev) => (prev === "insert" ? null : "insert"))} className="h-9 flex-1 px-2" />
+          <Button label="Renk" onClick={() => setOpenToolbarMenu((prev) => (prev === "color" ? null : "color"))} className="h-9 flex-1 px-2" />
+          <Button label="Ekle" onClick={() => setOpenToolbarMenu((prev) => (prev === "insert" ? null : "insert"))} className="h-9 flex-1 px-2" />
           <Button label="Find" onClick={() => { setIsFindBarOpen(true); window.setTimeout(() => findInputRef.current?.focus(), 0); }} className="h-9 flex-1 px-2" />
         </div>
 
-        {openToolbarMenu ? (
-          <div data-toolbar-menu className="fixed inset-x-3 bottom-16 z-[123] rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_28px_rgba(15,23,42,0.2)] md:hidden">
-            {openToolbarMenu === "typography" ? (
-              <div className="space-y-2">
-                <select
-                  className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
-                  defaultValue="paragraph"
-                  disabled={editorReadOnly}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    if (!editor) return;
-                    if (value === "paragraph") {
-                      editor.chain().focus().setParagraph().run();
-                      return;
-                    }
-                    editor.chain().focus().toggleHeading({ level: Number.parseInt(value, 10) as 1 | 2 | 3 | 4 | 5 | 6 }).run();
-                  }}
-                >
-                  <option value="paragraph">H/Paragraf</option>
-                  <option value="1">H1</option>
-                  <option value="2">H2</option>
-                  <option value="3">H3</option>
-                </select>
-                <div className="grid grid-cols-3 gap-2">
-                  <Button label="B" onClick={() => editor?.chain().focus().toggleBold().run()} active={Boolean(editor?.isActive("bold"))} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="I" onClick={() => editor?.chain().focus().toggleItalic().run()} active={Boolean(editor?.isActive("italic"))} disabled={editorReadOnly} className="h-8 px-2" />
-                  <Button label="U" onClick={() => editor?.chain().focus().toggleUnderline().run()} active={Boolean(editor?.isActive("underline"))} disabled={editorReadOnly} className="h-8 px-2" />
-                </div>
-              </div>
-            ) : null}
-            {openToolbarMenu === "insert" ? (
-              <div className="grid grid-cols-2 gap-2">
-                <Button label="Gorsel URL" onClick={() => { const src = window.prompt("Gorsel URL", "https://"); if (src) editor?.chain().focus().setImage({ src }).run(); }} disabled={editorReadOnly} className="h-8 px-2" />
-                <Button label="Gorsel Yukle" onClick={() => imageInputRef.current?.click()} disabled={editorReadOnly} className="h-8 px-2" />
-                <Button label="Dipnot" onClick={() => { const note = window.prompt("Dipnot"); if (note) editor?.chain().focus().insertFootnote(note).run(); }} disabled={editorReadOnly} className="h-8 px-2" />
-                <Button label="Sayfa Sonu" onClick={insertPageBreak} disabled={editorReadOnly} className="h-8 px-2" />
-                <Button label="Oto Sayfala" onClick={autoFormatPages} disabled={editorReadOnly} className="h-8 px-2" />
-                <Button label="UYAP Kopya" onClick={() => { void copyForUyap(); }} disabled={editorReadOnly} className="h-8 px-2" />
-              </div>
+        <div className="flex w-full items-center gap-2 md:ml-auto md:w-auto">
+          <div className="inline-flex h-9 shrink-0 overflow-hidden rounded-lg border border-slate-300 bg-slate-100/70 md:h-8">
+            <button
+              type="button"
+              className={cn(
+                "px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset",
+                mode === "edit" ? "bg-white text-slate-900" : "text-slate-600 hover:bg-white/70",
+              )}
+              onClick={() => setMode("edit")}
+              disabled={!canEnterEdit}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset",
+                mode === "preview" ? "bg-white text-slate-900" : "text-slate-600 hover:bg-white/70",
+              )}
+              onClick={() => setMode("preview")}
+            >
+              Preview
+            </button>
+          </div>
+          <Button
+            label="Kaydet"
+            onClick={() => { void saveCurrentDocument(); }}
+            disabled={editorReadOnly}
+            variant="secondary"
+            className="h-9 flex-1 px-2 md:h-8 md:flex-none md:px-2.5"
+          />
+          <Button
+            label="Paylaş"
+            onClick={() => { void createShareLink(); }}
+            variant="primary"
+            className="h-9 flex-1 px-2 md:h-8 md:flex-none md:px-2.5"
+          />
+          <div data-export-menu className="relative flex-1 md:flex-none">
+            <Button
+              label="Exportlar"
+              onClick={() => {
+                setIsExportMenuOpen((prev) => !prev);
+              }}
+              variant="secondary"
+              className="h-9 w-full px-2 md:h-8 md:w-auto md:px-2.5"
+            />
+            {isExportMenuOpen ? (
+              typeof document !== "undefined"
+                ? createPortal(
+                    <div data-export-floating className="fixed right-3 top-20 w-44 rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.16)]" style={{ zIndex: 9999, top: 80, right: 12 }}>
+                      <button
+                        type="button"
+                        className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        onClick={() => {
+                          setIsExportMenuOpen(false);
+                          downloadUdf();
+                        }}
+                      >
+                        UDF indir
+                      </button>
+                      <button
+                        type="button"
+                        className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        onClick={() => {
+                          setIsExportMenuOpen(false);
+                          void requestExport("pdf");
+                        }}
+                      >
+                        PDF
+                      </button>
+                      <button
+                        type="button"
+                        className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        onClick={() => {
+                          setIsExportMenuOpen(false);
+                          void requestExport("docx");
+                        }}
+                      >
+                        DOCX
+                      </button>
+                    </div>,
+                    document.body,
+                  )
+                : null
             ) : null}
           </div>
+        </div>
+
+        {openToolbarMenu ? (
+          typeof document !== "undefined"
+            ? createPortal(
+                <div
+                  data-toolbar-floating
+                  className="fixed right-3 top-24 max-h-[70vh] w-[min(92vw,340px)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_28px_rgba(15,23,42,0.2)] md:hidden"
+                  style={{ zIndex: 9999, top: 96, right: 12 }}
+                >
+                  {openToolbarMenu === "typography" ? (
+                    <div className="space-y-2">
+                      <select
+                        className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
+                        defaultValue="paragraph"
+                        disabled={editorReadOnly}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (!editor) return;
+                          if (value === "paragraph") {
+                            editor.chain().focus().setParagraph().run();
+                            return;
+                          }
+                          editor.chain().focus().toggleHeading({ level: Number.parseInt(value, 10) as 1 | 2 | 3 | 4 | 5 | 6 }).run();
+                        }}
+                      >
+                        <option value="paragraph">H/Paragraf</option>
+                        <option value="1">H1</option>
+                        <option value="2">H2</option>
+                        <option value="3">H3</option>
+                      </select>
+                      <div className="grid grid-cols-3 gap-2">
+                        <Button label="B" onClick={() => editor?.chain().focus().toggleBold().run()} active={Boolean(editor?.isActive("bold"))} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="I" onClick={() => editor?.chain().focus().toggleItalic().run()} active={Boolean(editor?.isActive("italic"))} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="U" onClick={() => editor?.chain().focus().toggleUnderline().run()} active={Boolean(editor?.isActive("underline"))} disabled={editorReadOnly} className="h-8 px-2" />
+                      </div>
+                    </div>
+                  ) : null}
+                  {openToolbarMenu === "color" ? (
+                    colorMenuContent
+                  ) : null}
+                  {openToolbarMenu === "insert" ? (
+                    <div className="grid grid-cols-1 gap-2">
+                      <Button label="Gorsel URL" onClick={() => { const src = window.prompt("Gorsel URL", "https://"); if (src) editor?.chain().focus().setImage({ src }).run(); }} disabled={editorReadOnly} className="h-8 px-2" />
+                      <Button label="Gorsel Yukle" onClick={() => imageInputRef.current?.click()} disabled={editorReadOnly} className="h-8 px-2" />
+                      <Button label="Dipnot" onClick={() => { const note = window.prompt("Dipnot"); if (note) editor?.chain().focus().insertFootnote(note).run(); }} disabled={editorReadOnly} className="h-8 px-2" />
+                      <Button label="Sayfa Sonu" onClick={insertPageBreak} disabled={editorReadOnly} className="h-8 px-2" />
+                      <Button label="Oto Sayfala" onClick={autoFormatPages} disabled={editorReadOnly} className="h-8 px-2" />
+                      <Button label="UDF indir" onClick={downloadUdf} className="h-8 px-2" />
+                      <Button label="UDF yükle" onClick={() => udfInputRef.current?.click()} disabled={editorReadOnly} className="h-8 px-2" />
+                      <Button label="UDF iç kopyala" onClick={() => { void copyInternalUdf(); }} disabled={editorReadOnly} className="h-8 px-2" />
+                      <Button label="UYAP uyumlu kopyala" onClick={() => { void copyForUyap(); }} disabled={editorReadOnly} className="h-8 px-2" />
+                      <Button label="Word" onClick={exportWordLocal} disabled={editorReadOnly} className="h-8 px-2" />
+                      <Button label="Lexge Kaydet" onClick={saveLexgeLocal} disabled={editorReadOnly} className="h-8 px-2" />
+                    </div>
+                  ) : null}
+                </div>,
+                document.body,
+              )
+            : null
         ) : null}
 
-        <div className="ml-auto hidden items-center gap-2 md:flex">
+        <div className="hidden items-center gap-2 md:flex">
           {wordGoal > 0 ? (
             <span className="inline-flex min-w-[110px] items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
               Hedef: %{wordGoalProgress}
@@ -1779,7 +2305,6 @@ export default function EditorUnified({
           ) : null}
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">Sozcuk: {wordCount}</span>
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">Okuma: {readingMinutes}dk</span>
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">Oturum: {sessionLabel}</span>
         </div>
 
         {isFindBarOpen ? (
@@ -1845,6 +2370,19 @@ export default function EditorUnified({
             event.currentTarget.value = "";
           }}
         />
+        <input
+          ref={udfInputRef}
+          type="file"
+          accept=".udf,application/zip,application/x-marinantex-udf"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              void importUdf(file);
+            }
+            event.currentTarget.value = "";
+          }}
+        />
       </div>
     </div>
   );
@@ -1862,227 +2400,11 @@ export default function EditorUnified({
       : "bg-gradient-to-b from-stone-100 via-slate-50 to-stone-100",
   );
 
-  const rightPanelBody = (
-    <div className="flex h-full flex-col bg-white">
-      <div className="border-b border-slate-200 px-3">
-        <div className="grid h-11 grid-cols-6 gap-1">
-          {panelTabs.map((item) => {
-            const active = tab === item.key;
-            return (
-              <button
-                key={item.key}
-                type="button"
-                className={cn(
-                  "relative inline-flex items-center justify-center gap-1 border-b-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2",
-                  active ? "border-slate-900 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700",
-                )}
-                onClick={() => setTab(item.key)}
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="flex-1 space-y-3 overflow-y-auto p-4">
-        {tab === "search" ? (
-          <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
-            <div className="flex gap-2">
-              <input
-                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none focus:border-slate-500"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && void search()}
-              />
-              <button type="button" className="h-10 rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs font-semibold text-slate-100" onClick={() => { void search(); }} disabled={searching}>{searching ? "..." : "Ara"}</button>
-            </div>
-            <div className="space-y-2">
-              {searchResults.map((r) => (
-                <div key={r.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs" draggable onDragStart={(e) => { e.dataTransfer.setData("application/x-jurix-snippet", JSON.stringify({ title: r.title, content: r.content })); e.dataTransfer.setData("text/plain", `${r.title}\n${r.content}`); }}>
-                  <p className="font-semibold text-slate-900">{r.title}</p>
-                  <p className="mt-1 line-clamp-3 text-[11px] text-slate-600">{r.content}</p>
-                  <button type="button" className="mt-2 h-8 rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-semibold text-slate-700" onClick={() => insertSnippet(r.title, r.content)}>Metne Ekle</button>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {tab === "library" ? (
-          <div className="space-y-3">
-            <div className="rounded-xl border border-slate-200 bg-white p-3">
-              <h3 className="text-sm font-semibold text-slate-900">Template</h3>
-              <div className="mt-2 space-y-2">{templates.map((t) => <button key={t.id} type="button" className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-left text-xs font-semibold text-slate-700 hover:bg-slate-100" onClick={() => editor?.commands.setContent(t.canonicalJson.content)}>{t.name}</button>)}</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3">
-              <h3 className="text-sm font-semibold text-slate-900">Clause</h3>
-              <div className="mt-2 space-y-2">{clauses.map((c) => <button key={c.id} type="button" className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-left text-xs font-semibold text-slate-700 hover:bg-slate-100" onClick={() => editor?.chain().focus().insertContent(c.bodyJson).run()}>{c.title}</button>)}</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3">
-              <h3 className="text-sm font-semibold text-slate-900">Dynamic Field</h3>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {LOCAL_DYNAMIC_FIELDS.map((field) => (
-                  <button
-                    key={field.fieldKey}
-                    type="button"
-                    className="h-8 rounded-lg border border-slate-300 bg-slate-100 px-2 text-xs font-semibold text-slate-700"
-                    onClick={() => editor?.chain().focus().insertDynamicField({
-                      fieldKey: field.fieldKey,
-                      label: field.label,
-                      value: field.defaultValue || "",
-                    }).run()}
-                  >
-                    {field.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {tab === "outline" ? (
-          <div className="space-y-3">
-            <div className="rounded-xl border border-slate-200 bg-white p-3">
-              <h3 className="text-sm font-semibold text-slate-900">Belge Plani</h3>
-              <p className="mt-1 text-xs text-slate-500">Basliklara tiklayarak ilgili bolume git.</p>
-              <div className="mt-3 max-h-[420px] space-y-1 overflow-auto pr-1">
-                {outlineItems.length ? (
-                  outlineItems.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100"
-                      style={{ paddingLeft: `${item.level * 8 + 8}px` }}
-                      onClick={() => focusOutlineItem(item.pos)}
-                    >
-                      {item.text}
-                    </button>
-                  ))
-                ) : (
-                  <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                    Henuz baslik bulunamadi. H1/H2/H3 ekleyince burada gorunur.
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {tab === "exports" ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs">
-            <button type="button" className="h-8 rounded-lg border border-slate-300 bg-slate-100 px-3 text-xs font-semibold text-slate-700" onClick={() => { void refreshExports(); }}>Yenile</button>
-            <div className="mt-2 space-y-2">
-              {exports.map((x) => (
-                <div key={x.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-slate-700">
-                  {x.format} - {x.status === "QUEUED" ? "Kuyrukta" : x.status === "PROCESSING" ? "Isleniyor" : x.status === "COMPLETED" ? "Hazir" : x.status === "FAILED" ? "Basarisiz" : "Suresi doldu"}
-                  {x.status === "COMPLETED" ? (
-                    <button type="button" className="ml-2 h-7 rounded-lg border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700" onClick={() => { void downloadExport(x.id); }}>
-                      Indir
-                    </button>
-                  ) : null}
-                </div>
-              ))}
-              {!apiAvailable ? <p className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-700">Queue export icin API baglantisi gerekli.</p> : null}
-            </div>
-          </div>
-        ) : null}
-
-        {tab === "share" ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs">
-            <div className="flex gap-2">
-              <select className="h-9 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-700" value={permission} onChange={(e) => setPermission(e.target.value as SharePermission)}><option value="VIEW">VIEW</option><option value="COMMENT">COMMENT</option></select>
-              <button type="button" className="h-9 rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs font-semibold text-slate-100" onClick={() => { void createShareLink(); }}>Uret</button>
-              <button type="button" className="h-9 rounded-lg border border-slate-300 bg-slate-100 px-3 text-xs font-semibold text-slate-700" onClick={() => { void refreshLinks(); }}>Yenile</button>
-            </div>
-            {newLink ? (
-              <div className="mt-2 flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
-                <p className="min-w-0 flex-1 break-all text-[11px] text-slate-600">{newLink}</p>
-                <button type="button" className="h-7 rounded-lg border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700" onClick={() => { void copyTextValue(newLink, "Baglanti panoya kopyalandi."); }}>Kopyala</button>
-              </div>
-            ) : null}
-            <div className="mt-2 space-y-2">
-              {links.map((x) => (
-                <div key={x.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-slate-700">
-                  <p>{x.permission} - {x.revokedAt ? "Revoked" : "Active"} ({new Date(x.expiresAt).toLocaleString()})</p>
-                  {x.publicUrl ? (
-                    <div className="mt-2 flex items-start gap-2">
-                      <p className="min-w-0 flex-1 break-all text-[11px] text-slate-600">{x.publicUrl}</p>
-                      <button type="button" className="h-7 rounded-lg border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700" onClick={() => { void copyTextValue(x.publicUrl || "", "Baglanti panoya kopyalandi."); }}>Kopyala</button>
-                    </div>
-                  ) : null}
-                  {!x.revokedAt ? (
-                    <button type="button" className="mt-2 h-7 rounded-lg border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700" onClick={() => { void revokeShareLink(x.id); }}>
-                      Revoke
-                    </button>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {tab === "tools" ? (
-          <div className="space-y-3">
-            <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs">
-              <h3 className="text-sm font-semibold text-slate-900">Yazim Takibi</h3>
-              <div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-slate-600">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">Sozcuk: {wordCount}</div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">Okuma: {readingMinutes} dk</div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">Oturum: {sessionLabel}</div>
-              </div>
-              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2">
-                <div className="mb-1 flex items-center justify-between text-[11px] text-slate-600">
-                  <span>Sozcuk hedefi</span>
-                  <span>{wordGoal > 0 ? `${wordCount}/${wordGoal}` : "Kapali"}</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                  <div className="h-full rounded-full bg-slate-700 transition-[width]" style={{ width: `${wordGoalProgress}%` }} />
-                </div>
-                <div className="mt-2 flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={0}
-                    step={50}
-                    value={wordGoal}
-                    onChange={(event) => {
-                      const next = Number.parseInt(event.target.value || "0", 10);
-                      setWordGoal(Number.isFinite(next) && next >= 0 ? next : 0);
-                    }}
-                    className="h-8 w-24 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-700"
-                  />
-                  <button type="button" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700" onClick={() => setWordGoal(Math.max(500, wordCount + 250))}>Oto Hedef</button>
-                  <button type="button" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700" onClick={() => setWordGoal(0)}>Kapat</button>
-                </div>
-              </div>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs">
-              <h3 className="text-sm font-semibold text-slate-900">AI Asistan</h3>
-              <p className="mt-2 text-slate-600">Dilekceyi analiz etme ve hukuki dile cevirme aksiyonlari bu panelde tutulur.</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" className="h-8 rounded-lg border border-slate-700 bg-slate-900 px-2 text-xs font-semibold text-slate-100" onClick={() => setMessage("AI analiz islemi bu surumde hazirlaniyor.")}>Dilekceyi Analiz Et</button>
-                <button type="button" className="h-8 rounded-lg border border-slate-300 bg-slate-100 px-2 text-xs font-semibold text-slate-700" onClick={() => setMessage("Hukuki dile cevirme islemi bu surumde hazirlaniyor.")}>Hukuki Dile Cevir</button>
-              </div>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs">
-              <h3 className="text-sm font-semibold text-slate-900">Araclar</h3>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" className="h-8 rounded-lg border border-slate-300 bg-slate-100 px-2 text-xs font-semibold text-slate-700" onClick={() => setMessage("Faiz hesaplama modulu bu surumde panel entegrasyonuna acik.")}>Faiz Hesaplama</button>
-                <button type="button" className="h-8 rounded-lg border border-slate-300 bg-slate-100 px-2 text-xs font-semibold text-slate-700" onClick={() => setMessage("Sure hesaplayici modulu bu surumde panel entegrasyonuna acik.")}>Sure Hesaplayici</button>
-              </div>
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-
   const mentionPreviewCard = mentionPreview ? (
     <div
       data-mention-preview
       className="fixed z-[132] w-[360px] rounded-2xl border border-slate-300 bg-white p-3 shadow-[0_18px_46px_rgba(15,23,42,0.24)]"
-      style={{ top: mentionPreview.top, left: mentionPreview.left }}
+      style={{ top: mentionPreview.top, left: mentionPreview.left, zIndex: 132 }}
     >
       <p className="text-sm font-semibold text-slate-900">{mentionPreview.label}</p>
       <p className="mt-1 line-clamp-5 text-xs leading-5 text-slate-600">{mentionPreview.text || "Kanun metni bulunamadi."}</p>
@@ -2107,7 +2429,7 @@ export default function EditorUnified({
         {editor ? <FloatingMenu editor={editor} tippyOptions={{ duration: 120 }} className="flex gap-1 rounded-lg border border-slate-300 bg-white p-1 shadow-[0_10px_28px_rgba(15,23,42,0.16)]"><Button label="H1" onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} active={editor.isActive("heading", { level: 1 })} /><Button label="H2" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive("heading", { level: 2 })} /></FloatingMenu> : null}
         {canvas}
         {mention ? (
-          <div className="fixed z-[130] w-[340px] rounded-xl border border-slate-300 bg-white p-1 shadow-[0_18px_46px_rgba(15,23,42,0.28)]" style={{ top: mention.top, left: mention.left }}>
+          <div className="fixed z-[130] w-[340px] rounded-xl border border-slate-300 bg-white p-1 shadow-[0_18px_46px_rgba(15,23,42,0.28)]" style={{ top: mention.top, left: mention.left, zIndex: 130 }}>
             {mention.items.map((item, index) => (
               <button key={item.id} type="button" className={`block w-full rounded-lg px-2 py-2 text-left text-xs ${mention.selected === index ? "bg-slate-900 text-slate-100" : "text-slate-700 hover:bg-slate-100"}`} onMouseDown={(e) => { e.preventDefault(); editor?.chain().focus().insertContentAt({ from: mention.from, to: mention.to }, { type: "lawMention", attrs: item }).insertContent(" ").run(); updateMention(null); }}>
                 <p className="font-semibold">{item.label}</p>
@@ -2123,146 +2445,13 @@ export default function EditorUnified({
 
   return (
     <div className={fullContainerClass}>
-      <main className={cn("min-w-0 flex-1 overflow-y-auto", isFocusMode ? "pb-8" : "pb-20 xl:pb-0")}>
-        {!isFocusMode ? (
-          <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur">
-            <div className="mx-auto flex min-h-16 max-w-[1280px] items-center gap-3 px-2 py-2 md:px-6">
-              <p className="hidden text-xs font-medium text-slate-500 lg:block">Calisma Alani / editor</p>
-
-              <div className="min-w-0 flex-1">
-                <h1 className="truncate text-base font-semibold text-slate-900 md:text-lg">editor</h1>
-                <p className="truncate text-xs text-slate-500">
-                  Durum: {status} | {apiAvailable ? "API bagli" : "Yerel mod"} | <span title={docId}>ID: {shortDocId}</span> |{" "}
-                  <span className={saveStateMeta.className}>{saveStateMeta.label}</span>
-                </p>
-                <div className="mt-2 hidden flex-wrap items-center gap-1.5 lg:flex">
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">Sozcuk {wordCount}</span>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">Okuma {readingMinutes} dk</span>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">Oturum {sessionLabel}</span>
-                  {wordGoal > 0 ? (
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">Hedef %{wordGoalProgress}</span>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="inline-flex h-9 overflow-hidden rounded-lg border border-slate-300 bg-slate-100/70">
-                <button
-                  type="button"
-                  className={cn(
-                    "px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset",
-                    mode === "edit" ? "bg-white text-slate-900" : "text-slate-600 hover:bg-white/70",
-                  )}
-                  onClick={() => setMode("edit")}
-                  disabled={!canEnterEdit}
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  className={cn(
-                    "px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset",
-                    mode === "preview" ? "bg-white text-slate-900" : "text-slate-600 hover:bg-white/70",
-                  )}
-                  onClick={() => setMode("preview")}
-                >
-                  Preview
-                </button>
-              </div>
-
-              <Button label="Kaydet" onClick={() => { void saveCurrentDocument(); }} disabled={editorReadOnly} variant="secondary" className="hidden md:inline-flex" />
-              <Button label="Paylaş" onClick={() => openPanelWithTab("share")} variant="primary" />
-
-              <Button
-                label={isRightPanelOpen ? "Panel Kapat" : "Panel"}
-                onClick={() => setIsRightPanelOpen((prev) => !prev)}
-                variant="secondary"
-                className="hidden md:inline-flex"
-              />
-              <Button label={isFocusMode ? "Odak Cik" : "Odak"} onClick={() => setIsFocusMode((prev) => !prev)} variant="secondary" className="hidden md:inline-flex" />
-
-              <div data-export-menu className="relative">
-                <Button
-                  label="Exportlar"
-                  onClick={() => {
-                    setIsOverflowMenuOpen(false);
-                    setIsExportMenuOpen((prev) => !prev);
-                  }}
-                  variant="secondary"
-                />
-                {isExportMenuOpen ? (
-                  <div className="absolute right-0 top-[calc(100%+8px)] z-40 w-44 rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.16)]">
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100" onClick={() => { setIsExportMenuOpen(false); void requestExport("pdf"); }}>PDF</button>
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100" onClick={() => { setIsExportMenuOpen(false); void requestExport("docx"); }}>DOCX</button>
-                  </div>
-                ) : null}
-              </div>
-
-              <div data-overflow-menu className="relative">
-                <button
-                  type="button"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-sm text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-                  onClick={() => {
-                    setIsExportMenuOpen(false);
-                    setIsOverflowMenuOpen((prev) => !prev);
-                  }}
-                  aria-label="Daha fazla"
-                >
-                  ...
-                </button>
-                {isOverflowMenuOpen ? (
-                  <div className="absolute right-0 top-[calc(100%+8px)] z-40 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.16)]">
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100 md:hidden" onClick={() => { setIsOverflowMenuOpen(false); void saveCurrentDocument(); }}>Kaydet</button>
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100 md:hidden" onClick={() => { setIsOverflowMenuOpen(false); openPanelWithTab("search"); }}>Ara</button>
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100 md:hidden" onClick={() => { setIsOverflowMenuOpen(false); openPanelWithTab("library"); }}>Lib</button>
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100 md:hidden" onClick={() => { setIsOverflowMenuOpen(false); openPanelWithTab("outline"); }}>Plan</button>
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100 md:hidden" onClick={() => { setIsOverflowMenuOpen(false); openPanelWithTab("exports"); }}>Exp</button>
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100 md:hidden" onClick={() => { setIsOverflowMenuOpen(false); openPanelWithTab("share"); }}>Share</button>
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100 md:hidden" onClick={() => { setIsOverflowMenuOpen(false); openPanelWithTab("tools"); }}>Tools</button>
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100" onClick={() => { setIsOverflowMenuOpen(false); setIsFindBarOpen(true); window.setTimeout(() => findInputRef.current?.focus(), 0); }}>Find</button>
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100" onClick={() => { setIsOverflowMenuOpen(false); setIsFocusMode((prev) => !prev); }}>{isFocusMode ? "Odak Modundan Cik" : "Odak Modu"}</button>
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100" onClick={() => { setIsOverflowMenuOpen(false); void updateDocumentStatus("REVIEW"); }}>Review</button>
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-45" onClick={() => { setIsOverflowMenuOpen(false); void finalizeDocument(); }} disabled={status === "FINAL"}>Finalize</button>
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-45" onClick={() => { setIsOverflowMenuOpen(false); void updateDocumentStatus("ARCHIVED"); }} disabled={status === "ARCHIVED"}>Arşiv</button>
-                    <button type="button" className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-45" onClick={() => { setIsOverflowMenuOpen(false); void forkDraft(); }} disabled={status !== "FINAL" && status !== "ARCHIVED"}>Yeni Draft</button>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-            </div>
-          </header>
-        ) : null}
-
+      <main className={cn("relative isolate min-w-0 flex-1 overflow-y-auto", isFocusMode ? "pb-8" : "pb-20 xl:pb-0")}>
         {toolbar}
         <div className={cn("mx-auto max-w-[1280px] px-2 py-4 md:px-6", isFocusMode ? "pt-8" : "")}>{canvas}</div>
       </main>
 
-      <aside
-        className={cn(
-          "hidden overflow-hidden border-l border-slate-200 bg-slate-50/90 transition-[width] duration-200 xl:block",
-          isFocusMode ? "w-0 border-l-0" : isRightPanelOpen ? "w-[360px]" : "w-0 border-l-0",
-        )}
-      >
-        {isRightPanelOpen && !isFocusMode ? rightPanelBody : null}
-      </aside>
-
-      {isRightPanelOpen && !isFocusMode ? (
-        <>
-          <button
-            type="button"
-            className="fixed inset-0 z-[121] bg-slate-900/30 xl:hidden"
-            onClick={() => setIsRightPanelOpen(false)}
-            aria-label="Paneli kapat"
-          />
-          <aside className="fixed inset-x-0 bottom-0 z-[122] h-[72vh] rounded-t-2xl border border-slate-200 bg-white shadow-[0_-12px_30px_rgba(15,23,42,0.2)] md:inset-y-0 md:right-0 md:left-auto md:h-full md:w-[320px] md:rounded-none md:border-y-0 md:border-r-0 md:border-l">
-            <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-300 md:hidden" />
-            <div className="mt-2 h-[calc(100%-8px)]">{rightPanelBody}</div>
-          </aside>
-        </>
-      ) : null}
-
       {message ? (
-        <div className="pointer-events-none fixed inset-x-3 bottom-3 z-[140] flex justify-center md:inset-x-auto md:right-4">
+        <div className="pointer-events-none fixed inset-x-3 top-3 z-[140] flex justify-center md:inset-x-auto md:right-4 md:top-4" style={{ zIndex: 140 }}>
           <div className="pointer-events-auto flex max-w-[420px] items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-[0_10px_24px_rgba(15,23,42,0.18)]">
             <span>{message}</span>
             <button type="button" className="rounded-md px-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700" onClick={() => setMessage("")}>x</button>
@@ -2271,7 +2460,7 @@ export default function EditorUnified({
       ) : null}
 
       {mention ? (
-        <div className="fixed z-[130] w-[340px] rounded-xl border border-slate-300 bg-white p-1 shadow-[0_18px_46px_rgba(15,23,42,0.28)]" style={{ top: mention.top, left: mention.left }}>
+        <div className="fixed z-[130] w-[340px] rounded-xl border border-slate-300 bg-white p-1 shadow-[0_18px_46px_rgba(15,23,42,0.28)]" style={{ top: mention.top, left: mention.left, zIndex: 130 }}>
           {mention.items.map((item, index) => (
             <button key={item.id} type="button" className={`block w-full rounded-lg px-2 py-2 text-left text-xs ${mention.selected === index ? "bg-slate-900 text-slate-100" : "text-slate-700 hover:bg-slate-100"}`} onMouseDown={(e) => { e.preventDefault(); editor?.chain().focus().insertContentAt({ from: mention.from, to: mention.to }, { type: "lawMention", attrs: item }).insertContent(" ").run(); updateMention(null); }}>
               <p className="font-semibold">{item.label}</p>

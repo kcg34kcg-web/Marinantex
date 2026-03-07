@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 from infrastructure.rag_v3.repository import RagV3ChunkMatch
 
@@ -37,6 +37,103 @@ _SOURCE_TYPE_SCORES = {
     "secondary": 0.38,
 }
 
+_POLICY_SENSITIVITY_ORDER = {
+    "public": 0,
+    "internal": 1,
+    "confidential": 2,
+    "privileged": 3,
+}
+_POLICY_RESIDENCY_ORDER = {
+    "global": 0,
+    "regional": 1,
+    "tr-only": 2,
+}
+_POLICY_EXTERNAL_TRANSFER_ORDER = {
+    "allowed": 0,
+    "restricted": 1,
+    "forbidden": 2,
+}
+_POLICY_RETENTION_ORDER = {
+    "standard": 0,
+    "limited": 1,
+    "no-store": 2,
+}
+_POLICY_PRIVILEGE_SCOPE_ORDER = {
+    "none": 0,
+    "client_confidential": 1,
+    "attorney_work_product": 2,
+}
+_POLICY_SOURCE_RIGHTS_ORDER = {
+    "owned": 0,
+    "licensed": 1,
+    "customer_authorized": 2,
+    "prohibited": 3,
+}
+_POLICY_EXPORTABILITY_ORDER = {
+    "exportable": 0,
+    "non_exportable": 1,
+}
+_POLICY_PURPOSE_VALUES = {"search", "draft", "compare", "summarize", "research", "review"}
+
+_CLASSIFICATION_TO_POLICY: dict[str, dict[str, Any]] = {
+    "PUBLIC": {
+        "sensitivity": "public",
+        "residency": "global",
+        "external_transfer": "allowed",
+        "retention": "standard",
+        "privilege_scope": "none",
+        "source_rights": "owned",
+        "exportability": "exportable",
+        "provider_allowlist": {"google", "openai", "anthropic", "groq"},
+    },
+    "INTERNAL": {
+        "sensitivity": "internal",
+        "residency": "regional",
+        "external_transfer": "restricted",
+        "retention": "limited",
+        "privilege_scope": "none",
+        "source_rights": "owned",
+        "exportability": "exportable",
+        "provider_allowlist": {"google", "openai", "anthropic", "groq"},
+    },
+    "CONFIDENTIAL": {
+        "sensitivity": "confidential",
+        "residency": "regional",
+        "external_transfer": "restricted",
+        "retention": "limited",
+        "privilege_scope": "client_confidential",
+        "source_rights": "customer_authorized",
+        "exportability": "non_exportable",
+        "provider_allowlist": {"openai"},
+    },
+    "SENSITIVE": {
+        "sensitivity": "privileged",
+        "residency": "tr-only",
+        "external_transfer": "forbidden",
+        "retention": "no-store",
+        "privilege_scope": "attorney_work_product",
+        "source_rights": "customer_authorized",
+        "exportability": "non_exportable",
+        "provider_allowlist": {"openai"},
+    },
+}
+
+_PROVIDER_ALIAS_MAP = {
+    "gemini": "google",
+    "google": "google",
+    "qwen": "openai",
+    "qwen_core": "openai",
+    "qwen_deep": "openai",
+    "self_host": "openai",
+    "openai": "openai",
+    "gpt": "openai",
+    "chatgpt": "openai",
+    "anthropic": "anthropic",
+    "claude": "anthropic",
+    "groq": "groq",
+}
+_PROVIDER_ORDER = ("google", "openai", "anthropic", "groq")
+
 _RISK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("URGENT_CRIMINAL", re.compile(r"\b(tutuklama|gozalti|yakalama|ceza)\b", re.IGNORECASE)),
     ("LIMITATION_PERIOD", re.compile(r"\b(zamanasimi|hak dusurucu)\b", re.IGNORECASE)),
@@ -64,6 +161,21 @@ class PolicyDecision:
 
 
 @dataclass(frozen=True)
+class PolicyLattice:
+    sensitivity: str = "public"
+    residency: str = "global"
+    external_transfer: str = "allowed"
+    retention: str = "standard"
+    privilege_scope: str = "none"
+    purpose_of_use: str = "research"
+    source_rights: str = "owned"
+    exportability: str = "exportable"
+    provider_allowlist: list[str] = field(default_factory=list)
+    policy_flags: list[str] = field(default_factory=list)
+    should_block_generation: bool = False
+
+
+@dataclass(frozen=True)
 class ClaimVerification:
     total_claims: int
     supported_claims: int
@@ -72,10 +184,78 @@ class ClaimVerification:
     passed: bool
 
 
+def evaluate_policy_lattice(
+    *,
+    matches: list[RagV3ChunkMatch],
+    session_policy: Optional[dict[str, Any]],
+    default_provider_allowlist: Optional[list[str]],
+    self_host_provider_allowlist: Optional[list[str]],
+) -> PolicyLattice:
+    base_providers = _normalise_provider_allowlist(default_provider_allowlist)
+    if not base_providers:
+        base_providers = set(_PROVIDER_ORDER)
+
+    state: dict[str, Any] = {
+        "sensitivity": "public",
+        "residency": "global",
+        "external_transfer": "allowed",
+        "retention": "standard",
+        "privilege_scope": "none",
+        "purpose_of_use": "research",
+        "source_rights": "owned",
+        "exportability": "exportable",
+        "provider_allowlist": set(base_providers),
+    }
+    flags: list[str] = []
+
+    session = _coerce_session_policy(session_policy)
+    _apply_policy_slice(state, session, flags=flags, reason_prefix="session")
+
+    for row in matches:
+        class_policy = _CLASSIFICATION_TO_POLICY.get(str(row.classification or "").upper())
+        if class_policy:
+            _apply_policy_slice(state, class_policy, flags=flags, reason_prefix="classification")
+        acl_policy = _acl_tags_policy(getattr(row, "acl_tags", []))
+        if acl_policy:
+            _apply_policy_slice(state, acl_policy, flags=flags, reason_prefix="acl")
+
+    self_host_providers = _normalise_provider_allowlist(self_host_provider_allowlist)
+    if state["external_transfer"] == "forbidden" and self_host_providers:
+        narrowed = set(state["provider_allowlist"]) & set(self_host_providers)
+        if narrowed != state["provider_allowlist"]:
+            flags.append("EXTERNAL_TRANSFER_FORBIDDEN_SELF_HOST_ENFORCED")
+            state["provider_allowlist"] = narrowed
+
+    if state["source_rights"] == "prohibited":
+        flags.append("SOURCE_RIGHTS_PROHIBITED")
+    if not state["provider_allowlist"]:
+        flags.append("PROVIDER_ALLOWLIST_EMPTY")
+
+    should_block = (
+        state["source_rights"] == "prohibited"
+        or not state["provider_allowlist"]
+    )
+    return PolicyLattice(
+        sensitivity=str(state["sensitivity"]),
+        residency=str(state["residency"]),
+        external_transfer=str(state["external_transfer"]),
+        retention=str(state["retention"]),
+        privilege_scope=str(state["privilege_scope"]),
+        purpose_of_use=str(state["purpose_of_use"]),
+        source_rights=str(state["source_rights"]),
+        exportability=str(state["exportability"]),
+        provider_allowlist=_ordered_provider_list(set(state["provider_allowlist"])),
+        policy_flags=list(dict.fromkeys(flags)),
+        should_block_generation=should_block,
+    )
+
+
 def resolve_as_of_date(
     query: str,
     explicit_as_of_date: Optional[date],
     *,
+    event_date: Optional[date] = None,
+    decision_date: Optional[date] = None,
     today: Optional[date] = None,
 ) -> TemporalResolution:
     now = today or date.today()
@@ -86,6 +266,23 @@ def resolve_as_of_date(
             warnings.append("as_of_date_future_clamped_to_today")
             return TemporalResolution(as_of_date=now, source="explicit_clamped", warnings=warnings)
         return TemporalResolution(as_of_date=explicit_as_of_date, source="explicit", warnings=warnings)
+
+    normalized_event = _clamp_date_to_today(event_date, now, warnings, "event_date")
+    normalized_decision = _clamp_date_to_today(decision_date, now, warnings, "decision_date")
+
+    if normalized_event is not None and normalized_decision is not None:
+        if normalized_event > normalized_decision:
+            warnings.append("event_date_after_decision_date_swapped")
+            normalized_event, normalized_decision = normalized_decision, normalized_event
+        # Single as_of retrieval uses event-time law by default.
+        warnings.append("decision_date_not_used_in_single_as_of")
+        return TemporalResolution(as_of_date=normalized_event, source="event_date", warnings=warnings)
+
+    if normalized_event is not None:
+        return TemporalResolution(as_of_date=normalized_event, source="event_date", warnings=warnings)
+
+    if normalized_decision is not None:
+        return TemporalResolution(as_of_date=normalized_decision, source="decision_date", warnings=warnings)
 
     lowered = _normalize_text(query)
 
@@ -247,6 +444,265 @@ def evaluate_policy(query: str) -> PolicyDecision:
     )
 
 
+def _coerce_session_policy(session_policy: Optional[dict[str, Any]]) -> dict[str, Any]:
+    raw = session_policy if isinstance(session_policy, dict) else {}
+    policy: dict[str, Any] = {}
+
+    sensitivity = _normalise_from_order(raw.get("sensitivity"), _POLICY_SENSITIVITY_ORDER, default="public")
+    residency = _normalise_from_order(raw.get("residency"), _POLICY_RESIDENCY_ORDER, default="global")
+    external_transfer = _normalise_from_order(
+        raw.get("external_transfer"),
+        _POLICY_EXTERNAL_TRANSFER_ORDER,
+        default="allowed",
+    )
+    retention = _normalise_from_order(raw.get("retention"), _POLICY_RETENTION_ORDER, default="standard")
+    privilege_scope = _normalise_from_order(
+        raw.get("privilege_scope"),
+        _POLICY_PRIVILEGE_SCOPE_ORDER,
+        default="none",
+    )
+    source_rights = _normalise_from_order(
+        raw.get("source_rights"),
+        _POLICY_SOURCE_RIGHTS_ORDER,
+        default="owned",
+    )
+    exportability = _normalise_from_order(
+        raw.get("exportability"),
+        _POLICY_EXPORTABILITY_ORDER,
+        default="exportable",
+    )
+    purpose_value = _normalise_token(raw.get("purpose_of_use") or raw.get("purpose"), default="research")
+    if purpose_value not in _POLICY_PURPOSE_VALUES:
+        purpose_value = "research"
+
+    policy["sensitivity"] = sensitivity
+    policy["residency"] = residency
+    policy["external_transfer"] = external_transfer
+    policy["retention"] = retention
+    policy["privilege_scope"] = privilege_scope
+    policy["source_rights"] = source_rights
+    policy["exportability"] = exportability
+    policy["purpose_of_use"] = purpose_value
+
+    providers = _normalise_provider_allowlist(
+        raw.get("provider_allowlist")
+        or raw.get("provider_allow_list")
+        or raw.get("provider_allow")
+    )
+    if providers:
+        policy["provider_allowlist"] = providers
+    return policy
+
+
+def _acl_tags_policy(acl_tags: list[str]) -> dict[str, Any]:
+    policy: dict[str, Any] = {}
+    providers: set[str] = set()
+    for tag in acl_tags or []:
+        token = _normalise_token(tag, default="")
+        if not token:
+            continue
+        if token in {"privileged", "attorney_work_product"}:
+            policy["sensitivity"] = "privileged"
+            policy["privilege_scope"] = "attorney_work_product"
+            continue
+        if token in {"client_confidential", "client-confidential"}:
+            policy["sensitivity"] = "confidential"
+            policy["privilege_scope"] = "client_confidential"
+            continue
+        if token in {"tr-only", "tr_only"}:
+            policy["residency"] = "tr-only"
+            continue
+        if token in {"no-store", "nostore"}:
+            policy["retention"] = "no-store"
+            continue
+        if token in {"non_exportable", "non-exportable"}:
+            policy["exportability"] = "non_exportable"
+            continue
+        if token in {"external-transfer-forbidden", "external_transfer_forbidden"}:
+            policy["external_transfer"] = "forbidden"
+            continue
+        if token in {"source_rights_prohibited", "rights_prohibited", "prohibited"}:
+            policy["source_rights"] = "prohibited"
+            continue
+
+        key, sep, value = token.partition(":")
+        if not sep:
+            continue
+        value_token = _normalise_token(value, default="")
+        if key == "sensitivity":
+            parsed = _normalise_from_order(value_token, _POLICY_SENSITIVITY_ORDER, default=None)
+            if parsed:
+                policy["sensitivity"] = parsed
+        elif key == "residency":
+            parsed = _normalise_from_order(value_token, _POLICY_RESIDENCY_ORDER, default=None)
+            if parsed:
+                policy["residency"] = parsed
+        elif key == "external_transfer":
+            parsed = _normalise_from_order(value_token, _POLICY_EXTERNAL_TRANSFER_ORDER, default=None)
+            if parsed:
+                policy["external_transfer"] = parsed
+        elif key == "retention":
+            parsed = _normalise_from_order(value_token, _POLICY_RETENTION_ORDER, default=None)
+            if parsed:
+                policy["retention"] = parsed
+        elif key == "privilege_scope":
+            parsed = _normalise_from_order(value_token, _POLICY_PRIVILEGE_SCOPE_ORDER, default=None)
+            if parsed:
+                policy["privilege_scope"] = parsed
+        elif key in {"source_rights", "rights"}:
+            parsed = _normalise_from_order(value_token, _POLICY_SOURCE_RIGHTS_ORDER, default=None)
+            if parsed:
+                policy["source_rights"] = parsed
+        elif key == "exportability":
+            parsed = _normalise_from_order(value_token, _POLICY_EXPORTABILITY_ORDER, default=None)
+            if parsed:
+                policy["exportability"] = parsed
+        elif key in {"provider", "provider_allowlist", "provider_allow_list"}:
+            providers.update(_normalise_provider_allowlist(value_token))
+
+    if providers:
+        policy["provider_allowlist"] = providers
+    return policy
+
+
+def _apply_policy_slice(
+    state: dict[str, Any],
+    incoming: dict[str, Any],
+    *,
+    flags: list[str],
+    reason_prefix: str,
+) -> None:
+    _apply_restrictive_value(
+        state,
+        incoming,
+        key="sensitivity",
+        order=_POLICY_SENSITIVITY_ORDER,
+        flags=flags,
+        reason_prefix=reason_prefix,
+    )
+    _apply_restrictive_value(
+        state,
+        incoming,
+        key="residency",
+        order=_POLICY_RESIDENCY_ORDER,
+        flags=flags,
+        reason_prefix=reason_prefix,
+    )
+    _apply_restrictive_value(
+        state,
+        incoming,
+        key="external_transfer",
+        order=_POLICY_EXTERNAL_TRANSFER_ORDER,
+        flags=flags,
+        reason_prefix=reason_prefix,
+    )
+    _apply_restrictive_value(
+        state,
+        incoming,
+        key="retention",
+        order=_POLICY_RETENTION_ORDER,
+        flags=flags,
+        reason_prefix=reason_prefix,
+    )
+    _apply_restrictive_value(
+        state,
+        incoming,
+        key="privilege_scope",
+        order=_POLICY_PRIVILEGE_SCOPE_ORDER,
+        flags=flags,
+        reason_prefix=reason_prefix,
+    )
+    _apply_restrictive_value(
+        state,
+        incoming,
+        key="source_rights",
+        order=_POLICY_SOURCE_RIGHTS_ORDER,
+        flags=flags,
+        reason_prefix=reason_prefix,
+    )
+    _apply_restrictive_value(
+        state,
+        incoming,
+        key="exportability",
+        order=_POLICY_EXPORTABILITY_ORDER,
+        flags=flags,
+        reason_prefix=reason_prefix,
+    )
+
+    purpose_value = str(incoming.get("purpose_of_use") or "").strip().lower()
+    if purpose_value in _POLICY_PURPOSE_VALUES:
+        state["purpose_of_use"] = purpose_value
+
+    providers = incoming.get("provider_allowlist")
+    if isinstance(providers, set):
+        narrowed = set(state["provider_allowlist"]) & set(providers)
+        if narrowed != state["provider_allowlist"]:
+            flags.append(f"{reason_prefix}_provider_allowlist_intersection")
+            state["provider_allowlist"] = narrowed
+
+
+def _apply_restrictive_value(
+    state: dict[str, Any],
+    incoming: dict[str, Any],
+    *,
+    key: str,
+    order: dict[str, int],
+    flags: list[str],
+    reason_prefix: str,
+) -> None:
+    candidate = incoming.get(key)
+    if not isinstance(candidate, str):
+        return
+    current = str(state.get(key) or "")
+    if order.get(candidate, -1) > order.get(current, -1):
+        state[key] = candidate
+        flags.append(f"{reason_prefix}_{key}_tightened")
+
+
+def _normalise_provider_allowlist(value: Any) -> set[str]:
+    providers: set[str] = set()
+    raw_items: list[str] = []
+    if isinstance(value, str):
+        raw_items = re.split(r"[,\s;+|]+", value)
+    elif isinstance(value, (list, tuple, set)):
+        for item in value:
+            if isinstance(item, str):
+                raw_items.extend(re.split(r"[,\s;+|]+", item))
+
+    for item in raw_items:
+        token = _normalise_token(item, default="")
+        if not token:
+            continue
+        if token == "none":
+            continue
+        mapped = _PROVIDER_ALIAS_MAP.get(token)
+        if mapped:
+            providers.add(mapped)
+    return providers
+
+
+def _normalise_from_order(value: Any, order: dict[str, int], *, default: Optional[str]) -> Optional[str]:
+    token = _normalise_token(value, default="")
+    if token in order:
+        return token
+    return default
+
+
+def _normalise_token(value: Any, *, default: str) -> str:
+    if not isinstance(value, str):
+        return default
+    token = value.strip().lower()
+    if not token:
+        return default
+    return token
+
+
+def _ordered_provider_list(values: set[str]) -> list[str]:
+    ordered = [provider for provider in _PROVIDER_ORDER if provider in values]
+    extras = sorted([provider for provider in values if provider not in _PROVIDER_ORDER])
+    return ordered + extras
+
+
 def _normalize_text(text: str) -> str:
     table = str.maketrans(
         {
@@ -277,6 +733,20 @@ def _safe_date(year: int, month: int, day: int) -> Optional[date]:
         return date(year, month, day)
     except ValueError:
         return None
+
+
+def _clamp_date_to_today(
+    value: Optional[date],
+    today: date,
+    warnings: list[str],
+    label: str,
+) -> Optional[date]:
+    if value is None:
+        return None
+    if value > today:
+        warnings.append(f"{label}_future_clamped_to_today")
+        return today
+    return value
 
 
 def _source_type_score(source_type: str) -> float:

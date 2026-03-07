@@ -1,0 +1,27 @@
+{
+  "name": "@lexoffice/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@lexoffice/contracts": "workspace:*",
+    "@lexoffice/core": "workspace:*",
+    "@lexoffice/db": "workspace:*",
+    "bullmq": "^5.43.0",
+    "ioredis": "5.9.3",
+    "pino": "^9.6.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  }
+}

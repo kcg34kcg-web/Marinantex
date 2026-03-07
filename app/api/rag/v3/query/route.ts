@@ -1,14 +1,22 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { resolveBureauContext } from '@/app/api/rag/_lib/bureau-context';
+import { ragProxyErrorResponse } from '@/app/api/rag/_lib/error-contract';
 import { fetchRagBackend, getRagBackendForLogs } from '@/app/api/rag/_lib/rag-backend';
+import { enforceRagRouteRateLimit } from '@/app/api/rag/_lib/rate-limit';
 import { createClient } from '@/utils/supabase/server';
 
 const querySchema = z.object({
   query: z.string().min(1).max(4000),
+  history: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string().min(1).max(4000),
+  })).max(20).optional(),
   top_k: z.number().int().min(8).max(12).optional(),
   jurisdiction: z.string().min(2).max(10).optional(),
   as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  decision_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   requested_tier: z.number().int().min(1).max(4).optional(),
   acl_tags: z.array(z.string().min(1).max(64)).max(16).optional(),
 });
@@ -28,39 +36,91 @@ function pickErrorMessage(body: unknown): string {
   return 'RAG v3 query istegi basarisiz oldu.';
 }
 
+function aclTagsForAccessLevel(accessLevel: 'OWNER' | 'MEMBER' | 'READ_ONLY'): string[] {
+  if (accessLevel === 'OWNER') return ['public', 'internal', 'confidential', 'sensitive'];
+  if (accessLevel === 'MEMBER') return ['public', 'internal', 'confidential'];
+  return ['public', 'internal'];
+}
+
 export async function POST(request: Request) {
   try {
     const parsed = querySchema.safeParse(await request.json());
     if (!parsed.success) {
-      return NextResponse.json(
-        { error: parsed.error.issues.map((issue) => issue.message).join(' ') },
-        { status: 400 },
-      );
+      return ragProxyErrorResponse({
+        status: 400,
+        errorCode: 'INVALID_REQUEST',
+        message: parsed.error.issues.map((issue) => issue.message).join(' '),
+      });
     }
 
     const supabase = await createClient();
     let context;
     try {
-      context = await resolveBureauContext(supabase);
-    } catch {
-      return NextResponse.json({ error: 'Oturum bulunamadi.' }, { status: 401 });
+      context = await resolveBureauContext(supabase, {
+        requireClaimMatch: true,
+        requireBureau: true,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : '';
+      if (reason === 'TENANT_CLAIM_MISMATCH') {
+        return ragProxyErrorResponse({
+          status: 403,
+          errorCode: 'TENANT_CLAIM_MISMATCH',
+          message: 'Oturum tenant bilgisi ile profil tenant bilgisi uyusmuyor. Lutfen tekrar giris yapin.',
+        });
+      }
+      if (reason === 'BUREAU_CONTEXT_MISSING') {
+        return ragProxyErrorResponse({
+          status: 401,
+          errorCode: 'BUREAU_CONTEXT_MISSING',
+          message: 'Buro baglami bulunamadi. Lutfen tekrar giris yapin.',
+        });
+      }
+      return ragProxyErrorResponse({
+        status: 401,
+        errorCode: 'AUTH_REQUIRED',
+        message: 'Oturum bulunamadi.',
+      });
     }
 
-    const { bureauId, userId } = context;
+    const { bureauId, userId, accessLevel, accessToken } = context;
+    if (!bureauId) {
+      return ragProxyErrorResponse({
+        status: 401,
+        errorCode: 'BUREAU_CONTEXT_MISSING',
+        message: 'Buro baglami bulunamadi. Lutfen tekrar giris yapin.',
+      });
+    }
+    const rateLimit = enforceRagRouteRateLimit({
+      request,
+      routeKey: 'v3_query',
+      userId,
+    });
+    if (rateLimit.limited && rateLimit.response) {
+      return rateLimit.response;
+    }
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-Bureau-ID': bureauId,
+      'X-User-ID': userId,
+      'X-Access-Level': accessLevel,
+    };
+    if (accessToken) {
+      headers.Authorization = `Bearer ${accessToken}`;
+    }
     const upstream = await fetchRagBackend('/api/v1/rag-v3/query', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Bureau-ID': bureauId || userId,
-        'X-User-ID': userId,
-      },
+      headers,
       body: JSON.stringify({
         query: parsed.data.query,
+        history: parsed.data.history,
         top_k: parsed.data.top_k ?? 10,
         jurisdiction: parsed.data.jurisdiction ?? 'TR',
         as_of_date: parsed.data.as_of_date,
+        event_date: parsed.data.event_date,
+        decision_date: parsed.data.decision_date,
         requested_tier: parsed.data.requested_tier ?? 2,
-        acl_tags: parsed.data.acl_tags ?? ['public'],
+        acl_tags: parsed.data.acl_tags ?? aclTagsForAccessLevel(accessLevel),
       }),
       signal: AbortSignal.timeout(120_000),
     });
@@ -73,7 +133,12 @@ export async function POST(request: Request) {
     }
 
     if (!upstream.ok) {
-      return NextResponse.json({ error: pickErrorMessage(body) }, { status: upstream.status });
+      return ragProxyErrorResponse({
+        status: upstream.status,
+        errorCode: 'RAG_BACKEND_ERROR',
+        message: pickErrorMessage(body),
+        retryable: upstream.status >= 500,
+      });
     }
 
     return NextResponse.json(body, { status: 200 });
@@ -83,6 +148,11 @@ export async function POST(request: Request) {
         ? 'RAG v3 query istegi zaman asimina ugradi.'
         : 'RAG v3 query servisine baglanilamadi.';
     console.error('[RAG v3 query proxy]', err, { backendCandidates: getRagBackendForLogs() });
-    return NextResponse.json({ error: message }, { status: 502 });
+    return ragProxyErrorResponse({
+      status: 502,
+      errorCode: err instanceof Error && err.name === 'AbortError' ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
+      message,
+      retryable: true,
+    });
   }
 }

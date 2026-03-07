@@ -28,13 +28,30 @@ function coerceInt(value: unknown): number | null {
 export interface ResolvedBureauContext {
   userId: string;
   bureauId: string | null;
+  claimBureauId: string | null;
+  role: string;
+  accessLevel: 'OWNER' | 'MEMBER' | 'READ_ONLY';
   planTier: string;
   messagesToday: number | null;
   tokensUsedMonth: number | null;
+  accessToken: string | null;
+}
+
+export interface ResolveBureauContextOptions {
+  requireClaimMatch?: boolean;
+  requireBureau?: boolean;
+}
+
+function mapRoleToAccessLevel(role: string): 'OWNER' | 'MEMBER' | 'READ_ONLY' {
+  const token = role.trim().toLowerCase();
+  if (token === 'lawyer' || token === 'admin') return 'OWNER';
+  if (token === 'client' || token === 'viewer' || token === 'guest') return 'READ_ONLY';
+  return 'MEMBER';
 }
 
 export async function resolveBureauContext(
   supabase: Awaited<ReturnType<typeof createClient>>,
+  options: ResolveBureauContextOptions = {},
 ): Promise<ResolvedBureauContext> {
   const {
     data: { user },
@@ -44,23 +61,38 @@ export async function resolveBureauContext(
   if (userError || !user) {
     throw new Error('AUTH_REQUIRED');
   }
+  const requireClaimMatch = Boolean(options.requireClaimMatch);
+  const requireBureau = Boolean(options.requireBureau);
+
+  const appMetadata = user.app_metadata && typeof user.app_metadata === 'object'
+    ? user.app_metadata as Record<string, unknown>
+    : {};
+  const metadataBureauId = isUuid(user.user_metadata?.bureau_id) ? user.user_metadata.bureau_id : null;
+  const claimBureauId = isUuid(appMetadata.bureau_id) ? String(appMetadata.bureau_id) : metadataBureauId;
 
   const profileResult = await supabase
     .from('profiles')
-    .select('bureau_id')
+    .select('bureau_id, role')
     .eq('id', user.id)
     .maybeSingle();
 
   const profileBureauId = isUuid(profileResult.data?.bureau_id) ? profileResult.data.bureau_id : null;
-  const metadataBureauId = isUuid(user.user_metadata?.bureau_id) ? user.user_metadata.bureau_id : null;
-  let bureauId = profileBureauId ?? metadataBureauId;
+  const metadataRole = typeof user.user_metadata?.role === 'string' ? user.user_metadata.role : '';
+  const role = typeof profileResult.data?.role === 'string' && profileResult.data.role.trim()
+    ? profileResult.data.role
+    : metadataRole;
+  const accessLevel = mapRoleToAccessLevel(role);
+  if (requireClaimMatch && profileBureauId && claimBureauId && profileBureauId !== claimBureauId) {
+    throw new Error('TENANT_CLAIM_MISMATCH');
+  }
+  let bureauId = claimBureauId ?? profileBureauId;
 
   const planTierRaw = user.user_metadata?.plan_tier;
   const planTier = typeof planTierRaw === 'string' && planTierRaw.trim() ? planTierRaw.trim().toUpperCase() : 'FREE';
   const messagesToday = coerceInt(user.user_metadata?.messages_today);
   const tokensUsedMonth = coerceInt(user.user_metadata?.tokens_used_month);
 
-  if (!bureauId) {
+  if (!bureauId && !requireBureau) {
     try {
       const admin = createAdminClient();
       const emailLocal = String(user.email ?? '').split('@')[0] || 'kullanici';
@@ -99,13 +131,23 @@ export async function resolveBureauContext(
       // Non-fatal; context can still proceed with metadata-based bureau id.
     }
   }
+  if (requireBureau && !bureauId) {
+    throw new Error('BUREAU_CONTEXT_MISSING');
+  }
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
 
   return {
     userId: user.id,
     bureauId,
+    claimBureauId,
+    role,
+    accessLevel,
     planTier,
     messagesToday,
     tokensUsedMonth,
+    accessToken: session?.access_token ?? null,
   };
 }
-

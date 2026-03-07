@@ -106,6 +106,39 @@ def extract_plan_tier_from_headers(headers: dict) -> str:
     return value
 
 
+def extract_access_level_from_headers(headers: dict) -> AccessLevel:
+    raw = (
+        headers.get("x-access-level")
+        or headers.get("X-Access-Level")
+        or headers.get("x-user-role")
+        or headers.get("X-User-Role")
+    )
+    token = str(raw or "").strip().upper()
+    if not token:
+        return AccessLevel.MEMBER
+
+    direct_map = {
+        "OWNER": AccessLevel.OWNER,
+        "MEMBER": AccessLevel.MEMBER,
+        "READ_ONLY": AccessLevel.READ_ONLY,
+        "READONLY": AccessLevel.READ_ONLY,
+        "READ-ONLY": AccessLevel.READ_ONLY,
+    }
+    if token in direct_map:
+        return direct_map[token]
+
+    role_map = {
+        "LAWYER": AccessLevel.OWNER,
+        "ADMIN": AccessLevel.OWNER,
+        "ASSISTANT": AccessLevel.MEMBER,
+        "MEMBER_USER": AccessLevel.MEMBER,
+        "CLIENT": AccessLevel.READ_ONLY,
+        "GUEST": AccessLevel.READ_ONLY,
+        "VIEWER": AccessLevel.READ_ONLY,
+    }
+    return role_map.get(token, AccessLevel.MEMBER)
+
+
 def _extract_optional_int(headers: dict, lower_key: str, title_key: str) -> Optional[int]:
     raw = headers.get(lower_key) or headers.get(title_key)
     if raw is None:
@@ -185,6 +218,7 @@ class TenantContextExtractor:
         bureau_id = extract_bureau_id_from_headers(headers)
         user_id   = extract_user_id_from_headers(headers)
         plan_tier = extract_plan_tier_from_headers(headers)
+        access_level = extract_access_level_from_headers(headers)
         messages_today = _extract_optional_int(headers, "x-messages-today", "X-Messages-Today")
         tokens_used_month = _extract_optional_int(headers, "x-tokens-used-month", "X-Tokens-Used-Month")
 
@@ -198,6 +232,7 @@ class TenantContextExtractor:
         return build_tenant_context(
             bureau_id=bureau_id,
             user_id=user_id,
+            access_level=access_level,
             plan_tier=plan_tier,
             messages_today=messages_today,
             tokens_used_month=tokens_used_month,

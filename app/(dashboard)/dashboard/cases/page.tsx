@@ -1,8 +1,9 @@
 ﻿'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -51,6 +52,60 @@ type TaskTemplate = {
   priority: 'low' | 'normal' | 'high';
 };
 
+type TaskModalMode = 'single' | 'bulk' | 'general';
+type TaskEntryMode = 'quick' | 'smart';
+type TaskType =
+  | 'follow_up'
+  | 'petition_drafting'
+  | 'contract_review'
+  | 'precedent_research'
+  | 'hearing_preparation'
+  | 'client_meeting'
+  | 'service_tracking'
+  | 'uyap_control';
+type TaskDeadlineType = 'due_date' | 'objection_deadline' | 'response_deadline' | 'hearing_date' | 'service_control';
+type TaskRiskLevel = 'low' | 'medium' | 'critical';
+type TaskConfidentiality = 'team' | 'restricted';
+
+type TaskDocumentItem = {
+  id: string;
+  publicRefCode: string;
+  fileName: string;
+};
+
+type TaskAiAssistPayload = {
+  subtasks: string[];
+  missingFields: string[];
+  reminderSuggestion: string;
+  templateSuggestion: string;
+  suggestedPriority: 'low' | 'normal' | 'high';
+  suggestedRiskLevel: TaskRiskLevel;
+  suggestedDeadlineType: TaskDeadlineType;
+  model?: {
+    provider: string;
+    id: string;
+  };
+};
+
+const TASK_TYPE_OPTIONS: Array<{ value: TaskType; label: string }> = [
+  { value: 'follow_up', label: 'Takip Görevi' },
+  { value: 'petition_drafting', label: 'Dilekçe Hazırlama' },
+  { value: 'contract_review', label: 'Sözleşme İnceleme' },
+  { value: 'precedent_research', label: 'İçtihat Araştırması' },
+  { value: 'hearing_preparation', label: 'Duruşma Hazırlığı' },
+  { value: 'client_meeting', label: 'Müvekkil Görüşmesi' },
+  { value: 'service_tracking', label: 'Tebligat Takibi' },
+  { value: 'uyap_control', label: 'UYAP / Mahkeme Kontrolü' },
+];
+
+const TASK_DEADLINE_TYPE_OPTIONS: Array<{ value: TaskDeadlineType; label: string }> = [
+  { value: 'due_date', label: 'Genel Son Tarih' },
+  { value: 'objection_deadline', label: 'İtiraz Süresi' },
+  { value: 'response_deadline', label: 'Cevap Süresi' },
+  { value: 'hearing_date', label: 'Duruşma Tarihi' },
+  { value: 'service_control', label: 'Tebligat Kontrol Tarihi' },
+];
+
 const TASK_TEMPLATES: TaskTemplate[] = [
   { id: 'follow_up', label: 'Takip', title: 'Takip Görevi', priority: 'normal' },
   { id: 'document_review', label: 'Belge İnceleme', title: 'Belge İnceleme', priority: 'normal' },
@@ -96,6 +151,11 @@ function getActivityRisk(updatedAt: string): { label: string; variant: 'blue' | 
 }
 
 export default function CasesPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const handledQuickTaskSearchRef = useRef<string | null>(null);
+
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | CaseStatus>('all');
   const [quickView, setQuickView] = useState<'all' | 'open' | 'active' | 'updated_this_week' | 'high_risk'>('all');
@@ -111,9 +171,30 @@ export default function CasesPage() {
   const [notePublic, setNotePublic] = useState(false);
   const [noteHistory, setNoteHistory] = useState<CaseNoteItem[]>([]);
   const [isLoadingNoteHistory, setIsLoadingNoteHistory] = useState(false);
-  const [taskModal, setTaskModal] = useState<{ mode: 'single' | 'bulk'; caseId?: string; caseTitle?: string } | null>(null);
+  const [taskModal, setTaskModal] = useState<{ mode: TaskModalMode; caseId?: string; caseTitle?: string } | null>(null);
+  const [taskEntryMode, setTaskEntryMode] = useState<TaskEntryMode>('quick');
+  const [taskCaseId, setTaskCaseId] = useState('');
   const [taskTitle, setTaskTitle] = useState('Takip Görevi');
+  const [taskDescription, setTaskDescription] = useState('');
   const [taskPriority, setTaskPriority] = useState<'low' | 'normal' | 'high'>('normal');
+  const [taskType, setTaskType] = useState<TaskType>('follow_up');
+  const [taskDeadlineType, setTaskDeadlineType] = useState<TaskDeadlineType>('due_date');
+  const [taskRiskLevel, setTaskRiskLevel] = useState<TaskRiskLevel>('medium');
+  const [taskConfidentiality, setTaskConfidentiality] = useState<TaskConfidentiality>('team');
+  const [taskCourt, setTaskCourt] = useState('');
+  const [taskCourtFileNo, setTaskCourtFileNo] = useState('');
+  const [taskOpponent, setTaskOpponent] = useState('');
+  const [taskReferenceInput, setTaskReferenceInput] = useState('');
+  const [taskAttachmentNotes, setTaskAttachmentNotes] = useState('');
+  const [taskAiSubtasks, setTaskAiSubtasks] = useState<string[]>([]);
+  const [taskAiMissingFields, setTaskAiMissingFields] = useState<string[]>([]);
+  const [taskAiReminder, setTaskAiReminder] = useState('');
+  const [taskAiTemplate, setTaskAiTemplate] = useState('');
+  const [taskAiModel, setTaskAiModel] = useState<{ provider: string; id: string } | null>(null);
+  const [isGeneratingTaskAssist, setIsGeneratingTaskAssist] = useState(false);
+  const [taskDocuments, setTaskDocuments] = useState<TaskDocumentItem[]>([]);
+  const [selectedTaskDocumentIds, setSelectedTaskDocumentIds] = useState<string[]>([]);
+  const [isTaskDocumentsLoading, setIsTaskDocumentsLoading] = useState(false);
   const [taskDueAt, setTaskDueAt] = useState('');
   const [taskAssignedTo, setTaskAssignedTo] = useState('');
   const [createCaseModalOpen, setCreateCaseModalOpen] = useState(false);
@@ -240,6 +321,115 @@ export default function CasesPage() {
   const pagination = data?.pagination ?? { page: 1, pageSize, total: 0, totalPages: 1 };
 
   const allFilteredSelected = filteredCases.length > 0 && filteredCases.every((item) => selectedCaseIds.includes(item.id));
+  const taskCaseOptions = filteredCases.map((item) => ({ id: item.id, title: item.title }));
+  const resolvedTaskCaseId = taskModal?.mode === 'single' ? taskModal.caseId ?? '' : taskCaseId;
+  const canSubmitTask =
+    taskTitle.trim().length >= 3 &&
+    (taskModal?.mode === 'bulk' ? selectedCaseIds.length > 0 : resolvedTaskCaseId.length > 0);
+
+  function resetTaskDraft(options?: { assigneeId?: string; mode?: TaskEntryMode }) {
+    setTaskEntryMode(options?.mode ?? 'quick');
+    setTaskCaseId('');
+    setTaskTitle('Takip Görevi');
+    setTaskDescription('');
+    setTaskPriority('normal');
+    setTaskType('follow_up');
+    setTaskDeadlineType('due_date');
+    setTaskRiskLevel('medium');
+    setTaskConfidentiality('team');
+    setTaskCourt('');
+    setTaskCourtFileNo('');
+    setTaskOpponent('');
+    setTaskReferenceInput('');
+    setTaskAttachmentNotes('');
+    setTaskAiSubtasks([]);
+    setTaskAiMissingFields([]);
+    setTaskAiReminder('');
+    setTaskAiTemplate('');
+    setTaskAiModel(null);
+    setTaskDocuments([]);
+    setSelectedTaskDocumentIds([]);
+    setTaskDueAt('');
+    setTaskAssignedTo(options?.assigneeId ?? '');
+  }
+
+  async function loadTaskCaseDocuments(caseId: string) {
+    if (!caseId) {
+      setTaskDocuments([]);
+      setSelectedTaskDocumentIds([]);
+      return;
+    }
+
+    setIsTaskDocumentsLoading(true);
+    try {
+      const response = await fetch(`/api/dashboard/cases/documents?caseId=${encodeURIComponent(caseId)}`, { cache: 'no-store' });
+      const payload = (await response.json()) as { items?: TaskDocumentItem[]; error?: string };
+      if (!response.ok) {
+        setTaskDocuments([]);
+        setSelectedTaskDocumentIds([]);
+        setActionMessage(payload.error ?? 'Görev için dosya belgeleri alınamadı.');
+        return;
+      }
+
+      setTaskDocuments(payload.items ?? []);
+      setSelectedTaskDocumentIds((previous) =>
+        previous.filter((id) => (payload.items ?? []).some((item) => item.id === id))
+      );
+    } catch {
+      setTaskDocuments([]);
+      setSelectedTaskDocumentIds([]);
+      setActionMessage('Görev belgeleri yüklenirken beklenmeyen hata oluştu.');
+    } finally {
+      setIsTaskDocumentsLoading(false);
+    }
+  }
+
+  async function requestTaskAiAssist() {
+    if (taskTitle.trim().length < 3) {
+      setActionMessage('AI önerisi için görev başlığı en az 3 karakter olmalı.');
+      return;
+    }
+
+    setIsGeneratingTaskAssist(true);
+    setActionMessage(null);
+
+    try {
+      const response = await fetch('/api/dashboard/cases/tasks/assist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          caseId: taskModal?.mode === 'bulk' ? undefined : resolvedTaskCaseId || undefined,
+          title: taskTitle.trim(),
+          description: taskDescription.trim() || undefined,
+          taskType,
+          deadlineType: taskDeadlineType,
+          dueAt: taskDueAt ? new Date(taskDueAt).toISOString() : undefined,
+        }),
+      });
+
+      const payload = (await response.json()) as { suggestion?: TaskAiAssistPayload; error?: string };
+
+      if (!response.ok || !payload.suggestion) {
+        setActionMessage(payload.error ?? 'AI görev önerisi alınamadı.');
+        return;
+      }
+
+      const suggestion = payload.suggestion;
+      setTaskAiSubtasks(suggestion.subtasks ?? []);
+      setTaskAiMissingFields(suggestion.missingFields ?? []);
+      setTaskAiReminder(suggestion.reminderSuggestion ?? '');
+      setTaskAiTemplate(suggestion.templateSuggestion ?? '');
+      setTaskAiModel(suggestion.model ?? null);
+      setTaskPriority(suggestion.suggestedPriority ?? 'normal');
+      setTaskRiskLevel(suggestion.suggestedRiskLevel ?? 'medium');
+      setTaskDeadlineType(suggestion.suggestedDeadlineType ?? 'due_date');
+      setTaskEntryMode('smart');
+    } catch {
+      setActionMessage('AI önerisi alınırken hata oluştu.');
+    } finally {
+      setIsGeneratingTaskAssist(false);
+    }
+  }
 
   function toggleCaseSelection(caseId: string) {
     setSelectedCaseIds((previous) =>
@@ -293,18 +483,72 @@ export default function CasesPage() {
     }
   }
 
-  async function handleCreateCaseTask(caseId: string, caseTitle: string) {
-    setTaskModal({ mode: 'single', caseId, caseTitle });
-    setTaskTitle(`${caseTitle} - Takip Görevi`);
-    setTaskPriority('normal');
-    setTaskDueAt('');
+  function getPreferredTaskAssigneeId(): string {
     const currentUser = teamMembers.find((member) => member.isCurrentUser);
-    setTaskAssignedTo(currentUser?.id ?? teamMembers[0]?.id ?? '');
+    return currentUser?.id ?? teamMembers[0]?.id ?? '';
+  }
+
+  function openGeneralTaskModal() {
+    const preferredCase = filteredCases[0];
+    const defaultAssigneeId = getPreferredTaskAssigneeId();
+    resetTaskDraft({ assigneeId: defaultAssigneeId, mode: 'smart' });
+    setTaskModal({
+      mode: 'general',
+      caseId: preferredCase?.id,
+      caseTitle: preferredCase?.title,
+    });
+    setTaskCaseId(preferredCase?.id ?? '');
+    setTaskTitle(preferredCase?.title ? `${preferredCase.title} - Takip Görevi` : 'Takip Görevi');
+    if (preferredCase?.id) {
+      loadTaskCaseDocuments(preferredCase.id).catch(() => {
+        setActionMessage('Görev için dosya belgeleri yüklenemedi.');
+      });
+    }
+  }
+
+  useEffect(() => {
+    const shouldOpenTaskModal = searchParams.get('openTask') === '1';
+    if (!shouldOpenTaskModal) {
+      handledQuickTaskSearchRef.current = null;
+      return;
+    }
+
+    const currentSearch = searchParams.toString();
+    if (handledQuickTaskSearchRef.current === currentSearch) {
+      return;
+    }
+    handledQuickTaskSearchRef.current = currentSearch;
+
+    openGeneralTaskModal();
+
+    const nextParams = new URLSearchParams(currentSearch);
+    nextParams.delete('openTask');
+    const nextSearch = nextParams.toString();
+    router.replace((nextSearch ? `${pathname}?${nextSearch}` : pathname) as Route, { scroll: false });
+  }, [pathname, router, searchParams]);
+
+  async function handleCreateCaseTask(caseId: string, caseTitle: string) {
+    const defaultAssigneeId = getPreferredTaskAssigneeId();
+    resetTaskDraft({ assigneeId: defaultAssigneeId, mode: 'quick' });
+    setTaskModal({ mode: 'single', caseId, caseTitle });
+    setTaskCaseId(caseId);
+    setTaskTitle(`${caseTitle} - Takip Görevi`);
+    await loadTaskCaseDocuments(caseId);
   }
 
   async function submitTask() {
     if (!taskModal || taskTitle.trim().length < 3) {
       setActionMessage('Görev başlangıcı en az 3 karakter olmalı.');
+      return;
+    }
+
+    if (taskModal.mode !== 'bulk' && !resolvedTaskCaseId) {
+      setActionMessage('Görev için dosya seçimi zorunludur.');
+      return;
+    }
+
+    if (taskModal.mode === 'bulk' && selectedCaseIds.length === 0) {
+      setActionMessage('Toplu görev için önce en az bir dosya seçin.');
       return;
     }
 
@@ -324,11 +568,35 @@ export default function CasesPage() {
               assignedTo: taskAssignedTo || undefined,
             }
           : {
-              caseId: taskModal.caseId,
+              caseId: resolvedTaskCaseId,
               title: taskTitle.trim(),
+              description: taskDescription.trim() || undefined,
               priority: taskPriority,
               dueAt: taskDueAt ? new Date(taskDueAt).toISOString() : undefined,
               assignedTo: taskAssignedTo || undefined,
+              taskType,
+              deadlineType: taskDeadlineType,
+              riskLevel: taskRiskLevel,
+              confidentiality: taskConfidentiality,
+              court: taskCourt.trim() || undefined,
+              fileNo: taskCourtFileNo.trim() || undefined,
+              opponent: taskOpponent.trim() || undefined,
+              references: taskReferenceInput
+                .split('\n')
+                .map((line) => line.trim())
+                .filter(Boolean),
+              selectedDocumentIds: selectedTaskDocumentIds,
+              attachmentNotes: taskAttachmentNotes.trim() || undefined,
+              aiContext:
+                taskAiSubtasks.length > 0 || taskAiMissingFields.length > 0 || taskAiReminder || taskAiTemplate
+                  ? {
+                      subtasks: taskAiSubtasks,
+                      missingFields: taskAiMissingFields,
+                      reminderSuggestion: taskAiReminder || undefined,
+                      templateSuggestion: taskAiTemplate || undefined,
+                      model: taskAiModel ?? undefined,
+                    }
+                  : undefined,
             };
 
       const response = await fetch(endpoint, {
@@ -348,11 +616,13 @@ export default function CasesPage() {
           ? `${payload.createdCount ?? selectedCaseIds.length} dosya için görev oluşturuldu.`
           : 'Dosya için görev oluşturuldu.'
       );
-      setActionLink({ href: '/office?tab=team', label: 'Office > Ekip sekmesine git' });
+      setActionLink({ href: '/dashboard/tasks', label: 'Gorevler sayfasina git' });
       setTaskModal(null);
+      resetTaskDraft({ assigneeId: getPreferredTaskAssigneeId(), mode: 'quick' });
       if (taskModal.mode === 'bulk') {
         setSelectedCaseIds([]);
       }
+      await refetch();
     } catch {
       setActionMessage('Görev oluşturulurken hata oluştu.');
     } finally {
@@ -669,36 +939,46 @@ export default function CasesPage() {
               <CardTitle>Dosya Yönetimi</CardTitle>
               <p className="text-sm text-slate-500">Dosyaları durum, müvekkil ve başlığa göre filtreleyin.</p>
             </div>
-            <Button
-              type="button"
-              onClick={() => {
-                setCreateCaseModalOpen(true);
-                setCreateCaseStep(1);
-                setNewCaseClientIds([]);
-                setNewCaseClientDisplay('');
-                setClientSearch('');
-                setClientInviteFormOpen(false);
-                setClientInviteFullName('');
-                setClientInviteEmail('');
-                setClientInviteUsername('');
-                setClientDetailFullName('');
-                setClientDetailTcIdentity('');
-                setClientDetailContactName('');
-                setClientDetailEmail('');
-                setClientDetailPhone('');
-                setClientDetailFileNo('');
-                setClientDetailPartyType('');
-                if (!newCaseLawyerId) {
-                  const currentLawyer = caseFormMeta?.lawyers.find((lawyer) =>
-                    teamMembers.some((member) => member.id === lawyer.id && member.isCurrentUser)
-                  );
-                  setNewCaseLawyerId(currentLawyer?.id ?? caseFormMeta?.lawyers[0]?.id ?? '');
-                }
-              }}
-              className="h-11 rounded-xl bg-gradient-to-r from-blue-600 to-slate-900 px-4 text-sm font-semibold text-white shadow-sm hover:from-blue-700 hover:to-slate-950"
-            >
-              + Gelişmiş Dosya Ekle
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={openGeneralTaskModal}
+                className="h-11 rounded-xl border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+              >
+                + Görev Ekle
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  setCreateCaseModalOpen(true);
+                  setCreateCaseStep(1);
+                  setNewCaseClientIds([]);
+                  setNewCaseClientDisplay('');
+                  setClientSearch('');
+                  setClientInviteFormOpen(false);
+                  setClientInviteFullName('');
+                  setClientInviteEmail('');
+                  setClientInviteUsername('');
+                  setClientDetailFullName('');
+                  setClientDetailTcIdentity('');
+                  setClientDetailContactName('');
+                  setClientDetailEmail('');
+                  setClientDetailPhone('');
+                  setClientDetailFileNo('');
+                  setClientDetailPartyType('');
+                  if (!newCaseLawyerId) {
+                    const currentLawyer = caseFormMeta?.lawyers.find((lawyer) =>
+                      teamMembers.some((member) => member.id === lawyer.id && member.isCurrentUser)
+                    );
+                    setNewCaseLawyerId(currentLawyer?.id ?? caseFormMeta?.lawyers[0]?.id ?? '');
+                  }
+                }}
+                className="h-11 rounded-xl bg-gradient-to-r from-blue-600 to-slate-900 px-4 text-sm font-semibold text-white shadow-sm hover:from-blue-700 hover:to-slate-950"
+              >
+                + Gelişmiş Dosya Ekle
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -849,12 +1129,9 @@ export default function CasesPage() {
                 size="sm"
                 disabled={isApplyingAction}
                 onClick={() => {
+                  resetTaskDraft({ assigneeId: getPreferredTaskAssigneeId(), mode: 'quick' });
                   setTaskModal({ mode: 'bulk' });
                   setTaskTitle('Toplu Takip Görevi');
-                  setTaskPriority('normal');
-                  setTaskDueAt('');
-                  const currentUser = teamMembers.find((member) => member.isCurrentUser);
-                  setTaskAssignedTo(currentUser?.id ?? teamMembers[0]?.id ?? '');
                 }}
               >
                 Toplu Görev Aç
@@ -1590,19 +1867,99 @@ export default function CasesPage() {
 
       {taskModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+          <div className="w-full max-w-4xl rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
             <h3 className="text-base font-semibold text-slate-900">
-              {taskModal.mode === 'bulk' ? 'Toplu Görev Aç' : 'Dosya Görevi Oluştur'}
+              {taskModal.mode === 'bulk' ? 'Toplu Görev Aç' : taskModal.mode === 'general' ? 'Görev Ekle' : 'Dosya Görevi Oluştur'}
             </h3>
             <p className="mt-1 text-sm text-slate-600">
               {taskModal.mode === 'bulk'
                 ? `${selectedCaseIds.length} seçili dosya için görev oluşturulacak.`
-                : taskModal.caseTitle}
+                : taskModal.mode === 'general'
+                  ? 'Hızlı görev veya hukuk-özel akıllı görev oluşturabilirsiniz.'
+                  : taskModal.caseTitle}
             </p>
 
-            <div className="mt-3 space-y-3">
+            <div className="mt-3 max-h-[75vh] space-y-3 overflow-y-auto pr-1">
+              {taskModal.mode !== 'bulk' ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className={
+                          taskEntryMode === 'quick'
+                            ? 'rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white'
+                            : 'rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700'
+                        }
+                        onClick={() => setTaskEntryMode('quick')}
+                      >
+                        Hızlı Görev Ekle
+                      </button>
+                      <button
+                        type="button"
+                        className={
+                          taskEntryMode === 'smart'
+                            ? 'rounded-md bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white'
+                            : 'rounded-md border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700'
+                        }
+                        onClick={() => setTaskEntryMode('smart')}
+                      >
+                        Akıllı Görev Ekle
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {taskAiModel ? (
+                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                          AI: {taskAiModel.provider}/{taskAiModel.id}
+                        </span>
+                      ) : null}
+                      <Button type="button" size="sm" variant="outline" disabled={isGeneratingTaskAssist} onClick={requestTaskAiAssist}>
+                        {isGeneratingTaskAssist ? 'AI Öneriyor...' : 'AI ile Alt Görev Öner'}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {taskModal.mode === 'general' ? (
+                <div>
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Bağlı Dosya / Dava</label>
+                  <select
+                    value={taskCaseId}
+                    onChange={(event) => {
+                      const nextCaseId = event.target.value;
+                      setTaskCaseId(nextCaseId);
+                      const selectedCase = taskCaseOptions.find((item) => item.id === nextCaseId);
+                      if (selectedCase && (taskTitle === 'Takip Görevi' || taskTitle.trim().length === 0)) {
+                        setTaskTitle(`${selectedCase.title} - Takip Görevi`);
+                      }
+                      loadTaskCaseDocuments(nextCaseId).catch(() => {
+                        setActionMessage('Görev belgeleri yüklenemedi.');
+                      });
+                    }}
+                    className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+                  >
+                    <option value="">Dosya seçin</option>
+                    {taskCaseOptions.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.title}
+                      </option>
+                    ))}
+                  </select>
+                  {taskCaseOptions.length === 0 ? (
+                    <p className="mt-1 text-xs text-orange-600">Dosya listesi boş görünüyor. Önce filtreleri gevşetip tekrar deneyin.</p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {taskModal.mode === 'single' ? (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-xs text-blue-800">
+                  Bağlı dosya: <span className="font-semibold">{taskModal.caseTitle}</span>
+                </div>
+              ) : null}
+
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Hızlı şablon</label>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Hızlı Şablon</label>
                 <div className="flex flex-wrap gap-2">
                   {TASK_TEMPLATES.map((template) => (
                     <button
@@ -1611,7 +1968,8 @@ export default function CasesPage() {
                       className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
                       onClick={() => {
                         const baseTitle = template.title;
-                        setTaskTitle(taskModal.mode === 'single' && taskModal.caseTitle ? `${taskModal.caseTitle} - ${baseTitle}` : baseTitle);
+                        const titlePrefix = taskModal.mode === 'single' && taskModal.caseTitle ? `${taskModal.caseTitle} - ` : '';
+                        setTaskTitle(`${titlePrefix}${baseTitle}`);
                         setTaskPriority(template.priority);
                       }}
                     >
@@ -1622,11 +1980,11 @@ export default function CasesPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Görev Başlangıcı</label>
-                <Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Görev başlangıcı" />
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Görev Başlığı</label>
+                <Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Örn: Dava dilekçesi hazırla" />
               </div>
 
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
                 <div>
                   <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Öncelik</label>
                   <select
@@ -1636,17 +1994,18 @@ export default function CasesPage() {
                   >
                     <option value="low">Düşük</option>
                     <option value="normal">Normal</option>
-                    <option value="high">Yüksek</option>
+                    <option value="high">Acil</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Atanan</label>
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Sorumlu</label>
                   <select
                     value={taskAssignedTo}
                     onChange={(event) => setTaskAssignedTo(event.target.value)}
                     className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
                   >
+                    {teamMembers.length === 0 ? <option value="">Atama yapılmadı</option> : null}
                     {teamMembers.map((member) => (
                       <option key={member.id} value={member.id}>
                         {(member.fullName ?? 'İsimsiz kullanıcı') + (member.isCurrentUser ? ' (Ben)' : '')}
@@ -1656,10 +2015,170 @@ export default function CasesPage() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Bitiş Tarihi</label>
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Yasal Tarih Türü</label>
+                  <select
+                    value={taskDeadlineType}
+                    onChange={(event) => setTaskDeadlineType(event.target.value as TaskDeadlineType)}
+                    className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+                  >
+                    {TASK_DEADLINE_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Son Tarih / Termin</label>
                   <Input type="datetime-local" value={taskDueAt} onChange={(event) => setTaskDueAt(event.target.value)} />
                 </div>
               </div>
+
+              {taskEntryMode === 'smart' && taskModal.mode !== 'bulk' ? (
+                <>
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Görev Tipi</label>
+                      <select
+                        value={taskType}
+                        onChange={(event) => setTaskType(event.target.value as TaskType)}
+                        className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+                      >
+                        {TASK_TYPE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Risk Seviyesi</label>
+                      <select
+                        value={taskRiskLevel}
+                        onChange={(event) => setTaskRiskLevel(event.target.value as TaskRiskLevel)}
+                        className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+                      >
+                        <option value="low">Düşük</option>
+                        <option value="medium">Orta</option>
+                        <option value="critical">Kritik</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Gizlilik</label>
+                      <select
+                        value={taskConfidentiality}
+                        onChange={(event) => setTaskConfidentiality(event.target.value as TaskConfidentiality)}
+                        className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+                      >
+                        <option value="team">Ekip</option>
+                        <option value="restricted">Sadece Yetkililer</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Mahkeme</label>
+                      <Input value={taskCourt} onChange={(event) => setTaskCourt(event.target.value)} placeholder="Örn: İstanbul 4. Asliye Hukuk" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Dosya No</label>
+                      <Input value={taskCourtFileNo} onChange={(event) => setTaskCourtFileNo(event.target.value)} placeholder="Örn: 2025/217 E." />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Karşı Taraf</label>
+                      <Input value={taskOpponent} onChange={(event) => setTaskOpponent(event.target.value)} placeholder="Örn: ABC A.Ş." />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Açıklama</label>
+                      <textarea
+                        value={taskDescription}
+                        onChange={(event) => setTaskDescription(event.target.value)}
+                        className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm"
+                        placeholder="Görevin kapsamını yazın"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">İlgili Not / Konuşma / Delil Referansları</label>
+                      <textarea
+                        value={taskReferenceInput}
+                        onChange={(event) => setTaskReferenceInput(event.target.value)}
+                        className="min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm"
+                        placeholder="Her satıra bir referans: örn Not#12, Konuşma#34"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Ek Açıklama / Belge Notu</label>
+                    <textarea
+                      value={taskAttachmentNotes}
+                      onChange={(event) => setTaskAttachmentNotes(event.target.value)}
+                      className="min-h-20 w-full rounded-md border border-input bg-white px-3 py-2 text-sm"
+                      placeholder="Ek belge veya talimat notu"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">İliştirilecek Dosya Belgeleri</label>
+                    {isTaskDocumentsLoading ? (
+                      <p className="text-xs text-slate-500">Belgeler yükleniyor...</p>
+                    ) : taskDocuments.length === 0 ? (
+                      <p className="text-xs text-slate-500">Bu dosyada iliştirilecek belge bulunamadı.</p>
+                    ) : (
+                      <div className="max-h-32 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2">
+                        {taskDocuments.map((doc) => (
+                          <label key={doc.id} className="flex items-center gap-2 text-xs text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={selectedTaskDocumentIds.includes(doc.id)}
+                              onChange={(event) => {
+                                setSelectedTaskDocumentIds((previous) =>
+                                  event.target.checked ? [...previous, doc.id] : previous.filter((id) => id !== doc.id)
+                                );
+                              }}
+                            />
+                            <span>{doc.fileName}</span>
+                            <span className="text-slate-400">({doc.publicRefCode})</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {taskAiSubtasks.length > 0 || taskAiMissingFields.length > 0 || taskAiReminder || taskAiTemplate ? (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">AI Önerileri</p>
+                      {taskAiSubtasks.length > 0 ? (
+                        <div className="mt-2">
+                          <p className="text-xs font-medium text-blue-700">Alt Görevler</p>
+                          <ul className="mt-1 space-y-1 text-xs text-blue-900">
+                            {taskAiSubtasks.map((item, index) => (
+                              <li key={`${item}-${index}`}>- {item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {taskAiMissingFields.length > 0 ? (
+                        <div className="mt-2">
+                          <p className="text-xs font-medium text-orange-700">Eksik Bilgi Uyarısı</p>
+                          <ul className="mt-1 space-y-1 text-xs text-orange-900">
+                            {taskAiMissingFields.map((item, index) => (
+                              <li key={`${item}-${index}`}>- {item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {taskAiReminder ? <p className="mt-2 text-xs text-slate-700">Hatırlatma: {taskAiReminder}</p> : null}
+                      {taskAiTemplate ? <p className="mt-1 text-xs text-slate-700">Şablon Önerisi: {taskAiTemplate}</p> : null}
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
@@ -1668,15 +2187,12 @@ export default function CasesPage() {
                 variant="outline"
                 onClick={() => {
                   setTaskModal(null);
-                  setTaskTitle('Takip Görevi');
-                  setTaskPriority('normal');
-                  setTaskDueAt('');
-                  setTaskAssignedTo('');
+                  resetTaskDraft({ assigneeId: getPreferredTaskAssigneeId(), mode: 'quick' });
                 }}
               >
                 Vazgeç
               </Button>
-              <Button type="button" disabled={isApplyingAction || taskTitle.trim().length < 3} onClick={submitTask}>
+              <Button type="button" disabled={isApplyingAction || !canSubmitTask} onClick={submitTask}>
                 Görev Oluştur
               </Button>
             </div>

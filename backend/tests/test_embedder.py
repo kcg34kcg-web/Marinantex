@@ -18,6 +18,7 @@ Coverage:
 from __future__ import annotations
 
 import pytest
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException
 
@@ -51,6 +52,7 @@ def _make_embedder(
     max_retries: int = 3,
     retry_base_delay: float = 0.0,  # zero delay in tests
     batch_size: int = 512,
+    fail_open_enabled: bool = False,
 ) -> QueryEmbedder:
     """Creates a QueryEmbedder with test-safe settings (no real API key needed)."""
     with patch("infrastructure.embeddings.embedder.settings") as mock_settings:
@@ -61,6 +63,9 @@ def _make_embedder(
         mock_settings.embedding_max_retries = max_retries
         mock_settings.embedding_retry_base_delay_s = retry_base_delay
         mock_settings.embedding_quota_cooldown_s = 120
+        mock_settings.embedding_fail_open_enabled = fail_open_enabled
+        mock_settings.embedding_model_lock_enforced = False
+        mock_settings.embedding_model_lock_file = "evals/embedding_model_lock.tr.json"
         return QueryEmbedder()
 
 
@@ -323,6 +328,35 @@ class TestEmbedRetry:
             assert second_exc.value.detail["error"] == "EMBEDDING_QUOTA_COOLDOWN"
             assert mock_create.call_count == 1
 
+    @pytest.mark.asyncio
+    async def test_insufficient_quota_uses_local_fallback_when_fail_open_enabled(self) -> None:
+        from openai import RateLimitError
+
+        embedder = _make_embedder(
+            max_retries=3,
+            retry_base_delay=0.0,
+            fail_open_enabled=True,
+        )
+        quota_err = RateLimitError(
+            "insufficient_quota",
+            response=MagicMock(status_code=429),
+            body={"error": {"code": "insufficient_quota", "type": "insufficient_quota"}},
+        )
+        mock_create = AsyncMock(side_effect=quota_err)
+
+        with patch.object(embedder._client.embeddings, "create", new=mock_create):
+            vectors = await embedder._embed_with_retry(["query"])
+            assert len(vectors) == 1
+            assert len(vectors[0]) == 1536
+            # First quota event still touches upstream once.
+            assert mock_create.call_count == 1
+
+            vectors2 = await embedder._embed_with_retry(["query"])
+            assert len(vectors2) == 1
+            assert len(vectors2[0]) == 1536
+            # Cooldown path must not call SDK again.
+            assert mock_create.call_count == 1
+
 
 # ============================================================================
 # embed_texts — batch embedding
@@ -364,3 +398,47 @@ class TestEmbedTexts:
 
         assert len(result) == 7
         assert mock_create.call_count == 3
+
+
+class TestEmbeddingModelLock:
+    def test_init_rejects_model_when_lock_mismatch(self, tmp_path: Path) -> None:
+        lock_file = tmp_path / "embedding-lock.json"
+        lock_file.write_text(
+            '{"locked_model":"text-embedding-3-small","language":"tr"}',
+            encoding="utf-8",
+        )
+
+        with patch("infrastructure.embeddings.embedder.settings") as mock_settings:
+            mock_settings.openai_api_key = "sk-test-key"
+            mock_settings.embedding_model = "text-embedding-3-large"
+            mock_settings.embedding_dimensions = 1536
+            mock_settings.embedding_batch_size = 128
+            mock_settings.embedding_max_retries = 2
+            mock_settings.embedding_retry_base_delay_s = 0.0
+            mock_settings.embedding_quota_cooldown_s = 60
+            mock_settings.embedding_model_lock_enforced = True
+            mock_settings.embedding_model_lock_file = str(lock_file)
+
+            with pytest.raises(EmbeddingError, match="Embedding model lock ihlali"):
+                QueryEmbedder()
+
+    def test_init_accepts_model_when_lock_matches(self, tmp_path: Path) -> None:
+        lock_file = tmp_path / "embedding-lock.json"
+        lock_file.write_text(
+            '{"locked_model":"text-embedding-3-small","language":"tr"}',
+            encoding="utf-8",
+        )
+
+        with patch("infrastructure.embeddings.embedder.settings") as mock_settings:
+            mock_settings.openai_api_key = "sk-test-key"
+            mock_settings.embedding_model = "text-embedding-3-small"
+            mock_settings.embedding_dimensions = 1536
+            mock_settings.embedding_batch_size = 128
+            mock_settings.embedding_max_retries = 2
+            mock_settings.embedding_retry_base_delay_s = 0.0
+            mock_settings.embedding_quota_cooldown_s = 60
+            mock_settings.embedding_model_lock_enforced = True
+            mock_settings.embedding_model_lock_file = str(lock_file)
+
+            embedder = QueryEmbedder()
+            assert embedder is not None

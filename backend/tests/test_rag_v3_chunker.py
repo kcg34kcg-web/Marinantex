@@ -70,3 +70,33 @@ def test_page_range_tracks_form_feed_boundaries() -> None:
 
     assert len(chunks) == 1
     assert chunks[0].page_range == "1-2"
+
+
+def test_overlap_tokens_are_prepended_for_adjacent_clauses_same_article() -> None:
+    chunker = LegalStructuredChunker(target_min_tokens=50, target_max_tokens=900, overlap_tokens=4)
+    text = (
+        "MADDE 1 - Genel Hukumler\n"
+        "(1) Birinci fikra metni burada.\n"
+        "(2) Ikinci fikra metni burada.\n"
+    )
+
+    chunks = chunker.chunk(text)
+
+    assert len(chunks) == 2
+    assert chunks[1].text.startswith("Birinci fikra metni burada.")
+
+
+def test_overlap_is_not_applied_across_different_articles() -> None:
+    chunker = LegalStructuredChunker(target_min_tokens=50, target_max_tokens=900, overlap_tokens=6)
+    text = (
+        "MADDE 1 - Birinci madde\n"
+        "(1) Birinci madde fikra metni.\n\n"
+        "MADDE 2 - Ikinci madde\n"
+        "(1) Ikinci madde fikra metni.\n"
+    )
+
+    chunks = chunker.chunk(text)
+
+    assert len(chunks) == 2
+    assert chunks[1].article_no == "2"
+    assert not chunks[1].text.startswith("Birinci madde fikra metni.")

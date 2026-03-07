@@ -35,9 +35,9 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md items-center px-6">
-      <div className="w-full space-y-4 rounded-xl border border-border bg-white p-6">
-        <h1 className="text-2xl font-semibold text-slate-900">Profilinizi Tamamlayın</h1>
-        <p className="text-sm text-slate-600">Hesabınızı kullanabilmek için birkaç bilgiye ihtiyacımız var.</p>
+      <div className="w-full space-y-4 rounded-[var(--radius-md)] border border-[var(--main-border,var(--border))] bg-[color-mix(in_srgb,var(--main-surface-3,var(--surface)),transparent_4%)] p-6 shadow-[var(--shadow-elev-2)] backdrop-blur-[var(--blur-heavy)]">
+        <h1 className="text-2xl font-semibold tracking-[-0.01em] text-[var(--main-text,var(--text))]">Profilinizi Tamamlayın</h1>
+        <p className="text-sm text-[var(--main-muted,var(--secondary))]">Hesabınızı kullanabilmek için birkaç bilgiye ihtiyacımız var.</p>
         <OnboardingForm nextPath={isSafeRedirect(params.next) ? params.next : undefined} />
       </div>
     </main>

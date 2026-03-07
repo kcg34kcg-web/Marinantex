@@ -54,9 +54,18 @@ type StructuredNewsSummary = {
   uncertainties: string[];
 };
 
+type PreparedNewsSnapshot = {
+  generatedAt: string;
+  sourceHealth: NewsSourceHealth[];
+  rawItems: RawFeedItem[];
+};
+
 let googleDecoderPromise: Promise<GoogleDecoderClient | null> | null = null;
 let newsSummaryModelPromise: Promise<NewsSummaryModelSelection | null> | null = null;
+let preparedNewsSnapshotPromise: Promise<PreparedNewsSnapshot> | null = null;
 const NEWS_SUMMARY_CACHE = new Map<string, { value: StructuredNewsSummary; expiresAt: number }>();
+let preparedNewsSnapshotCache: { value: PreparedNewsSnapshot; expiresAt: number } | null = null;
+let lastNonEmptyPreparedNewsSnapshot: PreparedNewsSnapshot | null = null;
 
 const DEFAULT_KEYWORD_FOLLOWUPS = [
   'kira artisi',
@@ -88,6 +97,15 @@ const GOOGLE_NEWS_SOURCES: DomainSourceConfig[] = [
   { id: 'sayistay', name: 'Sayistay', domain: 'sayistay.gov.tr', websiteUrl: 'https://www.sayistay.gov.tr', searchTerms: ['karar', 'rapor', 'duyuru'] },
   { id: 'enerji-bakanligi', name: 'Enerji Bakanligi', domain: 'enerji.gov.tr', websiteUrl: 'https://www.enerji.gov.tr', searchTerms: ['enerji', 'duzenleme', 'duyuru'] },
 ];
+const DEFAULT_TRUSTED_X_ACCOUNTS = 'ResmiGazete,TBMMresmi,adalet_bakanlik,KVKKKurumu,YargitayBaskanlik';
+const TRUSTED_OFFICIAL_SOURCE_IDS = new Set(GOOGLE_NEWS_SOURCES.map((source) => source.id));
+const TRUSTED_OFFICIAL_SOURCE_DOMAINS = [...new Set(GOOGLE_NEWS_SOURCES.map((source) => source.domain.toLowerCase()))];
+const TRUSTED_X_ACCOUNTS = new Set(
+  (process.env.NEWS_X_ACCOUNTS ?? DEFAULT_TRUSTED_X_ACCOUNTS)
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry.length > 0),
+);
 
 const WORKSPACE_RULES: Array<{ workspace: WorkspaceTag; keywords: string[] }> = [
   { workspace: 'icra', keywords: ['icra', 'haciz', 'takip', 'tebligat', 'iflas'] },
@@ -110,12 +128,21 @@ const CRITICAL_SEVERITY_KEYWORDS = ['yururluk', 'zorunlu', 'ceza', 'iptal', 'son
 const MEDIUM_SEVERITY_KEYWORDS = ['guncelleme', 'duzenleme', 'rehber', 'karar', 'taslak'];
 const STOP_WORDS = new Set(['ve', 'ile', 'icin', 'olan', 'gibi', 'hakkinda', 'karar', 'duyuru', 'kanun', 'yonetmelik']);
 const TRACKING_PARAM_PREFIXES = ['utm_', 'fbclid', 'gclid', 'igshid', 'ref', 'oc', 'ved'];
-const GOOGLE_NEWS_DECODE_LIMIT = 36;
-const NEWS_ENRICH_LIMIT = 36;
-const NEWS_ENRICH_CONCURRENCY = 6;
-const NEWS_SUMMARY_BUDGET_PER_RUN = 10;
+const GOOGLE_NEWS_DECODE_LIMIT = 12;
+const GOOGLE_NEWS_DECODE_CONCURRENCY = 6;
+const GOOGLE_NEWS_RECENCY_FILTER = 'when:30d';
+const NEWS_ENRICH_LIMIT = 20;
+const NEWS_ENRICH_CONCURRENCY = 8;
+const NEWS_SUMMARY_BUDGET_PER_RUN = 0;
 const NEWS_SUMMARY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const NEWS_SUMMARY_CACHE_LIMIT = 600;
+const NEWS_ARTICLE_FETCH_TIMEOUT_MS = 1500;
+const NEWS_SOURCE_FETCH_TIMEOUT_MS = 5500;
+const NEWS_SOURCE_ITEMS_PER_FEED = 6;
+const NEWS_X_FALLBACK_ITEMS_PER_FEED = 6;
+const NEWS_CANDIDATE_POOL_LIMIT = 70;
+const DASHBOARD_NEWS_SNAPSHOT_TTL_MS = 2 * 60 * 1000;
+const EMPTY_SNAPSHOT_TTL_MS = 15 * 1000;
 const NEWS_CHUNK_TARGET_WORDS = 950;
 const NEWS_CHUNK_MAX_WORDS = 1300;
 const NEWS_CHUNK_MIN_WORDS = 250;
@@ -126,7 +153,47 @@ const LOW_QUALITY_SNIPPETS = [
   'full coverage on google news',
   'google news',
   'read full article',
+  'ayrintilar icin kaynak baglantisini acin',
+  'bu kayit otomatik haber akisindan alinmistir',
+  'resmi ayrintilar icin kaynak metnini dogrudan inceleyin',
+  'kaynaginda yeni bir guncelleme yayimlandi',
+  'baslikli duyuru yayimlandi',
+  'kaynaginda "',
+  'kaynak metni ac ve degisikligin kapsamini dogrula',
+  'etkilenen dosyalarda gorev acip sorumlu kisiye ata',
+  'emsal karari ilgili dilekce/ictihat notuna bagla',
 ] as const;
+const LEGAL_RELEVANCE_KEYWORDS = [
+  'kanun',
+  'yonetmelik',
+  'teblig',
+  'genelge',
+  'karar',
+  'ictihat',
+  'mahkeme',
+  'yargi',
+  'duyuru',
+  'resmi gazete',
+  'tbmm',
+  'kvkk',
+  'kurul',
+  'idari para cezasi',
+  'yururluk',
+  'taslak',
+] as const;
+const LOW_LEGAL_RELEVANCE_KEYWORDS = [
+  'futbol',
+  'transfer',
+  'maglup',
+  'galibiyet',
+  'savas',
+  'hava saldirisi',
+  'diplomasi',
+  'parti',
+  'secim mitingi',
+  'yarisma sonuclari',
+] as const;
+const LEGAL_RELEVANCE_MIN_SCORE = 2.4;
 
 const chunkSummarySchema = z.object({
   one_liner: z.string().min(1).max(320),
@@ -135,17 +202,9 @@ const chunkSummarySchema = z.object({
   uncertainties: z.array(z.string().min(1).max(220)).max(6),
 });
 
-const finalSummarySchema = z.object({
-  one_liner: z.string().min(1).max(320),
-  bullets: z.array(z.string().min(1).max(240)).min(1).max(5),
-  who_what_where_when: z.object({
-    who: z.string().min(1).max(180),
-    what: z.string().min(1).max(220),
-    where: z.string().min(1).max(140),
-    when: z.string().min(1).max(120),
-  }),
-  numbers: z.array(z.string().min(1).max(120)).max(10),
-  uncertainties: z.array(z.string().min(1).max(220)).max(6),
+const publishableSummarySchema = z.object({
+  publishable: z.boolean(),
+  summary: z.string().max(3200),
 });
 
 function normalize(input: string) {
@@ -235,6 +294,23 @@ function decodeXmlEntities(input: string) {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
+    .replace(/&ldquo;/g, '"')
+    .replace(/&rdquo;/g, '"')
+    .replace(/&rsquo;/g, "'")
+    .replace(/&lsquo;/g, "'")
+    .replace(/&ndash;/g, '-')
+    .replace(/&mdash;/g, '-')
+    .replace(/&ccedil;/g, 'ç')
+    .replace(/&Ccedil;/g, 'Ç')
+    .replace(/&ouml;/g, 'ö')
+    .replace(/&Ouml;/g, 'Ö')
+    .replace(/&uuml;/g, 'ü')
+    .replace(/&Uuml;/g, 'Ü')
+    .replace(/&scedil;/g, 'ş')
+    .replace(/&Scedil;/g, 'Ş')
+    .replace(/&iacute;/g, 'í')
+    .replace(/&Iacute;/g, 'Í')
+    .replace(/&nbsp;/g, ' ')
     .replace(/&#39;/g, "'")
     .replace(/&#x2F;/g, '/');
 }
@@ -291,6 +367,61 @@ function isHttpUrl(urlText: string) {
   }
 }
 
+function extractHostname(urlText: string) {
+  try {
+    return new URL(urlText).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+function isHostWithinDomain(hostname: string, domain: string) {
+  const normalizedHost = hostname.toLowerCase().replace(/^www\./, '');
+  const normalizedDomain = domain.toLowerCase().replace(/^www\./, '');
+  return normalizedHost === normalizedDomain || normalizedHost.endsWith(`.${normalizedDomain}`);
+}
+
+function extractXUsername(urlText: string, sourceName = '') {
+  const sourceMatch = sourceName.match(/@([A-Za-z0-9_]{2,30})/);
+  if (sourceMatch?.[1]) {
+    return sourceMatch[1].toLowerCase();
+  }
+
+  try {
+    const parsed = new URL(urlText);
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    if (hostname !== 'x.com' && hostname !== 'twitter.com') {
+      return '';
+    }
+    const firstPathSegment = parsed.pathname.split('/').filter(Boolean)[0] ?? '';
+    return firstPathSegment.replace(/^@/, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function isTrustedSource(item: Pick<RawFeedItem, 'sourceId' | 'sourceName' | 'sourceUrl' | 'link'>) {
+  if (TRUSTED_OFFICIAL_SOURCE_IDS.has(item.sourceId)) {
+    return true;
+  }
+
+  const linkHost = extractHostname(item.link);
+  const sourceHost = extractHostname(item.sourceUrl);
+  const fromTrustedDomain = TRUSTED_OFFICIAL_SOURCE_DOMAINS.some((domain) => {
+    return isHostWithinDomain(linkHost, domain) || isHostWithinDomain(sourceHost, domain);
+  });
+  if (fromTrustedDomain) {
+    return true;
+  }
+
+  if (item.sourceId === 'x-twitter') {
+    const username = extractXUsername(item.link || item.sourceUrl, item.sourceName);
+    return username.length > 0 && TRUSTED_X_ACCOUNTS.has(username);
+  }
+
+  return false;
+}
+
 async function getGoogleDecoder() {
   if (googleDecoderPromise) {
     return googleDecoderPromise;
@@ -310,7 +441,11 @@ async function getGoogleDecoder() {
 }
 
 async function resolveGoogleNewsLinks(items: RawFeedItem[]) {
-  const candidates = [...new Set(items.map((item) => item.link).filter((link) => isGoogleNewsUrl(link)))].slice(0, GOOGLE_NEWS_DECODE_LIMIT);
+  const recentSortedLinks = [...items]
+    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+    .map((item) => item.link)
+    .filter((link) => isGoogleNewsUrl(link));
+  const candidates = [...new Set(recentSortedLinks)].slice(0, GOOGLE_NEWS_DECODE_LIMIT);
   if (candidates.length === 0) {
     return items;
   }
@@ -324,7 +459,7 @@ async function resolveGoogleNewsLinks(items: RawFeedItem[]) {
   try {
     decodeResults = await decoder.decodeBatch(candidates);
   } catch {
-    return items;
+    decodeResults = [];
   }
 
   const decodedMap = new Map<string, string>();
@@ -337,15 +472,47 @@ async function resolveGoogleNewsLinks(items: RawFeedItem[]) {
     decodedMap.set(sourceUrl, canonicalizeUrl(decodedUrl));
   }
 
+  const unresolvedLinks = candidates.filter((url) => !decodedMap.has(url));
+  if (unresolvedLinks.length > 0) {
+    for (let index = 0; index < unresolvedLinks.length; index += GOOGLE_NEWS_DECODE_CONCURRENCY) {
+      const batch = unresolvedLinks.slice(index, index + GOOGLE_NEWS_DECODE_CONCURRENCY);
+      const decodedBatch = await Promise.all(
+        batch.map(async (googleUrl) => {
+          try {
+            const result = await decoder.decode(googleUrl);
+            const decodedUrl = result.decoded_url?.trim();
+            if (!result.status || !decodedUrl || !isHttpUrl(decodedUrl) || isGoogleNewsUrl(decodedUrl)) {
+              return null;
+            }
+            return { sourceUrl: googleUrl, decodedUrl: canonicalizeUrl(decodedUrl) };
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      for (const entry of decodedBatch) {
+        if (!entry) {
+          continue;
+        }
+        decodedMap.set(entry.sourceUrl, entry.decodedUrl);
+      }
+    }
+  }
+
   return items.map((item) => {
     const decodedLink = decodedMap.get(item.link);
     if (!decodedLink) {
       return item;
     }
-    return {
+    const updated = {
       ...item,
       link: decodedLink,
       sourceUrl: decodedLink,
+    };
+    return {
+      ...updated,
+      isWhitelistedSource: isTrustedSource(updated),
     };
   });
 }
@@ -394,17 +561,24 @@ function parseRssOrAtom(xmlText: string, fallbackSourceName: string, fallbackSou
           return null;
         }
 
+        const canonicalLink = canonicalizeUrl(bestLink);
+        const canonicalSourceUrl = canonicalizeUrl(sourceUrl);
         const item: RawFeedItem = {
           sourceId,
           sourceName: sourceTagName || fallbackSourceName,
-          sourceUrl,
+          sourceUrl: canonicalSourceUrl,
           title,
-          link: canonicalizeUrl(bestLink),
+          link: canonicalLink,
           publishedAt,
           summary,
           detailText,
           highlights,
-          isWhitelistedSource: true,
+          isWhitelistedSource: isTrustedSource({
+            sourceId,
+            sourceName: sourceTagName || fallbackSourceName,
+            sourceUrl: canonicalSourceUrl,
+            link: canonicalLink,
+          }),
         };
         return item;
       })
@@ -427,17 +601,24 @@ function parseRssOrAtom(xmlText: string, fallbackSourceName: string, fallbackSou
         return null;
       }
 
+      const canonicalLink = canonicalizeUrl(link);
+      const canonicalSourceUrl = canonicalizeUrl(fallbackSourceUrl);
       const item: RawFeedItem = {
         sourceId,
         sourceName: fallbackSourceName,
-        sourceUrl: fallbackSourceUrl,
+        sourceUrl: canonicalSourceUrl,
         title,
-        link: canonicalizeUrl(link),
+        link: canonicalLink,
         publishedAt,
         summary,
         detailText,
         highlights,
-        isWhitelistedSource: true,
+        isWhitelistedSource: isTrustedSource({
+          sourceId,
+          sourceName: fallbackSourceName,
+          sourceUrl: canonicalSourceUrl,
+          link: canonicalLink,
+        }),
       };
       return item;
     })
@@ -449,7 +630,17 @@ function normalizeWhitespace(text: string) {
 }
 
 function compactForCompare(text: string) {
-  return normalize(text).replace(/[^a-z0-9]+/gi, '');
+  return normalize(text)
+    .replace(/ı/g, 'i')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/â/g, 'a')
+    .replace(/î/g, 'i')
+    .replace(/û/g, 'u')
+    .replace(/[^a-z0-9]+/gi, '');
 }
 
 function hasLowQualitySnippet(text: string) {
@@ -470,6 +661,11 @@ function isGenericTitle(title: string, sourceName: string) {
   const cleanedTitle = normalizeWhitespace(stripHtml(title));
   const normalizedTitle = normalize(cleanedTitle);
   const normalizedSource = normalize(sourceName);
+  const titleNoSource = normalizeWhitespace(cleanedTitle.replace(new RegExp(`\\s*-\\s*${sourceName}$`, 'i'), ''));
+  const normalizedTitleNoSource = normalize(titleNoSource);
+  const titleCompact = compactForCompare(cleanedTitle);
+  const sourceCompact = compactForCompare(sourceName);
+  const titleNoSourceCompact = compactForCompare(titleNoSource);
 
   const genericPatterns = [
     'duyurular',
@@ -478,17 +674,46 @@ function isGenericTitle(title: string, sourceName: string) {
     'announcements',
     'news',
     'guncellemeler',
+    'iletisim',
+    'misyonumuz',
+    'vizyonumuz',
+    'hakkimizda',
+    'sss',
+    'sikca sorulan sorular',
+    'genel duyurular',
+    'basin',
+    'kurul kararlari',
+    'daire baskanlari',
+    'dergi haberleri',
+    'untitled',
+    'cumhuriyet bassavcisi',
+    'birinci baskani',
   ];
+  const genericPatternCompacts = genericPatterns.map((pattern) => compactForCompare(pattern)).filter(Boolean);
 
-  if (normalizedTitle === normalizedSource) {
+  if (/^\d{3,}\.pdf$/i.test(cleanedTitle)) {
+    return true;
+  }
+  if (/^[-–—]\s*[a-z0-9.-]+\.[a-z]{2,}$/i.test(titleNoSource)) {
+    return true;
+  }
+  if (cleanedTitle.includes('?') && !hasStrongNewsSignal(cleanedTitle)) {
     return true;
   }
 
-  if (cleanedTitle.length <= 30 && genericPatterns.some((pattern) => normalizedTitle.includes(pattern))) {
+  if (normalizedTitle === normalizedSource || (titleCompact && sourceCompact && titleCompact === sourceCompact)) {
     return true;
   }
 
-  if (genericPatterns.some((pattern) => normalizedTitle === `${pattern} - ${normalizedSource}`)) {
+  if (cleanedTitle.length <= 30 && genericPatternCompacts.some((pattern) => titleCompact.includes(pattern))) {
+    return true;
+  }
+
+  if (genericPatternCompacts.some((pattern) => titleCompact === `${pattern}${sourceCompact}`)) {
+    return true;
+  }
+
+  if (!hasStrongNewsSignal(cleanedTitle) && genericPatternCompacts.some((pattern) => titleNoSourceCompact.includes(pattern))) {
     return true;
   }
 
@@ -497,15 +722,12 @@ function isGenericTitle(title: string, sourceName: string) {
 
 function hasConcreteContext(text: string) {
   const normalizedText = normalize(text);
-  if (!normalizedText) {
+  const compactText = compactForCompare(text);
+  if (!normalizedText || !compactText) {
     return false;
   }
 
-  if (
-    normalizedText.includes('tarih:') ||
-    normalizedText.includes('birim:') ||
-    normalizedText.includes('ek dosya:')
-  ) {
+  if (compactText.includes('tarih') || compactText.includes('birim') || compactText.includes('ekdosya')) {
     return true;
   }
 
@@ -514,11 +736,152 @@ function hasConcreteContext(text: string) {
   }
 
   const monthHints = ['ocak', 'subat', 'mart', 'nisan', 'mayis', 'haziran', 'temmuz', 'agustos', 'eylul', 'ekim', 'kasim', 'aralik'];
-  return monthHints.some((hint) => normalizedText.includes(hint));
+  return monthHints.some((hint) => compactText.includes(hint));
+}
+
+function hasStrongNewsSignal(text: string) {
+  const compactText = compactForCompare(text);
+  if (!compactText) {
+    return false;
+  }
+
+  const newsSignals = [
+    'kanun',
+    'yonetmelik',
+    'teblig',
+    'karar',
+    'duyuru',
+    'ihlal',
+    'genelge',
+    'duzenleme',
+    'resmi gazete',
+    'yururluk',
+    'cezasi',
+    'bulten',
+    'teklif',
+  ];
+  if (newsSignals.some((signal) => compactText.includes(signal))) {
+    return true;
+  }
+  if (/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/.test(text)) {
+    return true;
+  }
+  if (/\b20\d{2}\/\d{1,4}\b/.test(text)) {
+    return true;
+  }
+
+  return false;
+}
+
+function sanitizeBoilerplateText(text: string) {
+  const stripped = normalizeWhitespace(
+    text
+      .replace(/Ayrintilar icin kaynak baglantisini acin\.?/gi, ' ')
+      .replace(/Bu kayit otomatik haber akisindan alinmistir;?/gi, ' ')
+      .replace(/resmi ayrintilar icin kaynak metnini dogrudan inceleyin\.?/gi, ' ')
+      .replace(/kaynaginda\s+"[^"]+"\s+baslikli yeni bir guncelleme yayinlandi\.?/gi, ' ')
+      .replace(/kaynaginda\s+"[^"]+"\s+baslikli duyuru yayimlandi\.?/gi, ' ')
+      .replace(/kaynaginda\s+yeni bir guncelleme yayinlandi\.?/gi, ' ')
+      .replace(/kaynaginda\s+yeni bir guncelleme yayimlandi\.?/gi, ' ')
+      .replace(/Kaynak metni ac ve degisikligin kapsamini dogrula\.?/gi, ' ')
+      .replace(/Etkilenen dosyalarda gorev acip sorumlu kisiye ata\.?/gi, ' ')
+      .replace(/Emsal karari ilgili dilekce\/ictihat notuna bagla\.?/gi, ' '),
+  );
+
+  return collapseRepeatedPrefixChunks(collapseRepeatedPrefixChunks(stripped));
+}
+
+function collapseRepeatedPrefixChunks(text: string) {
+  const normalizedText = normalizeWhitespace(text);
+  const words = normalizedText.split(/\s+/).filter(Boolean);
+  if (words.length < 12) {
+    return normalizedText;
+  }
+
+  const maxChunkSize = Math.min(18, Math.floor(words.length / 2));
+  for (let chunkSize = maxChunkSize; chunkSize >= 6; chunkSize -= 1) {
+    const firstChunk = words.slice(0, chunkSize).join(' ');
+    const firstCompact = compactForCompare(firstChunk);
+    if (!firstCompact) {
+      continue;
+    }
+
+    let index = chunkSize;
+    let repeated = false;
+    while (index + chunkSize <= words.length) {
+      const nextChunk = words.slice(index, index + chunkSize).join(' ');
+      if (compactForCompare(nextChunk) !== firstCompact) {
+        break;
+      }
+      repeated = true;
+      index += chunkSize;
+    }
+
+    if (repeated) {
+      return normalizeWhitespace([...words.slice(0, chunkSize), ...words.slice(index)].join(' '));
+    }
+  }
+
+  return normalizedText;
+}
+
+function normalizeTitleForSummary(title: string, sourceName: string) {
+  const cleaned = sanitizeBoilerplateText(stripHtml(title));
+  if (!cleaned) {
+    return '';
+  }
+
+  const parts = cleaned
+    .split(/\s+-\s+/)
+    .map((part) => normalizeWhitespace(part))
+    .filter((part) => part.length > 0);
+
+  if (parts.length <= 1) {
+    return cleaned;
+  }
+
+  const sourceCompact = compactForCompare(sourceName);
+  const uniqueParts = parts.filter((part, index) => {
+    const compact = compactForCompare(part);
+    if (!compact) {
+      return false;
+    }
+    if (sourceCompact && compact === sourceCompact) {
+      return false;
+    }
+    return !parts.slice(0, index).some((prev) => compactForCompare(prev) === compact);
+  });
+
+  if (uniqueParts.length > 0) {
+    return uniqueParts.join(' - ');
+  }
+
+  return parts[0] ?? cleaned;
+}
+
+function isTextEchoingTitle(text: string, title: string) {
+  const normalizedText = sanitizeBoilerplateText(text);
+  const normalizedTitle = normalizeTitleForSummary(title, '');
+  const textCompact = compactForCompare(normalizedText);
+  const titleCompact = compactForCompare(normalizedTitle);
+
+  if (!textCompact || !titleCompact) {
+    return false;
+  }
+
+  if (textCompact === titleCompact) {
+    return true;
+  }
+
+  if (textCompact.includes(titleCompact) && textCompact.replace(titleCompact, '').length < 28) {
+    return true;
+  }
+
+  return false;
 }
 
 function isInformativeSummary(summary: string, title: string, sourceName: string) {
-  if (summary.length < 70) {
+  if (summary.length < 45) {
     return false;
   }
 
@@ -542,29 +905,52 @@ function isInformativeSummary(summary: string, title: string, sourceName: string
   return true;
 }
 
-function buildFallbackSummary(title: string, sourceName: string) {
-  const cleanedTitle = normalizeWhitespace(stripHtml(title));
-  if (!cleanedTitle) {
-    return `${sourceName} kaynaginda yeni bir guncelleme yayinlandi. Ayrintilar icin kaynak baglantisini acin.`;
+function buildFallbackSummary(title: string, sourceName: string, contextText = '') {
+  const normalizedContext = sanitizeBoilerplateText(contextText);
+  const contextSentences = splitIntoCandidateSentences(normalizedContext);
+  const titleCandidate = normalizeTitleForSummary(title, sourceName);
+  const titleCompact = compactForCompare(titleCandidate);
+  const contextCandidate = contextSentences.find((sentence) => {
+    const compact = compactForCompare(sentence);
+    if (!compact) {
+      return false;
+    }
+    if (titleCompact && compact === titleCompact) {
+      return false;
+    }
+    if (isTextEchoingTitle(sentence, title)) {
+      return false;
+    }
+    return !hasLowQualitySnippet(sentence);
+  });
+
+  if (contextCandidate) {
+    return trimSummary(contextCandidate);
   }
-  return `${sourceName} kaynaginda "${cleanedTitle}" baslikli yeni bir guncelleme yayinlandi. Ayrintilar icin kaynak baglantisini acin.`;
+
+  if (titleCandidate) {
+    const withPunctuation = /[.!?]$/.test(titleCandidate) ? titleCandidate : `${titleCandidate}.`;
+    return trimSummary(withPunctuation);
+  }
+
+  return 'Haber metninde ozet cikarmaya yetecek acik ayrinti bulunmuyor.';
 }
 
 function isFallbackSummary(summary: string) {
   const normalized = normalize(summary);
-  return normalized.includes('kaynaginda') && normalized.includes('ayrintilar icin kaynak baglantisini acin');
+  return normalized.includes('ozet cikarmaya yetecek acik ayrinti bulunmuyor');
 }
 
-function normalizeSummary(summary: string, title: string, sourceName: string) {
-  const cleaned = normalizeWhitespace(summary);
+function normalizeSummary(summary: string, title: string, sourceName: string, fallbackContext = '') {
+  const cleaned = sanitizeBoilerplateText(summary);
   if (!cleaned || hasLowQualitySnippet(cleaned) || !isInformativeSummary(cleaned, title, sourceName)) {
-    return buildFallbackSummary(title, sourceName);
+    return buildFallbackSummary(title, sourceName, fallbackContext);
   }
   return cleaned;
 }
 
 function isInformativeDetail(detailText: string, summary: string, title: string) {
-  if (detailText.length < 90) {
+  if (detailText.length < 60) {
     return false;
   }
 
@@ -585,18 +971,45 @@ function isInformativeDetail(detailText: string, summary: string, title: string)
   return true;
 }
 
-function buildFallbackDetail(summary: string) {
-  return `${summary} Bu kayit otomatik haber akisindan alinmistir; resmi ayrintilar icin kaynak metnini dogrudan inceleyin.`;
+function buildFallbackDetail(summary: string, title: string, contextText = '') {
+  const normalizedContext = sanitizeBoilerplateText(contextText);
+  const candidateText = normalizeWhitespace(`${normalizedContext} ${summary} ${title}`);
+  const sentences = splitIntoCandidateSentences(candidateText).filter((sentence) => !isTextEchoingTitle(sentence, title));
+  const uniqueSentences: string[] = [];
+  const seen = new Set<string>();
+  for (const sentence of sentences) {
+    const compact = compactForCompare(sentence);
+    if (!compact || seen.has(compact)) {
+      continue;
+    }
+    seen.add(compact);
+    uniqueSentences.push(sentence);
+  }
+
+  if (uniqueSentences.length > 0) {
+    return normalizeWhitespace(uniqueSentences.slice(0, 4).join(' '));
+  }
+
+  if (summary) {
+    return summary;
+  }
+
+  const normalizedTitle = normalizeTitleForSummary(title, '');
+  if (normalizedTitle) {
+    return normalizedTitle;
+  }
+
+  return 'Haber metninde ozet cikarmaya yetecek acik ayrinti bulunmuyor.';
 }
 
 function isFallbackDetail(detailText: string) {
-  return normalize(detailText).includes('bu kayit otomatik haber akisindan alinmistir');
+  return normalize(detailText).includes('ozet cikarmaya yetecek acik ayrinti bulunmuyor');
 }
 
 function normalizeDetail(detailText: string, summary: string, title: string) {
-  const cleaned = normalizeWhitespace(detailText);
+  const cleaned = sanitizeBoilerplateText(detailText);
   if (!isInformativeDetail(cleaned, summary, title)) {
-    return buildFallbackDetail(summary);
+    return buildFallbackDetail(summary, title, cleaned);
   }
   return cleaned;
 }
@@ -665,6 +1078,16 @@ function looksNoisyParagraph(paragraph: string) {
     'tum haklari saklidir',
     'kvkk',
     'javascript',
+    'telefon',
+    'tel:',
+    'faks',
+    'fax',
+    'e-posta',
+    'eposta',
+    'adres',
+    'mahallesi',
+    'bulvari',
+    'cadde',
   ];
 
   if (noisyHints.some((hint) => normalized.includes(hint))) {
@@ -673,6 +1096,11 @@ function looksNoisyParagraph(paragraph: string) {
 
   const urlCount = (paragraph.match(/https?:\/\//gi) ?? []).length;
   if (urlCount >= 2 && wordCount < 30) {
+    return true;
+  }
+
+  const fileRefCount = (paragraph.match(/\.(?:pdf|docx?|xlsx?|pptx?|zip|rar)\b/gi) ?? []).length;
+  if (fileRefCount >= 2 && wordCount < 80) {
     return true;
   }
 
@@ -797,13 +1225,16 @@ function buildPageDerivedSummary(html: string, item: RawFeedItem) {
   const attachments = extractAttachmentNames(html);
 
   const chunks: string[] = [];
-  chunks.push(`${item.sourceName} kaynaginda "${heading}" baslikli duyuru yayimlandi.`);
+  const headingText = normalizeTitleForSummary(heading, item.sourceName);
+  if (headingText) {
+    chunks.push(/[.!?]$/.test(headingText) ? headingText : `${headingText}.`);
+  }
 
   if (unit && compactForCompare(unit) !== compactForCompare(item.sourceName)) {
-    chunks.push(`Birim: ${unit}.`);
+    chunks.push(`Ilgili birim: ${unit}.`);
   }
   if (dateText) {
-    chunks.push(`Tarih: ${dateText}.`);
+    chunks.push(`Kayitta gecen tarih: ${dateText}.`);
   }
   if (attachments.length > 0) {
     chunks.push(`Ek dosya: ${attachments.join(', ')}.`);
@@ -976,6 +1407,7 @@ function buildFallbackStructuredSummary(item: RawFeedItem, articleText: string):
     articleText.length > 0 ? articleText : item.summary,
     item.title,
     item.sourceName,
+    articleText,
   );
   const fallbackHighlights = buildHighlights(item.title, fallbackSummary, articleText);
 
@@ -1069,6 +1501,40 @@ function normalizeStructuredSummary(
     },
     numbers: normalizeList(candidate.numbers, 8).length > 0 ? normalizeList(candidate.numbers, 8) : fallback.numbers,
     uncertainties: normalizeList(candidate.uncertainties, 6),
+  };
+}
+
+function splitSummarySentences(text: string) {
+  return normalizeWhitespace(text)
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => normalizeWhitespace(sentence))
+    .filter((sentence) => sentence.length > 0);
+}
+
+function convertPublishableSummaryToStructured(
+  item: RawFeedItem,
+  articleText: string,
+  publishableSummary: string,
+): StructuredNewsSummary {
+  const fallback = buildFallbackStructuredSummary(item, articleText);
+  const sentences = splitSummarySentences(publishableSummary);
+  const oneLiner = trimSummary(sentences[0] ?? publishableSummary);
+  const sentenceBullets = sentences.slice(1, 6);
+  const supportedBullets = filterBulletsWithEvidence(sentenceBullets, articleText);
+  const fallbackBullets = fallback.bullets.filter((bullet) => !supportedBullets.includes(bullet));
+  const bullets = [...supportedBullets, ...fallbackBullets].slice(0, 5);
+
+  return {
+    oneLiner: oneLiner || fallback.oneLiner,
+    bullets: bullets.length > 0 ? bullets : fallback.bullets,
+    whoWhatWhereWhen: {
+      who: item.sourceName,
+      what: oneLiner || item.title,
+      where: 'belirtilmiyor',
+      when: item.publishedAt ? item.publishedAt.slice(0, 10) : 'belirtilmiyor',
+    },
+    numbers: extractNumbersFromText(`${publishableSummary} ${articleText}`),
+    uncertainties: [],
   };
 }
 
@@ -1248,30 +1714,63 @@ async function summarizeArticleWithHybridApproach(item: RawFeedItem, articleText
     .join('\n');
 
   const prompt = [
+    'Sen hukuk odakli bir haber editorsun. Sana verilen icerikten, hukukcular icin yayinlanabilir nitelikte Turkce haber ozeti uret.',
+    '',
+    'GOREV:',
+    '- Metni dikkatle oku ve SADECE verilen icerikte acikca yer alan bilgilere dayan.',
+    '- Ozet en az 6 en fazla 8 cumle olsun.',
+    '- Ilk cumle haberin ozunu dogrudan anlatsin.',
+    '- Dogal, akici, profesyonel haber dili kullan.',
+    '- Boilerplate/fallback dili kullanma.',
+    '- Metinde acikca gecmeyen bilgi ekleme, yorum yapma, tahmin yuruttme.',
+    '- Icerik yetersizse ozet uydurma.',
+    '',
+    'YASAKLAR:',
+    '- "... kaynaginda ... baslikli yeni bir guncelleme yayimlandi."',
+    '- "Ayrintilar icin kaynak baglantisini acin."',
+    '- "Bu kayit otomatik haber akisindan alinmistir."',
+    '- "Kamuoyuyla paylasildi."',
+    '- "Detaylar resmi aciklamada yer aldi."',
+    '',
+    'CIKTI FORMATI (yalnizca JSON):',
+    '{"publishable": true, "summary": "tek paragraf halinde, 6-8 cumlelik yayinlanabilir ozet"}',
+    'veya',
+    '{"publishable": false, "summary": ""}',
+    '',
     `Baslik: ${item.title}`,
     `Kaynak: ${item.sourceName}`,
+    `Link: ${item.link || item.sourceUrl}`,
     `Yayin tarihi: ${item.publishedAt}`,
-    'Asagidaki cikarimsal (extractive) cekirdege bakarak tek bir abstractive ozet uret.',
-    'Kurallar:',
-    '- Cikti Turkce olmali.',
-    '- Sadece verilen cikarimsal cumlelerde gecen bilgiye dayan.',
-    '- Metinde olmayan bilgi ekleme.',
-    '- Bir alan belirsizse "belirtilmiyor" yaz.',
-    '- Hukuki tavsiye veya yorum uretme.',
-    '',
-    `Cikarimsal cumleler (${extractiveSelection.minSentences}-${extractiveSelection.maxSentences}, secilen=${extractiveSentences.length}):`,
+    `Icerik (${extractiveSelection.minSentences}-${extractiveSelection.maxSentences}, secilen=${extractiveSentences.length}):`,
     extractiveContext,
   ].join('\n');
 
   try {
     const { object } = await generateObject({
       model: modelSelection.model,
-      schema: finalSummarySchema,
+      schema: publishableSummarySchema,
       prompt,
       temperature: 0,
     });
+    const publishableSummary = normalizeWhitespace(object.summary ?? '');
+    const summarySentenceCount = splitSummarySentences(publishableSummary).length;
+    const looksValidPublishableSummary =
+      object.publishable &&
+      publishableSummary.length > 0 &&
+      summarySentenceCount >= 6 &&
+      summarySentenceCount <= 8 &&
+      !hasLowQualitySnippet(publishableSummary);
 
-    return normalizeStructuredSummary(object, item, articleText);
+    if (looksValidPublishableSummary) {
+      return convertPublishableSummaryToStructured(item, articleText, publishableSummary);
+    }
+
+    const extractiveFallback = normalizeWhitespace(extractiveSentences.join(' '));
+    if (extractiveFallback.length > 0) {
+      return convertPublishableSummaryToStructured(item, articleText, extractiveFallback);
+    }
+
+    return null;
   } catch {
     const fallbackBullets = buildHighlights(
       item.title,
@@ -1323,40 +1822,74 @@ function looksThinSummary(summary: string) {
 }
 
 async function enrichSingleRawItem(item: RawFeedItem, aiSummaryBudget: { remaining: number }): Promise<RawFeedItem> {
-  const currentSummary = normalizeSummary(item.summary, item.title, item.sourceName);
+  const currentSummary = normalizeSummary(item.summary, item.title, item.sourceName, item.detailText ?? '');
   const currentDetailText = normalizeDetail(item.detailText ?? '', currentSummary, item.title);
+  let resolvedLink = item.link;
+  const resolveTrustState = (linkValue: string, sourceUrlValue: string) => {
+    return isTrustedSource({
+      sourceId: item.sourceId,
+      sourceName: item.sourceName,
+      link: linkValue || item.link,
+      sourceUrl: sourceUrlValue || item.sourceUrl,
+    });
+  };
 
-  // Google News RSS article links often return a generic portal page instead of source content.
-  if (isGoogleNewsUrl(item.link)) {
+  // As a second chance, try decoding unresolved Google News links per-item.
+  if (isGoogleNewsUrl(resolvedLink)) {
+    const decoder = await getGoogleDecoder();
+    if (decoder) {
+      try {
+        const decoded = await decoder.decode(resolvedLink);
+        const decodedUrl = decoded.decoded_url?.trim();
+        if (decoded.status && decodedUrl && isHttpUrl(decodedUrl) && !isGoogleNewsUrl(decodedUrl)) {
+          resolvedLink = canonicalizeUrl(decodedUrl);
+        }
+      } catch {
+        // Best-effort decode; fall back to existing summary/detail.
+      }
+    }
+  }
+
+  // If it is still a Google News shell URL, skip source fetch to avoid low-value pages.
+  if (isGoogleNewsUrl(resolvedLink)) {
     const fallbackHighlights = buildHighlights(item.title, currentSummary, currentDetailText);
     return {
       ...item,
+      link: resolvedLink,
+      sourceUrl: resolvedLink,
       summary: currentSummary,
       detailText: currentDetailText,
       highlights: item.highlights?.length ? item.highlights : fallbackHighlights,
+      isWhitelistedSource: resolveTrustState(resolvedLink, resolvedLink),
     };
   }
 
-  const shouldFetchFromSource = Boolean(item.link);
+  const shouldFetchFromSource = Boolean(resolvedLink);
   if (!shouldFetchFromSource) {
     const fallbackHighlights = buildHighlights(item.title, currentSummary, currentDetailText);
     return {
       ...item,
+      link: resolvedLink || item.link,
+      sourceUrl: resolvedLink || item.sourceUrl,
       summary: currentSummary,
       detailText: currentDetailText,
       highlights: item.highlights?.length ? item.highlights : fallbackHighlights,
+      isWhitelistedSource: resolveTrustState(resolvedLink || item.link, resolvedLink || item.sourceUrl),
     };
   }
 
   try {
-    const response = await fetchTextWithTimeout(item.link, 7000);
+    const response = await fetchTextWithTimeout(resolvedLink, NEWS_ARTICLE_FETCH_TIMEOUT_MS);
     if (!response.ok) {
       const fallbackHighlights = buildHighlights(item.title, currentSummary, currentDetailText);
       return {
         ...item,
+        link: resolvedLink,
+        sourceUrl: resolvedLink,
         summary: currentSummary,
         detailText: currentDetailText,
         highlights: item.highlights?.length ? item.highlights : fallbackHighlights,
+        isWhitelistedSource: resolveTrustState(resolvedLink, resolvedLink),
       };
     }
 
@@ -1385,7 +1918,7 @@ async function enrichSingleRawItem(item: RawFeedItem, aiSummaryBudget: { remaini
 
     let structuredSummary: StructuredNewsSummary | null = null;
     if (shouldUseModelSummary(currentSummary, currentDetailText, bestAvailableTextForSummary)) {
-      const cacheKey = buildSummaryCacheKey(item.link || item.sourceUrl, bestAvailableTextForSummary);
+      const cacheKey = buildSummaryCacheKey(resolvedLink || item.sourceUrl, bestAvailableTextForSummary);
       const cachedSummary = getCachedSummary(cacheKey);
       if (cachedSummary) {
         structuredSummary = cachedSummary;
@@ -1398,10 +1931,10 @@ async function enrichSingleRawItem(item: RawFeedItem, aiSummaryBudget: { remaini
     }
 
     if (structuredSummary) {
-      const mergedSummary = trimSummary(
-        normalizeSummary(structuredSummary.oneLiner, item.title, item.sourceName),
-      );
       const structuredDetailText = buildStructuredDetailText(structuredSummary);
+      const mergedSummary = trimSummary(
+        normalizeSummary(structuredSummary.oneLiner, item.title, item.sourceName, structuredDetailText),
+      );
       const mergedDetailText = normalizeDetail(structuredDetailText, mergedSummary, item.title);
       const highlights = structuredSummary.bullets.length > 0
         ? structuredSummary.bullets.slice(0, 3)
@@ -1409,9 +1942,12 @@ async function enrichSingleRawItem(item: RawFeedItem, aiSummaryBudget: { remaini
 
       return {
         ...item,
+        link: resolvedLink,
+        sourceUrl: resolvedLink,
         summary: mergedSummary,
         detailText: mergedDetailText,
         highlights,
+        isWhitelistedSource: resolveTrustState(resolvedLink, resolvedLink),
       };
     }
 
@@ -1425,17 +1961,31 @@ async function enrichSingleRawItem(item: RawFeedItem, aiSummaryBudget: { remaini
           : compactMainArticleText,
       ].filter((part) => part.length > 0).join(' '),
     );
+    const extractiveFallbackSelection = selectExtractiveSentences(bestAvailableTextForSummary);
+    const extractiveFallbackText = normalizeWhitespace(extractiveFallbackSelection.sentences.join(' '));
+    const fallbackSummarySeed =
+      extractiveFallbackSelection.sentences[0] ||
+      (fallbackBestText.length > 0 ? fallbackBestText : currentSummary);
+    const fallbackDetailSeed = extractiveFallbackText.length > 0 ? extractiveFallbackText : fallbackBestText;
     const mergedSummary = trimSummary(
-      normalizeSummary(fallbackBestText.length > 0 ? fallbackBestText : currentSummary, item.title, item.sourceName),
+      normalizeSummary(
+        fallbackSummarySeed,
+        item.title,
+        item.sourceName,
+        `${fallbackDetailSeed} ${currentDetailText}`,
+      ),
     );
-    const mergedDetailText = normalizeDetail(fallbackBestText, mergedSummary, item.title);
+    const mergedDetailText = normalizeDetail(fallbackDetailSeed, mergedSummary, item.title);
     const highlights = buildHighlights(item.title, mergedSummary, mergedDetailText);
 
     return {
       ...item,
+      link: resolvedLink,
+      sourceUrl: resolvedLink,
       summary: mergedSummary,
       detailText: mergedDetailText,
       highlights: highlights.length > 0 ? highlights : buildHighlights(item.title, mergedSummary, ''),
+      isWhitelistedSource: resolveTrustState(resolvedLink, resolvedLink),
     };
   } catch {
     const fallbackHighlights = buildHighlights(item.title, currentSummary, currentDetailText);
@@ -1444,12 +1994,13 @@ async function enrichSingleRawItem(item: RawFeedItem, aiSummaryBudget: { remaini
       summary: currentSummary || item.title,
       detailText: currentDetailText,
       highlights: fallbackHighlights,
+      isWhitelistedSource: resolveTrustState(item.link, item.sourceUrl),
     };
   }
 }
 
-async function enrichRawItemsWithContent(items: RawFeedItem[]) {
-  const toEnrichCount = Math.min(items.length, NEWS_ENRICH_LIMIT);
+async function enrichRawItemsWithContent(items: RawFeedItem[], enrichLimit = NEWS_ENRICH_LIMIT) {
+  const toEnrichCount = Math.min(items.length, Math.max(enrichLimit, 0));
   const highPriorityItems = items.slice(0, toEnrichCount);
   const remainingItems = items.slice(toEnrichCount);
   const concurrency = NEWS_ENRICH_CONCURRENCY;
@@ -1463,13 +2014,20 @@ async function enrichRawItemsWithContent(items: RawFeedItem[]) {
   }
 
   const remainingNormalized = remainingItems.map((item) => {
-    const summary = normalizeSummary(item.summary, item.title, item.sourceName);
+    const summary = normalizeSummary(item.summary, item.title, item.sourceName, item.detailText ?? '');
     const detailText = normalizeDetail(item.detailText ?? '', summary, item.title);
+    const trusted = isTrustedSource({
+      sourceId: item.sourceId,
+      sourceName: item.sourceName,
+      sourceUrl: item.sourceUrl,
+      link: item.link,
+    });
     return {
       ...item,
       summary,
       detailText,
       highlights: item.highlights?.length ? item.highlights : buildHighlights(item.title, summary, detailText),
+      isWhitelistedSource: trusted,
     };
   });
 
@@ -1495,7 +2053,7 @@ async function fetchTextWithTimeout(url: string, timeoutMs: number) {
 }
 
 function buildGoogleNewsUrl(source: DomainSourceConfig) {
-  const searchQuery = `site:${source.domain} (${source.searchTerms.join(' OR ')})`;
+  const searchQuery = `site:${source.domain} (${source.searchTerms.join(' OR ')}) ${GOOGLE_NEWS_RECENCY_FILTER}`;
   return `https://news.google.com/rss/search?q=${encodeURIComponent(searchQuery)}&hl=tr&gl=TR&ceid=TR:tr`;
 }
 
@@ -1504,7 +2062,7 @@ async function fetchGoogleNewsSource(source: DomainSourceConfig): Promise<FetchR
   const startedAt = Date.now();
 
   try {
-    const response = await fetchTextWithTimeout(endpoint, 12000);
+    const response = await fetchTextWithTimeout(endpoint, NEWS_SOURCE_FETCH_TIMEOUT_MS);
     const elapsed = Date.now() - startedAt;
     if (!response.ok) {
       return {
@@ -1523,7 +2081,7 @@ async function fetchGoogleNewsSource(source: DomainSourceConfig): Promise<FetchR
     }
 
     const xmlText = await response.text();
-    const parsedItems = parseRssOrAtom(xmlText, source.name, source.websiteUrl, source.id).slice(0, 12);
+    const parsedItems = parseRssOrAtom(xmlText, source.name, source.websiteUrl, source.id).slice(0, NEWS_SOURCE_ITEMS_PER_FEED);
 
     return {
       status: {
@@ -1572,7 +2130,7 @@ async function fetchTwitterSource(): Promise<FetchResult> {
       '&hl=tr&gl=TR&ceid=TR:tr';
 
     try {
-      const response = await fetchTextWithTimeout(fallbackEndpoint, 12000);
+      const response = await fetchTextWithTimeout(fallbackEndpoint, NEWS_SOURCE_FETCH_TIMEOUT_MS);
       const elapsed = Date.now() - startedAt;
       if (!response.ok) {
         return {
@@ -1591,7 +2149,7 @@ async function fetchTwitterSource(): Promise<FetchResult> {
       }
 
       const xmlText = await response.text();
-      const items = parseRssOrAtom(xmlText, 'X', 'https://x.com', 'x-twitter').slice(0, 10);
+      const items = parseRssOrAtom(xmlText, 'X', 'https://x.com', 'x-twitter').slice(0, NEWS_X_FALLBACK_ITEMS_PER_FEED);
 
       return {
         status: {
@@ -1622,7 +2180,7 @@ async function fetchTwitterSource(): Promise<FetchResult> {
     }
   }
 
-  const accounts = (process.env.NEWS_X_ACCOUNTS ?? 'ResmiGazete,TBMMresmi,adalet_bakanlik,KVKKKurumu,YargitayBaskanlik')
+  const accounts = (process.env.NEWS_X_ACCOUNTS ?? DEFAULT_TRUSTED_X_ACCOUNTS)
     .split(',')
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
@@ -1666,16 +2224,23 @@ async function fetchTwitterSource(): Promise<FetchResult> {
       const user = tweet.author_id ? usersById.get(tweet.author_id) : undefined;
       const username = user?.username ?? 'x-kaynak';
       const title = stripHtml(tweet.text).slice(0, 160);
+      const sourceUrl = `https://x.com/${username}`;
+      const link = `https://x.com/${username}/status/${tweet.id}`;
 
       return {
         sourceId: 'x-twitter',
         sourceName: `X / @${username}`,
-        sourceUrl: `https://x.com/${username}`,
+        sourceUrl,
         title: title.length > 0 ? title : 'X paylasimi',
-        link: `https://x.com/${username}/status/${tweet.id}`,
+        link,
         publishedAt: toIsoDate(tweet.created_at ?? new Date().toISOString()),
         summary: trimSummary(stripHtml(tweet.text)),
-        isWhitelistedSource: true,
+        isWhitelistedSource: isTrustedSource({
+          sourceId: 'x-twitter',
+          sourceName: `X / @${username}`,
+          sourceUrl,
+          link,
+        }),
       };
     });
 
@@ -1832,7 +2397,7 @@ function buildActionDraft(category: NewsCategory, severity: NewsSeverity, worksp
 }
 
 function mapRawToLiveItem(rawItem: RawFeedItem, activeCases: DashboardCaseLite[]): LiveNewsItem {
-  const summary = trimSummary(normalizeSummary(rawItem.summary, rawItem.title, rawItem.sourceName));
+  const summary = trimSummary(normalizeSummary(rawItem.summary, rawItem.title, rawItem.sourceName, rawItem.detailText ?? ''));
   const detailText = normalizeDetail(rawItem.detailText ?? '', summary, rawItem.title);
   const highlights = rawItem.highlights?.length ? rawItem.highlights : buildHighlights(rawItem.title, summary, detailText);
   const textCorpus = `${rawItem.title} ${summary} ${detailText}`;
@@ -1921,9 +2486,145 @@ function dedupeByContentFingerprint(items: RawFeedItem[]) {
   return [...byFingerprint.values()];
 }
 
-export async function buildDashboardNewsPayload(options: { activeCases: DashboardCaseLite[]; limit?: number }): Promise<DashboardNewsPayload> {
-  const limit = Math.min(Math.max(options.limit ?? 80, 10), 200);
+function legalRelevanceScore(item: RawFeedItem) {
+  const textCorpus = normalize(`${item.title} ${item.summary} ${item.detailText ?? ''} ${item.sourceName}`);
+  const positiveMatches = LEGAL_RELEVANCE_KEYWORDS.reduce((count, keyword) => {
+    return textCorpus.includes(keyword) ? count + 1 : count;
+  }, 0);
+  const negativeMatches = LOW_LEGAL_RELEVANCE_KEYWORDS.reduce((count, keyword) => {
+    return textCorpus.includes(keyword) ? count + 1 : count;
+  }, 0);
 
+  let score = 0;
+  if (item.isWhitelistedSource) {
+    score += 1.35;
+  }
+  if (hasStrongNewsSignal(textCorpus)) {
+    score += 1.1;
+  }
+  score += Math.min(positiveMatches * 0.45, 2.25);
+  score -= Math.min(negativeMatches * 0.5, 1.5);
+
+  if (item.sourceId === 'x-twitter' && positiveMatches < 2) {
+    score -= 0.7;
+  }
+  if (isGenericTitle(item.title, item.sourceName) && positiveMatches === 0) {
+    score -= 0.9;
+  }
+
+  return score;
+}
+
+function filterLowQualityItems(items: RawFeedItem[]) {
+  return items.filter((item) => {
+    const summaryEchoesTitle = isTextEchoingTitle(item.summary, item.title);
+    const detailEchoesTitle = isTextEchoingTitle(item.detailText ?? '', item.title);
+    const textCorpus = `${item.title} ${item.summary} ${item.detailText ?? ''}`;
+    const hasStructuredSignals = hasConcreteContext(textCorpus);
+    const summaryLength = normalizeWhitespace(item.summary).length;
+    const detailLength = normalizeWhitespace(item.detailText ?? '').length;
+    const detailSentenceCount = splitSummarySentences(item.detailText ?? '').length;
+    const relevanceScore = legalRelevanceScore(item);
+
+    if (relevanceScore < LEGAL_RELEVANCE_MIN_SCORE) {
+      return false;
+    }
+
+    if (summaryEchoesTitle && detailEchoesTitle) {
+      return false;
+    }
+    if (detailEchoesTitle && detailSentenceCount < 2 && detailLength < 220) {
+      return false;
+    }
+    if (/^\d{3,}\.pdf\b/i.test(item.title) && detailLength < 120) {
+      return false;
+    }
+    if ((summaryLength < 80 || detailLength < 110) && detailSentenceCount < 2 && !hasStructuredSignals) {
+      return false;
+    }
+
+    const titleIsGeneric = isGenericTitle(item.title, item.sourceName);
+    if (!titleIsGeneric) {
+      return true;
+    }
+    // Baslik cok genelse ancak somut birikim (tarih/birim/ek dosya) varsa goster.
+    if (!hasStructuredSignals) {
+      return false;
+    }
+    if (!hasStrongNewsSignal(textCorpus)) {
+      return false;
+    }
+    // Baslik cok genelse ve halen fallback metnindeyse akis gurultusunu azalt.
+    return !isFallbackSummary(item.summary) && !isFallbackDetail(item.detailText ?? '');
+  });
+}
+
+function contentRichnessScore(item: RawFeedItem) {
+  const summaryLength = normalizeWhitespace(item.summary).length;
+  const detailText = normalizeWhitespace(item.detailText ?? '');
+  const detailLength = detailText.length;
+  const detailSentenceCount = splitSummarySentences(detailText).length;
+  const textCorpus = `${item.title} ${item.summary} ${item.detailText ?? ''}`;
+
+  let score = 0;
+  score += Math.min(summaryLength, 240) / 100;
+  score += Math.min(detailLength, 700) / 150;
+  if (detailSentenceCount >= 2) {
+    score += 1.3;
+  }
+  if (hasConcreteContext(textCorpus)) {
+    score += 1.0;
+  }
+  if (hasStrongNewsSignal(textCorpus)) {
+    score += 1.1;
+  }
+  if (isTextEchoingTitle(item.summary, item.title)) {
+    score -= 1.4;
+  }
+  if (isTextEchoingTitle(item.detailText ?? '', item.title)) {
+    score -= 1.7;
+  }
+  if (isFallbackSummary(item.summary) || isFallbackDetail(item.detailText ?? '')) {
+    score -= 2.2;
+  }
+  score += legalRelevanceScore(item) * 0.35;
+
+  return score;
+}
+
+function rankItemsByQualityAndRecency(items: RawFeedItem[]) {
+  return [...items].sort((a, b) => {
+    const scoreDiff = contentRichnessScore(b) - contentRichnessScore(a);
+    if (Math.abs(scoreDiff) > 0.01) {
+      return scoreDiff;
+    }
+    return Date.parse(b.publishedAt) - Date.parse(a.publishedAt);
+  });
+}
+
+function getCachedPreparedNewsSnapshot() {
+  if (!preparedNewsSnapshotCache) {
+    return null;
+  }
+  if (preparedNewsSnapshotCache.expiresAt <= Date.now()) {
+    preparedNewsSnapshotCache = null;
+    return null;
+  }
+  return preparedNewsSnapshotCache.value;
+}
+
+function setCachedPreparedNewsSnapshot(value: PreparedNewsSnapshot) {
+  const ttlMs = value.rawItems.length > 0 ? DASHBOARD_NEWS_SNAPSHOT_TTL_MS : EMPTY_SNAPSHOT_TTL_MS;
+  if (value.rawItems.length > 0) {
+    lastNonEmptyPreparedNewsSnapshot = value;
+  }
+  preparedNewsSnapshotCache = {
+    value,
+    expiresAt: Date.now() + ttlMs,
+  };
+}
+
+async function buildPreparedNewsSnapshot(): Promise<PreparedNewsSnapshot> {
   const sourceResults = await Promise.all([
     ...GOOGLE_NEWS_SOURCES.map((source) => fetchGoogleNewsSource(source)),
     fetchTwitterSource(),
@@ -1932,34 +2633,78 @@ export async function buildDashboardNewsPayload(options: { activeCases: Dashboar
   const sourceHealth = sourceResults.map((result) => result.status);
   const rawItems = sourceResults.flatMap((result) => result.items);
   const resolvedRawItems = await resolveGoogleNewsLinks(rawItems);
-  const dedupedRawItems = dedupeItems(resolvedRawItems).sort(
+  const dedupedRawItems = dedupeItems(resolvedRawItems)
+    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+    .slice(0, NEWS_CANDIDATE_POOL_LIMIT);
+  const enrichedRawItems = await enrichRawItemsWithContent(dedupedRawItems, NEWS_ENRICH_LIMIT);
+  const contentDedupedRawItems = dedupeByContentFingerprint(enrichedRawItems);
+  const sortedContentDedupedRawItems = [...contentDedupedRawItems].sort(
     (a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt),
   );
-  const enrichedRawItems = await enrichRawItemsWithContent(dedupedRawItems);
-  const contentDedupedRawItems = dedupeByContentFingerprint(enrichedRawItems);
-  const qualityFilteredRawItems = contentDedupedRawItems.filter((item) => {
-    const titleIsGeneric = isGenericTitle(item.title, item.sourceName);
-    if (!titleIsGeneric) {
-      return true;
-    }
-    // Baslik cok genelse ancak somut birikim (tarih/birim/ek dosya) varsa goster.
-    const hasStructuredSignals = hasConcreteContext(`${item.summary} ${item.detailText ?? ''}`);
-    if (!hasStructuredSignals) {
-      return false;
-    }
-    // Baslik cok genelse ve halen fallback metnindeyse akis gurultusunu azalt.
-    return !isFallbackSummary(item.summary) && !isFallbackDetail(item.detailText ?? '');
-  });
+  const qualityFilteredRawItems = filterLowQualityItems(sortedContentDedupedRawItems);
+  const rankedQualityItems = rankItemsByQualityAndRecency(qualityFilteredRawItems);
+  const nonEchoFallbackItems = sortedContentDedupedRawItems.filter(
+    (item) =>
+      legalRelevanceScore(item) >= LEGAL_RELEVANCE_MIN_SCORE &&
+      !isFallbackSummary(item.summary) &&
+      !isFallbackDetail(item.detailText ?? '') &&
+      !(isTextEchoingTitle(item.summary, item.title) && isTextEchoingTitle(item.detailText ?? '', item.title)),
+  );
+  const rankedFallbackItems = rankItemsByQualityAndRecency(nonEchoFallbackItems);
+  const richQualityItems = rankedQualityItems.filter((item) => contentRichnessScore(item) >= 4.4);
+  const primaryItems = richQualityItems.length >= 18 ? richQualityItems : rankedQualityItems;
+  const safeRawItems = primaryItems.length > 0
+    ? primaryItems.slice(0, NEWS_CANDIDATE_POOL_LIMIT)
+    : rankedFallbackItems.slice(0, NEWS_CANDIDATE_POOL_LIMIT);
 
-  const liveItems = qualityFilteredRawItems
+  return {
+    generatedAt: new Date().toISOString(),
+    sourceHealth,
+    rawItems: safeRawItems,
+  };
+}
+
+async function getPreparedNewsSnapshot(forceRefresh = false) {
+  const cached = forceRefresh ? null : getCachedPreparedNewsSnapshot();
+  if (cached) {
+    return cached;
+  }
+
+  if (!forceRefresh && preparedNewsSnapshotPromise) {
+    return preparedNewsSnapshotPromise;
+  }
+
+  preparedNewsSnapshotPromise = buildPreparedNewsSnapshot()
+    .then((snapshot) => {
+      setCachedPreparedNewsSnapshot(snapshot);
+      return snapshot;
+    })
+    .finally(() => {
+      preparedNewsSnapshotPromise = null;
+    });
+
+  return preparedNewsSnapshotPromise;
+}
+
+export async function buildDashboardNewsPayload(options: { activeCases: DashboardCaseLite[]; limit?: number }): Promise<DashboardNewsPayload> {
+  const limit = Math.min(Math.max(options.limit ?? 80, 10), 200);
+  let snapshot = await getPreparedNewsSnapshot();
+  if (snapshot.rawItems.length === 0) {
+    snapshot = await getPreparedNewsSnapshot(true);
+  }
+  if (snapshot.rawItems.length === 0 && lastNonEmptyPreparedNewsSnapshot) {
+    snapshot = lastNonEmptyPreparedNewsSnapshot;
+  }
+
+  const liveItems = snapshot.rawItems
     .map((rawItem) => mapRawToLiveItem(rawItem, options.activeCases))
     .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
     .slice(0, limit);
 
   return {
-    generatedAt: new Date().toISOString(),
+    generatedAt: snapshot.generatedAt,
     followupKeywords: [...DEFAULT_KEYWORD_FOLLOWUPS],
     items: liveItems,
-    sources: sourceHealth,
+    sources: snapshot.sourceHealth,
   };
 }

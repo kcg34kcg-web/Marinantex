@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "codex/**"]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Corepack
+        run: corepack enable
+
+      - name: Install
+        working-directory: lexoffice-ai
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Prisma Generate
+        working-directory: lexoffice-ai
+        run: corepack pnpm --filter @lexoffice/db prisma:generate
+
+      - name: Typecheck
+        working-directory: lexoffice-ai
+        run: corepack pnpm -r typecheck
+
+      - name: Unit Tests
+        working-directory: lexoffice-ai
+        run: corepack pnpm -r test
+
+      - name: Build
+        working-directory: lexoffice-ai
+        run: corepack pnpm build
+
+      - name: Install Playwright Browser
+        working-directory: lexoffice-ai/apps/web
+        run: corepack pnpm exec playwright install --with-deps chromium
+
+      - name: E2E Smoke
+        working-directory: lexoffice-ai
+        run: corepack pnpm e2e:smoke

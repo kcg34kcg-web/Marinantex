@@ -19,10 +19,11 @@ const ALLOWED_CATEGORIES = new Set([
   'zaman_hassas',
   'adversarial',
 ]);
+const ALLOWED_REVIEW_STATUS = new Set(['expert_verified']);
 
 function parseArgs(argv) {
   const args = {
-    dataset: 'evals/rag_v3_eval_set_v0_template.jsonl',
+    dataset: 'evals/rag_v3_ground_truth_v1.jsonl',
     baseUrl: process.env.RAG_V3_EVAL_BASE_URL || 'http://127.0.0.1:8000',
     queryPath: process.env.RAG_V3_EVAL_QUERY_PATH || '/api/v1/rag-v3/query',
     output: 'artifacts/rag-v3-eval-report.json',
@@ -31,6 +32,7 @@ function parseArgs(argv) {
     bureauId: process.env.RAG_V3_EVAL_BUREAU_ID || '',
     userId: process.env.RAG_V3_EVAL_USER_ID || '',
     concurrency: Number(process.env.RAG_V3_EVAL_CONCURRENCY || 2),
+    minDatasetSize: Number(process.env.RAG_V3_EVAL_MIN_DATASET_SIZE || 100),
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -52,10 +54,12 @@ function parseArgs(argv) {
     if (key === 'bureau-id') args.bureauId = next;
     if (key === 'user-id') args.userId = next;
     if (key === 'concurrency') args.concurrency = Number(next);
+    if (key === 'min-dataset-size') args.minDatasetSize = Number(next);
   }
 
   if (!Number.isFinite(args.topK) || args.topK < 1) args.topK = 10;
   if (!Number.isFinite(args.concurrency) || args.concurrency < 1) args.concurrency = 1;
+  if (!Number.isFinite(args.minDatasetSize) || args.minDatasetSize < 1) args.minDatasetSize = 100;
   return args;
 }
 
@@ -88,8 +92,22 @@ function validateRow(row, index) {
   if (typeof row.question !== 'string' || row.question.trim().length === 0) {
     throw new Error(`Dataset row ${lineNo} missing non-empty "question".`);
   }
+  if (typeof row.question_id !== 'string' || row.question_id.trim().length === 0) {
+    throw new Error(`Dataset row ${lineNo} missing non-empty "question_id".`);
+  }
+  if (typeof row.dataset_version !== 'string' || row.dataset_version.trim().length === 0) {
+    throw new Error(`Dataset row ${lineNo} missing non-empty "dataset_version".`);
+  }
   if (typeof row.gold_answer !== 'string' || row.gold_answer.trim().length === 0) {
     throw new Error(`Dataset row ${lineNo} missing non-empty "gold_answer".`);
+  }
+  const temporalFields = ['as_of_date', 'event_date', 'decision_date'];
+  for (const field of temporalFields) {
+    const value = row[field];
+    if (value === undefined || value === null || value === '') continue;
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw new Error(`Dataset row ${lineNo} ${field} must be YYYY-MM-DD string when provided.`);
+    }
   }
   if (!Array.isArray(row.gold_citations)) {
     throw new Error(`Dataset row ${lineNo} missing array "gold_citations".`);
@@ -109,6 +127,23 @@ function validateRow(row, index) {
     if (!isFiniteNumber(rubric[key])) {
       throw new Error(`Dataset row ${lineNo} rubric.${key} must be numeric.`);
     }
+  }
+
+  const review = row.review;
+  if (!review || typeof review !== 'object') {
+    throw new Error(`Dataset row ${lineNo} missing object "review".`);
+  }
+  if (typeof review.reviewer !== 'string' || review.reviewer.trim().length === 0) {
+    throw new Error(`Dataset row ${lineNo} review.reviewer must be non-empty string.`);
+  }
+  if (typeof review.reviewed_at !== 'string' || Number.isNaN(Date.parse(review.reviewed_at))) {
+    throw new Error(`Dataset row ${lineNo} review.reviewed_at must be valid ISO date.`);
+  }
+  const reviewStatus = String(review.status || '').toLowerCase().trim();
+  if (!ALLOWED_REVIEW_STATUS.has(reviewStatus)) {
+    throw new Error(
+      `Dataset row ${lineNo} review.status must be one of: ${Array.from(ALLOWED_REVIEW_STATUS).join(', ')}.`,
+    );
   }
 }
 
@@ -193,6 +228,21 @@ function extractFingerprint(payload) {
   };
 }
 
+function classifyFailure({
+  ok,
+  expectedNoAnswer,
+  predictedNoAnswer,
+  goldCitationCount,
+  matchedGoldCitations,
+}) {
+  if (!ok) return 'transport_or_contract_error';
+  if (expectedNoAnswer && !predictedNoAnswer) return 'hallucination_or_policy_miss';
+  if (!expectedNoAnswer && predictedNoAnswer) return 'retrieval_or_rerank_miss';
+  if (goldCitationCount > 0 && matchedGoldCitations === 0) return 'citation_miss';
+  if (goldCitationCount > 0 && matchedGoldCitations < goldCitationCount) return 'partial_citation';
+  return 'pass';
+}
+
 async function callQuery({ baseUrl, queryPath, topK, headers }, row) {
   const startedAt = Date.now();
   const response = await fetch(`${baseUrl}${queryPath}`, {
@@ -203,6 +253,9 @@ async function callQuery({ baseUrl, queryPath, topK, headers }, row) {
       top_k: topK,
       jurisdiction: 'TR',
       acl_tags: ['public'],
+      as_of_date: typeof row.as_of_date === 'string' ? row.as_of_date : undefined,
+      event_date: typeof row.event_date === 'string' ? row.event_date : undefined,
+      decision_date: typeof row.decision_date === 'string' ? row.decision_date : undefined,
     }),
   });
   const latencyMs = Date.now() - startedAt;
@@ -284,7 +337,9 @@ async function main() {
       || Number(row?.rubric?.no_answer || 0) === 1;
 
     return {
+      question_id: row.question_id,
       question: row.question,
+      dataset_version: row.dataset_version,
       category: row.category,
       ok: response.ok,
       statusCode: response.statusCode,
@@ -297,10 +352,19 @@ async function main() {
       fingerprintMissing: fingerprint.missing,
       fingerprint: fingerprint.value,
       answerPreview: answer.slice(0, 180),
+      failure_class: classifyFailure({
+        ok: response.ok,
+        expectedNoAnswer,
+        predictedNoAnswer,
+        goldCitationCount: goldCitations.length,
+        matchedGoldCitations: matchedGold,
+      }),
     };
   });
 
   const latencies = results.map((r) => r.latencyMs);
+  const datasetVersions = Array.from(new Set(rows.map((row) => String(row.dataset_version || '').trim()).filter(Boolean)));
+  const reviewers = Array.from(new Set(rows.map((row) => String(row?.review?.reviewer || '').trim()).filter(Boolean)));
   const totalGoldCitationCount = results.reduce((sum, r) => sum + r.goldCitationCount, 0);
   const totalMatchedGoldCitations = results.reduce((sum, r) => sum + r.matchedGoldCitations, 0);
 
@@ -324,15 +388,42 @@ async function main() {
     ? fingerprintPresentCount / results.length
     : 0;
   const latencyP95 = percentile(latencies, 95);
+  const datasetCoverageOk = rows.length >= args.minDatasetSize;
+  const categoryBreakdown = Array.from(ALLOWED_CATEGORIES).reduce((acc, category) => {
+    const group = results.filter((row) => String(row.category || '').toLowerCase() === category);
+    const count = group.length;
+    const success = group.filter((row) => row.ok).length;
+    const noAnswerExpected = group.filter((row) => row.expectedNoAnswer).length;
+    const noAnswerHit = group.filter((row) => row.expectedNoAnswer && row.predictedNoAnswer).length;
+    acc[category] = {
+      count,
+      success_rate: count > 0 ? success / count : 0,
+      no_answer_accuracy: noAnswerExpected > 0 ? noAnswerHit / noAnswerExpected : null,
+      citation_coverage: (() => {
+        const gold = group.reduce((sum, row) => sum + row.goldCitationCount, 0);
+        const matched = group.reduce((sum, row) => sum + row.matchedGoldCitations, 0);
+        return gold > 0 ? matched / gold : null;
+      })(),
+    };
+    return acc;
+  }, {});
+  const failureClassCounts = results.reduce((acc, row) => {
+    const key = String(row.failure_class || 'unknown');
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
 
   const summary = {
     generated_at: new Date().toISOString(),
     dataset: path.resolve(args.dataset),
+    dataset_versions: datasetVersions,
+    reviewers,
     request: {
       base_url: args.baseUrl,
       query_path: args.queryPath,
       top_k: args.topK,
       concurrency: args.concurrency,
+      min_dataset_size: args.minDatasetSize,
     },
     totals: {
       questions: results.length,
@@ -349,6 +440,8 @@ async function main() {
         p95: latencyP95,
         max: latencies.length > 0 ? Math.max(...latencies) : 0,
       },
+      category_breakdown: categoryBreakdown,
+      failure_class_counts: failureClassCounts,
     },
     gates: {
       stage1: {
@@ -356,8 +449,12 @@ async function main() {
         no_answer_accuracy_gt_90: noAnswerAccuracy > 0.9,
         fingerprint_coverage_eq_100: fingerprintCoverage === 1,
         latency_p95_measured: latencyP95,
+        dataset_coverage_sufficient: datasetCoverageOk,
       },
     },
+    warnings: datasetCoverageOk ? [] : [
+      `Dataset size ${rows.length} is below minimum ${args.minDatasetSize}; broad eval coverage not achieved.`,
+    ],
     rows: results,
   };
 
@@ -371,10 +468,14 @@ async function main() {
   console.log(`Adversarial safe rate: ${(summary.metrics.adversarial_safe_rate * 100).toFixed(1)}%`);
   console.log(`Fingerprint coverage: ${(summary.metrics.fingerprint_coverage * 100).toFixed(1)}%`);
   console.log(`Latency p95: ${summary.metrics.latency_ms.p95} ms`);
-  console.log(`Stage-1 gate (citation>80/no-answer>90/fingerprint=100): ${
+  if (!datasetCoverageOk) {
+    console.log(`Dataset coverage warning: size=${rows.length}, min=${args.minDatasetSize}`);
+  }
+  console.log(`Stage-1 gate (citation>80/no-answer>90/fingerprint=100/dataset>=min): ${
     summary.gates.stage1.citation_coverage_gt_80
     && summary.gates.stage1.no_answer_accuracy_gt_90
     && summary.gates.stage1.fingerprint_coverage_eq_100
+    && summary.gates.stage1.dataset_coverage_sufficient
       ? 'PASS'
       : 'FAIL'
   }`);

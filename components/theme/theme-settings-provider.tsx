@@ -27,7 +27,7 @@ import { THEME_KEY } from '@/lib/theme/theme-storage';
 
 const STORAGE_KEY = 'babylexit_ui_appearance_v1';
 const LEGACY_THEME_KEY = 'theme';
-const THEME_LOCKED_VALUE: ThemePresetName = 'pure-white';
+const THEME_LOCKED_VALUE: ThemePresetName = 'reading-mode';
 
 export type DefaultMode = 'chat' | 'review' | 'research';
 
@@ -63,14 +63,18 @@ interface ThemeSettingsContextValue {
 
 const ThemeSettingsContext = createContext<ThemeSettingsContextValue | null>(null);
 
-function readStoredSettings(): UiAppearanceSettings {
-  const completeDefaultSettings: UiAppearanceSettings = {
+function createDefaultSettings(): UiAppearanceSettings {
+  return {
     ...DEFAULT_APPEARANCE_SETTINGS,
     contrastLevel: DEFAULT_APPEARANCE_SETTINGS.contrastLevel,
     highContrast: DEFAULT_APPEARANCE_SETTINGS.highContrast,
     defaultMode: 'chat',
     autoSourcePanel: true,
   };
+}
+
+function readStoredSettings(): UiAppearanceSettings {
+  const completeDefaultSettings = createDefaultSettings();
 
   if (typeof window === 'undefined') return completeDefaultSettings;
 
@@ -130,7 +134,7 @@ function applyDomAttributes(settings: UiAppearanceSettings, pathname: string | n
 }
 
 export function ThemeSettingsProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<UiAppearanceSettings>(() => readStoredSettings());
+  const [settings, setSettings] = useState<UiAppearanceSettings>(() => createDefaultSettings());
   const [isClient, setIsClient] = useState(false);
   const pathname = usePathname();
 
@@ -139,7 +143,12 @@ export function ThemeSettingsProvider({ children }: { children: ReactNode }) {
   }, [settings, pathname]);
 
   useEffect(() => {
+    setSettings(readStoredSettings());
     setIsClient(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isClient) return;
     try {
       const persistedSettings: UiAppearanceSettings = {
         ...settings,
@@ -150,7 +159,7 @@ export function ThemeSettingsProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore
     }
-  }, [settings]);
+  }, [isClient, settings]);
 
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
