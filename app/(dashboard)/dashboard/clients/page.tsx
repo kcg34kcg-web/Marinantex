@@ -433,15 +433,23 @@ export default function ClientsPage() {
       <Card className="border-slate-200 shadow-sm">
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
+            <div className="space-y-2">
               <CardTitle>Müvekkil Yönetimi</CardTitle>
               <p className="text-sm text-slate-500">Müvekkil listenizi takip edin, yeni müvekkil daveti oluşturun.</p>
+              <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white p-1">
+                <Link href={'/dashboard/clients' as Route}>
+                  <span className="inline-flex h-8 items-center rounded-full bg-slate-900 px-3 text-xs font-semibold text-white">
+                    Müvekkiller
+                  </span>
+                </Link>
+                <Link href={'/dashboard/cases' as Route}>
+                  <span className="inline-flex h-8 items-center rounded-full px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900">
+                    Dosyalar
+                  </span>
+                </Link>
+              </div>
             </div>
-            <div className="min-w-[280px] rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 via-white to-slate-100 p-3 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Hızlı Davet</p>
-              <p className="mt-1 text-xs text-slate-600">
-                Ad, e-posta, kullanıcı adı, taraf tipi ve dosya no ile detaylı müvekkil daveti oluşturun.
-              </p>
+            <div className="min-w-[260px]">
               <Button
                 type="button"
                 onClick={() => {
@@ -449,9 +457,12 @@ export default function ClientsPage() {
                   setActionMessage(null);
                   setInviteUrl(null);
                 }}
-                className="mt-3 h-11 w-full rounded-xl bg-gradient-to-r from-blue-700 to-slate-900 px-4 text-sm font-semibold text-white shadow-md hover:from-blue-800 hover:to-slate-950"
+                className="h-auto w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-left text-slate-900 shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_12px_24px_rgba(15,23,42,0.06)] transition hover:border-slate-400 hover:bg-slate-50"
               >
-                + Yeni Müvekkil Daveti Oluştur
+                <span className="flex flex-col leading-tight">
+                  <span className="text-sm font-semibold">+ Yeni Müvekkil Ekle</span>
+                  <span className="mt-1 text-[11px] font-medium text-slate-500">Davet ve profil detayları ile</span>
+                </span>
               </Button>
             </div>
           </div>

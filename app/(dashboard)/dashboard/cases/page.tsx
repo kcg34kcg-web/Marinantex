@@ -683,6 +683,8 @@ export default function CasesPage() {
         return;
       }
 
+      let initialTaskErrorMessage: string | null = null;
+
       if (createInitialTask && payload.case?.id) {
         const taskResponse = await fetch('/api/dashboard/cases/tasks', {
           method: 'POST',
@@ -698,14 +700,16 @@ export default function CasesPage() {
 
         if (!taskResponse.ok) {
           const taskPayload = (await taskResponse.json()) as { error?: string };
-          setActionMessage(taskPayload.error ?? 'Dosya oluştu fakat ilk görev oluşturulamadı.');
+          initialTaskErrorMessage = taskPayload.error ?? 'Dosya oluştu fakat ilk görev oluşturulamadı.';
         }
       }
 
       setActionMessage(
-        payload.clientCandidateCreated
-          ? 'Yeni dosya oluşturuldu. Müvekkil detayıyla bir müvekkil adayı kaydedildi.'
-          : 'Yeni dosya başarıyla oluşturuldu.'
+        initialTaskErrorMessage
+          ? `Yeni dosya oluşturuldu ancak ilk görev açılamadı: ${initialTaskErrorMessage}`
+          : payload.clientCandidateCreated
+            ? 'Yeni dosya oluşturuldu. Müvekkil detayıyla bir müvekkil adayı kaydedildi.'
+            : 'Yeni dosya başarıyla oluşturuldu.'
       );
       if (payload.case?.id) {
         setActionLink({ href: `/dashboard/cases/${payload.case.id}`, label: 'Yeni dosyaya git' });
@@ -935,9 +939,21 @@ export default function CasesPage() {
       <Card className="border-slate-200 shadow-sm">
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
+            <div className="space-y-2">
               <CardTitle>Dosya Yönetimi</CardTitle>
               <p className="text-sm text-slate-500">Dosyaları durum, müvekkil ve başlığa göre filtreleyin.</p>
+              <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white p-1">
+                <Link href={'/dashboard/clients' as Route}>
+                  <span className="inline-flex h-8 items-center rounded-full px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900">
+                    Müvekkiller
+                  </span>
+                </Link>
+                <Link href={'/dashboard/cases' as Route}>
+                  <span className="inline-flex h-8 items-center rounded-full bg-slate-900 px-3 text-xs font-semibold text-white">
+                    Dosyalar
+                  </span>
+                </Link>
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
