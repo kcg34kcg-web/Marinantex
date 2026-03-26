@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { useQuery } from '@tanstack/react-query';
@@ -97,6 +98,7 @@ export default function ClientsPage() {
   const [draftActionMessage, setDraftActionMessage] = useState<string | null>(null);
   const [isUpdatingDraftId, setIsUpdatingDraftId] = useState<string | null>(null);
   const [clientsPage, setClientsPage] = useState(1);
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
 
   const normalizedInviteUsername = inviteUsername.trim().toLowerCase();
   const normalizedInviteEmail = inviteEmail.trim().toLowerCase();
@@ -124,7 +126,7 @@ export default function ClientsPage() {
       };
 
       if (!response.ok) {
-        throw new Error(payload.error ?? 'Muvekkil verileri alinamadi.');
+        throw new Error(payload.error ?? 'Müvekkil verileri alinamadi.');
       }
 
       return {
@@ -166,7 +168,7 @@ export default function ClientsPage() {
         error?: string;
       };
       if (!response.ok) {
-        throw new Error(payload.error ?? 'Muvekkil taslaklari alinamadi.');
+        throw new Error(payload.error ?? 'Müvekkil taslaklari alinamadi.');
       }
       return {
         drafts: payload.drafts ?? [],
@@ -221,6 +223,23 @@ export default function ClientsPage() {
     });
   }, [totalClientPages]);
 
+  useEffect(() => {
+    setPortalRoot(document.body);
+  }, []);
+
+  useEffect(() => {
+    if (!inviteModalOpen) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [inviteModalOpen]);
+
   const paginatedClients = useMemo(() => {
     const start = (clientsPage - 1) * CLIENTS_PER_PAGE;
     return filteredClients.slice(start, start + CLIENTS_PER_PAGE);
@@ -273,13 +292,13 @@ export default function ClientsPage() {
       };
 
       if (!response.ok) {
-        setLinkedCasesError(payload.error ?? 'Muvekkil dosyalari alinamadi.');
+        setLinkedCasesError(payload.error ?? 'Müvekkil dosyalari alinamadi.');
         return;
       }
 
       setLinkedCases(payload.items ?? []);
     } catch {
-      setLinkedCasesError('Muvekkil dosyalari yuklenirken ag hatasi olustu.');
+      setLinkedCasesError('Müvekkil dosyalari yuklenirken ag hatasi olustu.');
     } finally {
       setIsLoadingLinkedCases(false);
     }
@@ -334,7 +353,7 @@ export default function ClientsPage() {
 
   async function submitClientInvite() {
     if (inviteFullName.trim().length < 3) {
-      setActionMessage('Lutfen muvekkil ad soyad bilgisini girin.');
+      setActionMessage('Lutfen müvekkil ad soyad bilgisini girin.');
       return;
     }
 
@@ -371,11 +390,11 @@ export default function ClientsPage() {
 
       const payload = (await response.json()) as { error?: string; inviteUrl?: string };
       if (!response.ok) {
-        setActionMessage(payload.error ?? 'Muvekkil daveti gonderilemedi.');
+        setActionMessage(payload.error ?? 'Müvekkil daveti gonderilemedi.');
         return;
       }
 
-      setActionMessage('Muvekkil daveti olusturuldu.');
+      setActionMessage('Müvekkil daveti olusturuldu.');
       setInviteUrl(payload.inviteUrl ?? null);
       setInviteFullName('');
       setInviteUsername('');
@@ -388,10 +407,25 @@ export default function ClientsPage() {
       setInviteDays(7);
       await refetch();
     } catch {
-      setActionMessage('Muvekkil daveti gonderilirken hata olustu.');
+      setActionMessage('Müvekkil daveti gonderilirken hata olustu.');
     } finally {
       setIsSubmittingInvite(false);
     }
+  }
+
+  function closeInviteModal() {
+    setInviteModalOpen(false);
+    setInviteFullName('');
+    setInviteUsername('');
+    setInviteTcIdentity('');
+    setInviteContactName('');
+    setInvitePhone('');
+    setInvitePartyType('');
+    setInviteFileNo('');
+    setInviteEmail('');
+    setInviteDays(7);
+    setActionMessage(null);
+    setInviteUrl(null);
   }
 
   return (
@@ -400,26 +434,32 @@ export default function ClientsPage() {
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <CardTitle>Muvekkil Yonetimi</CardTitle>
-              <p className="text-sm text-slate-500">Muvekkil listenizi takip edin, yeni muvekkil daveti olusturun.</p>
+              <CardTitle>Müvekkil Yönetimi</CardTitle>
+              <p className="text-sm text-slate-500">Müvekkil listenizi takip edin, yeni müvekkil daveti oluşturun.</p>
             </div>
-            <Button
-              type="button"
-              onClick={() => {
-                setInviteModalOpen(true);
-                setActionMessage(null);
-                setInviteUrl(null);
-              }}
-              className="h-11 rounded-xl bg-gradient-to-r from-blue-600 to-slate-900 px-4 text-sm font-semibold text-white shadow-sm hover:from-blue-700 hover:to-slate-950"
-            >
-              + Muvekkil Ekle (Davet)
-            </Button>
+            <div className="min-w-[280px] rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 via-white to-slate-100 p-3 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Hızlı Davet</p>
+              <p className="mt-1 text-xs text-slate-600">
+                Ad, e-posta, kullanıcı adı, taraf tipi ve dosya no ile detaylı müvekkil daveti oluşturun.
+              </p>
+              <Button
+                type="button"
+                onClick={() => {
+                  setInviteModalOpen(true);
+                  setActionMessage(null);
+                  setInviteUrl(null);
+                }}
+                className="mt-3 h-11 w-full rounded-xl bg-gradient-to-r from-blue-700 to-slate-900 px-4 text-sm font-semibold text-white shadow-md hover:from-blue-800 hover:to-slate-950"
+              >
+                + Yeni Müvekkil Daveti Oluştur
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-4">
             <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-              <p className="text-xs text-slate-500">Toplam Muvekkil</p>
+              <p className="text-xs text-slate-500">Toplam Müvekkil</p>
               <p className="text-xl font-semibold text-slate-900">{isLoading ? '...' : stats.totalClients}</p>
             </div>
             <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
@@ -437,7 +477,7 @@ export default function ClientsPage() {
           </div>
 
           <Input
-            placeholder="Muvekkil adina gore ara"
+            placeholder="Müvekkil adina gore ara"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -450,7 +490,7 @@ export default function ClientsPage() {
             </div>
           ) : isError ? (
             <p className="text-sm text-orange-600">
-              {error instanceof Error ? error.message : 'Muvekkiller alinamadi.'}
+              {error instanceof Error ? error.message : 'Müvekkiller alinamadi.'}
             </p>
           ) : (
             <>
@@ -458,7 +498,7 @@ export default function ClientsPage() {
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-50 text-left">
                     <tr>
-                      <th className="px-4 py-3">Muvekkil</th>
+                      <th className="px-4 py-3">Müvekkil</th>
                       <th className="px-4 py-3">Dosya</th>
                       <th className="px-4 py-3">Referans</th>
                       <th className="px-4 py-3">Durum</th>
@@ -469,7 +509,7 @@ export default function ClientsPage() {
                     {filteredClients.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-500">
-                          Muvekkil bulunamadi.
+                          Müvekkil bulunamadi.
                         </td>
                       </tr>
                     ) : (
@@ -568,13 +608,13 @@ export default function ClientsPage() {
               ) : null}
               <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Son Muvekkil Davetleri</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Son Müvekkil Davetleri</p>
                   <Button type="button" variant="outline" size="sm" disabled={isFetching} onClick={() => refetch()}>
                     Yenile
                   </Button>
                 </div>
                 {invites.length === 0 ? (
-                  <p className="text-xs text-slate-500">Henuz muvekkil daveti olusturulmadi.</p>
+                  <p className="text-xs text-slate-500">Henuz müvekkil daveti olusturulmadi.</p>
                 ) : (
                   <ul className="space-y-2 text-xs">
                     {invites.slice(0, 8).map((invite) => (
@@ -623,10 +663,10 @@ export default function ClientsPage() {
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-xs font-medium uppercase tracking-wide text-blue-700">
-                      Muvekkil Taslaklari (AI)
+                      Müvekkil Taslaklari (AI)
                     </p>
                     <p className="text-xs text-blue-700/80">
-                      Muvekkile gitmeden once avukat onayi zorunludur. (MVP: otomatik gonderim yok)
+                      Müvekkile gitmeden once avukat onayi zorunludur. (MVP: otomatik gonderim yok)
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -678,9 +718,9 @@ export default function ClientsPage() {
                       <li key={draft.id} className="rounded-md border border-blue-100 bg-white px-3 py-2">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
-                            <p className="font-medium text-slate-900">{draft.title ?? 'Muvekkil Taslagi'}</p>
+                            <p className="font-medium text-slate-900">{draft.title ?? 'Müvekkil Taslagi'}</p>
                             <p className="text-slate-600">
-                              {draft.clientName ?? 'Muvekkil baglanmamis'}{' '}
+                              {draft.clientName ?? 'Müvekkil baglanmamis'}{' '}
                               {draft.caseTitle ? ` - ${draft.caseTitle}` : ''}
                             </p>
                           </div>
@@ -757,172 +797,169 @@ export default function ClientsPage() {
         </CardContent>
       </Card>
 
-      {inviteModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
-            <h3 className="text-base font-semibold text-slate-900">Muvekkil Daveti Olustur</h3>
-            <p className="mt-1 text-sm text-slate-600">Yeni muvekkili davet ederek kayit akisina yonlendirin.</p>
+      {inviteModalOpen && portalRoot
+        ? createPortal(
+            <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-4">
+              <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
+                <h3 className="text-base font-semibold text-slate-900">Müvekkil Daveti Oluştur</h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  Müvekkil kartını detaylı oluşturup davet bağlantısını tek adımda üretin.
+                </p>
 
-            <div className="mt-3 space-y-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Ad Soyad
-                </label>
-                <Input
-                  value={inviteFullName}
-                  onChange={(event) => setInviteFullName(event.target.value)}
-                  placeholder="Orn. Ayse Yilmaz"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Kullanici Adi (Opsiyonel)
-                </label>
-                <Input
-                  value={inviteUsername}
-                  onChange={(event) => setInviteUsername(event.target.value.toLowerCase())}
-                  placeholder="ayseyilmaz"
-                />
-                {isInviteUsernameProvided && !isInviteUsernameValid ? (
-                  <p className="mt-1 text-xs text-orange-600">Sadece a-z, 0-9, . ve _ kullanin; minimum 3 karakter.</p>
+                <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-2 text-xs text-blue-800">
+                  İpucu: Kullanıcı adı, taraf tipi ve dosya no bilgileri sonradan filtreleme ve takipte hız kazandırır.
+                </div>
+
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Ad Soyad
+                    </label>
+                    <Input
+                      value={inviteFullName}
+                      onChange={(event) => setInviteFullName(event.target.value)}
+                      placeholder="Örn. Ayşe Yılmaz"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Kullanıcı Adı (Opsiyonel)
+                    </label>
+                    <Input
+                      value={inviteUsername}
+                      onChange={(event) => setInviteUsername(event.target.value.toLowerCase())}
+                      placeholder="ayseyilmaz"
+                    />
+                    {isInviteUsernameProvided && !isInviteUsernameValid ? (
+                      <p className="mt-1 text-xs text-orange-600">Sadece a-z, 0-9, . ve _ kullanın; minimum 3 karakter.</p>
+                    ) : null}
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                        TC / VKN (Opsiyonel)
+                      </label>
+                      <Input
+                        value={inviteTcIdentity}
+                        onChange={(event) => setInviteTcIdentity(event.target.value)}
+                        placeholder="12345678901"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                        İletişim Kişisi (Opsiyonel)
+                      </label>
+                      <Input
+                        value={inviteContactName}
+                        onChange={(event) => setInviteContactName(event.target.value)}
+                        placeholder="Örn. Mehmet Kaya"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Telefon (Opsiyonel)
+                      </label>
+                      <Input
+                        value={invitePhone}
+                        onChange={(event) => setInvitePhone(event.target.value)}
+                        placeholder="05xx xxx xx xx"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Dosya No (Opsiyonel)
+                      </label>
+                      <Input
+                        value={inviteFileNo}
+                        onChange={(event) => setInviteFileNo(event.target.value)}
+                        placeholder="Örn. 2026/145"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Taraf Tipi (Opsiyonel)
+                      </label>
+                      <select
+                        value={invitePartyType}
+                        onChange={(event) =>
+                          setInvitePartyType(event.target.value as '' | 'plaintiff' | 'defendant' | 'consultant')
+                        }
+                        className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+                      >
+                        <option value="">Belirtilmedi</option>
+                        <option value="plaintiff">Davacı</option>
+                        <option value="defendant">Davalı</option>
+                        <option value="consultant">Danışan</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">E-Posta</label>
+                    <Input
+                      type="email"
+                      autoComplete="email"
+                      value={inviteEmail}
+                      onChange={(event) => setInviteEmail(event.target.value)}
+                      placeholder="ornek@domain.com"
+                    />
+                    {inviteEmail.trim().length > 0 && !isInviteEmailValid ? (
+                      <p className="mt-1 text-xs text-orange-600">Geçerli bir e-posta formatı girin.</p>
+                    ) : null}
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Geçerlilik (Gün)
+                    </label>
+                    <select
+                      value={inviteDays}
+                      onChange={(event) => setInviteDays(Number(event.target.value))}
+                      className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+                    >
+                      <option value={3}>3 gün</option>
+                      <option value={7}>7 gün</option>
+                      <option value={14}>14 gün</option>
+                      <option value={30}>30 gün</option>
+                    </select>
+                  </div>
+                </div>
+
+                {actionMessage ? <p className="mt-3 text-xs text-slate-600">{actionMessage}</p> : null}
+                {inviteUrl ? (
+                  <div className="mt-2 rounded-md border border-blue-200 bg-blue-50 p-2 text-xs text-blue-700">
+                    Davet bağlantısı:{' '}
+                    <a href={inviteUrl} className="font-medium underline">
+                      {inviteUrl}
+                    </a>
+                  </div>
                 ) : null}
-              </div>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-                    TC / VKN (Opsiyonel)
-                  </label>
-                  <Input
-                    value={inviteTcIdentity}
-                    onChange={(event) => setInviteTcIdentity(event.target.value)}
-                    placeholder="12345678901"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-                    Iletisim Kisisi (Opsiyonel)
-                  </label>
-                  <Input
-                    value={inviteContactName}
-                    onChange={(event) => setInviteContactName(event.target.value)}
-                    placeholder="Orn. Mehmet Kaya"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-                    Telefon (Opsiyonel)
-                  </label>
-                  <Input
-                    value={invitePhone}
-                    onChange={(event) => setInvitePhone(event.target.value)}
-                    placeholder="05xx xxx xx xx"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-                    Dosya No (Opsiyonel)
-                  </label>
-                  <Input
-                    value={inviteFileNo}
-                    onChange={(event) => setInviteFileNo(event.target.value)}
-                    placeholder="Orn. 2026/145"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-                    Taraf Tipi (Opsiyonel)
-                  </label>
-                  <select
-                    value={invitePartyType}
-                    onChange={(event) =>
-                      setInvitePartyType(event.target.value as '' | 'plaintiff' | 'defendant' | 'consultant')
-                    }
-                    className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={closeInviteModal}
                   >
-                    <option value="">Belirtilmedi</option>
-                    <option value="plaintiff">Davaci</option>
-                    <option value="defendant">Davali</option>
-                    <option value="consultant">Danisan</option>
-                  </select>
+                    Kapat
+                  </Button>
+                  <Button
+                    type="button"
+                    className="bg-gradient-to-r from-blue-700 to-slate-900 text-white hover:from-blue-800 hover:to-slate-950"
+                    disabled={
+                      isSubmittingInvite ||
+                      inviteFullName.trim().length < 3 ||
+                      !isInviteEmailValid ||
+                      !isInviteUsernameValid
+                    }
+                    onClick={submitClientInvite}
+                  >
+                    Davet Oluştur
+                  </Button>
                 </div>
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">E-Posta</label>
-                <Input
-                  type="email"
-                  autoComplete="email"
-                  value={inviteEmail}
-                  onChange={(event) => setInviteEmail(event.target.value)}
-                  placeholder="ornek@domain.com"
-                />
-                {inviteEmail.trim().length > 0 && !isInviteEmailValid ? (
-                  <p className="mt-1 text-xs text-orange-600">Gecerli bir e-posta formati girin.</p>
-                ) : null}
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Gecerlilik (Gun)
-                </label>
-                <select
-                  value={inviteDays}
-                  onChange={(event) => setInviteDays(Number(event.target.value))}
-                  className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
-                >
-                  <option value={3}>3 gun</option>
-                  <option value={7}>7 gun</option>
-                  <option value={14}>14 gun</option>
-                  <option value={30}>30 gun</option>
-                </select>
-              </div>
-            </div>
-
-            {actionMessage ? <p className="mt-3 text-xs text-slate-600">{actionMessage}</p> : null}
-            {inviteUrl ? (
-              <div className="mt-2 rounded-md border border-blue-200 bg-blue-50 p-2 text-xs text-blue-700">
-                Davet baglantisi:{' '}
-                <a href={inviteUrl} className="font-medium underline">
-                  {inviteUrl}
-                </a>
-              </div>
-            ) : null}
-
-            <div className="mt-4 flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setInviteModalOpen(false);
-                  setInviteFullName('');
-                  setInviteUsername('');
-                  setInviteTcIdentity('');
-                  setInviteContactName('');
-                  setInvitePhone('');
-                  setInvitePartyType('');
-                  setInviteFileNo('');
-                  setInviteEmail('');
-                  setInviteDays(7);
-                  setActionMessage(null);
-                  setInviteUrl(null);
-                }}
-              >
-                Kapat
-              </Button>
-              <Button
-                type="button"
-                disabled={
-                  isSubmittingInvite ||
-                  inviteFullName.trim().length < 3 ||
-                  !isInviteEmailValid ||
-                  !isInviteUsernameValid
-                }
-                onClick={submitClientInvite}
-              >
-                Davet Olustur
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+            </div>,
+            portalRoot,
+          )
+        : null}
 
       {linkedCasesModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -954,7 +991,7 @@ export default function ClientsPage() {
               </p>
             ) : linkedCases.length === 0 ? (
               <p className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                Bu muvekkile bagli dosya bulunamadi.
+                Bu müvekkile bagli dosya bulunamadi.
               </p>
             ) : (
               <ul className="max-h-[360px] space-y-2 overflow-y-auto">
@@ -1002,7 +1039,7 @@ export default function ClientsPage() {
                   value={messageBody}
                   onChange={(event) => setMessageBody(event.target.value)}
                   className="min-h-[120px] w-full rounded-md border border-input px-3 py-2 text-sm"
-                  placeholder="Muvekkile iletilecek mesaj..."
+                  placeholder="Müvekkile iletilecek mesaj..."
                 />
               </div>
               <label className="flex items-center gap-2 text-sm text-slate-700">
