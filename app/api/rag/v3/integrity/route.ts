@@ -3,6 +3,7 @@ import { resolveBureauContext } from '@/app/api/rag/_lib/bureau-context';
 import { ragProxyErrorResponse } from '@/app/api/rag/_lib/error-contract';
 import { fetchRagBackend, getRagBackendForLogs } from '@/app/api/rag/_lib/rag-backend';
 import { enforceRagRouteRateLimit } from '@/app/api/rag/_lib/rate-limit';
+import { isTimeoutError } from '@/app/api/rag/_lib/timeout';
 import { createClient } from '@/utils/supabase/server';
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -60,7 +61,7 @@ export async function GET(request: Request) {
         message: 'Buro baglami bulunamadi. Lutfen tekrar giris yapin.',
       });
     }
-    const rateLimit = enforceRagRouteRateLimit({
+    const rateLimit = await enforceRagRouteRateLimit({
       request,
       routeKey: 'v3_integrity',
       userId,
@@ -100,14 +101,14 @@ export async function GET(request: Request) {
 
     return NextResponse.json(body, { status: 200 });
   } catch (err) {
-    const message =
-      err instanceof Error && err.name === 'AbortError'
-        ? 'RAG v3 integrity istegi zaman asimina ugradi.'
-        : 'RAG v3 integrity servisine baglanilamadi.';
+    const timedOut = isTimeoutError(err);
+    const message = timedOut
+      ? 'RAG v3 integrity istegi zaman asimina ugradi.'
+      : 'RAG v3 integrity servisine baglanilamadi.';
     console.error('[RAG v3 integrity proxy]', err, { backendCandidates: getRagBackendForLogs() });
     return ragProxyErrorResponse({
       status: 502,
-      errorCode: err instanceof Error && err.name === 'AbortError' ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
+      errorCode: timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
       message,
       retryable: true,
     });

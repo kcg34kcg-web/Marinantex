@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -51,6 +51,43 @@ type CorpusIngestResponse = {
   };
 };
 
+type ReviewQueueStatus = 'pending' | 'in_review' | 'resolved' | 'rejected';
+type ReviewQueueFilterStatus = ReviewQueueStatus | 'all';
+
+type ReviewQueueItem = {
+  id: string;
+  status: ReviewQueueStatus;
+  risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | null;
+  severity: string | null;
+  confidence: number;
+  created_at: string | null;
+  due_at: string | null;
+  assigned_to: string | null;
+  resolved_at: string | null;
+  closure_code: string | null;
+  escalation_reason: string | null;
+  reason_codes: string[];
+  metadata: Record<string, unknown>;
+};
+
+type ReviewQueueResponse = {
+  items: ReviewQueueItem[];
+};
+
+type ReviewDraft = {
+  sla_minutes: string;
+  closure_code: string;
+  reviewer_feedback: string;
+  escalation_reason: string;
+};
+
+const DEFAULT_REVIEW_DRAFT: ReviewDraft = {
+  sla_minutes: '240',
+  closure_code: 'approved',
+  reviewer_feedback: '',
+  escalation_reason: '',
+};
+
 const SOURCE_TYPE_LABEL: Record<CorpusSourceType, string> = {
   legislation: 'Mevzuat',
   case_law: 'Ictihat',
@@ -72,6 +109,7 @@ function getErrorMessage(payload: unknown): string {
 }
 
 export default function CorpusPage() {
+  const queryClient = useQueryClient();
   const [listQuery, setListQuery] = useState('');
   const [sourceTitle, setSourceTitle] = useState('');
   const [sourceType, setSourceType] = useState<CorpusSourceType>('article');
@@ -86,6 +124,11 @@ export default function CorpusPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
   const [lastIngestResult, setLastIngestResult] = useState<CorpusIngestResponse | null>(null);
+  const [reviewStatusFilter, setReviewStatusFilter] = useState<ReviewQueueFilterStatus>('pending');
+  const [reviewActionTicketId, setReviewActionTicketId] = useState<string | null>(null);
+  const [reviewActionError, setReviewActionError] = useState<string | null>(null);
+  const [reviewActionSuccess, setReviewActionSuccess] = useState<string | null>(null);
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({});
 
   const {
     data,
@@ -129,6 +172,133 @@ export default function CorpusPage() {
     }
     return stats;
   }, [items]);
+
+  const {
+    data: reviewQueueData,
+    isLoading: isReviewQueueLoading,
+    isFetching: isReviewQueueFetching,
+    isError: isReviewQueueError,
+    error: reviewQueueError,
+    refetch: refetchReviewQueue,
+  } = useQuery<ReviewQueueResponse, Error>({
+    queryKey: ['dashboard', 'corpus', 'reviewQueue', reviewStatusFilter],
+    queryFn: async () => {
+      const qs = new URLSearchParams();
+      if (reviewStatusFilter !== 'all') qs.set('status', reviewStatusFilter);
+      qs.set('limit', '80');
+      const response = await fetch(`/api/rag/v3/review-queue?${qs.toString()}`, {
+        cache: 'no-store',
+      });
+      const payload = (await response.json()) as ReviewQueueResponse & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? 'Review queue okunamadi.');
+      }
+      return {
+        items: Array.isArray(payload.items) ? payload.items : [],
+      };
+    },
+  });
+  const reviewItems = reviewQueueData?.items ?? [];
+
+  function reviewDraftFor(ticketId: string): ReviewDraft {
+    return reviewDrafts[ticketId] ?? DEFAULT_REVIEW_DRAFT;
+  }
+
+  function updateReviewDraft(ticketId: string, patch: Partial<ReviewDraft>) {
+    setReviewDrafts((prev) => ({
+      ...prev,
+      [ticketId]: {
+        ...DEFAULT_REVIEW_DRAFT,
+        ...(prev[ticketId] ?? {}),
+        ...patch,
+      },
+    }));
+  }
+
+  async function handleAssignTicket(ticketId: string) {
+    const draft = reviewDraftFor(ticketId);
+    const slaRaw = draft.sla_minutes.trim();
+    const slaMinutes = slaRaw ? Number(slaRaw) : Number.NaN;
+    if (slaRaw && (!Number.isFinite(slaMinutes) || slaMinutes <= 0)) {
+      setReviewActionError('SLA dakika alani pozitif tam sayi olmalidir.');
+      setReviewActionSuccess(null);
+      return;
+    }
+
+    setReviewActionTicketId(ticketId);
+    setReviewActionError(null);
+    setReviewActionSuccess(null);
+
+    try {
+      const response = await fetch(`/api/rag/v3/review-queue/${ticketId}/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sla_minutes: slaRaw ? Math.trunc(slaMinutes) : undefined,
+          escalation_reason: draft.escalation_reason.trim() || undefined,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setReviewActionError(getErrorMessage(payload));
+        return;
+      }
+      setReviewActionSuccess(`Ticket atandi: ${String(payload?.id ?? ticketId).slice(0, 8)}`);
+      await queryClient.invalidateQueries({ queryKey: ['dashboard', 'corpus', 'reviewQueue'] });
+      await refetchReviewQueue();
+    } catch {
+      setReviewActionError('Review assign istegi basarisiz oldu.');
+    } finally {
+      setReviewActionTicketId(null);
+    }
+  }
+
+  async function handleCloseTicket(ticketId: string, status: 'resolved' | 'rejected') {
+    const draft = reviewDraftFor(ticketId);
+    const closureCode = draft.closure_code.trim();
+    const feedback = draft.reviewer_feedback.trim();
+    if (!closureCode) {
+      setReviewActionError('closure_code zorunludur.');
+      setReviewActionSuccess(null);
+      return;
+    }
+    if (!feedback) {
+      setReviewActionError('reviewer_feedback zorunludur.');
+      setReviewActionSuccess(null);
+      return;
+    }
+
+    setReviewActionTicketId(ticketId);
+    setReviewActionError(null);
+    setReviewActionSuccess(null);
+
+    try {
+      const response = await fetch(`/api/rag/v3/review-queue/${ticketId}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status,
+          closure_code: closureCode,
+          reviewer_feedback: feedback,
+          escalation_reason: draft.escalation_reason.trim() || undefined,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setReviewActionError(getErrorMessage(payload));
+        return;
+      }
+      setReviewActionSuccess(
+        `Ticket kapatildi: ${String(payload?.id ?? ticketId).slice(0, 8)} (${String(payload?.status ?? status)})`,
+      );
+      await queryClient.invalidateQueries({ queryKey: ['dashboard', 'corpus', 'reviewQueue'] });
+      await refetchReviewQueue();
+    } catch {
+      setReviewActionError('Review close istegi basarisiz oldu.');
+    } finally {
+      setReviewActionTicketId(null);
+    }
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -367,6 +537,127 @@ export default function CorpusPage() {
                   </p>
                 </li>
               ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="border-slate-200 shadow-sm">
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle>RAG v3 Human Review Queue</CardTitle>
+            <div className="flex items-center gap-2">
+              <select
+                value={reviewStatusFilter}
+                onChange={(event) => setReviewStatusFilter(event.target.value as ReviewQueueFilterStatus)}
+                className="flex h-10 rounded-md border border-input bg-white px-3 py-2 text-sm text-slate-700"
+              >
+                <option value="pending">pending</option>
+                <option value="in_review">in_review</option>
+                <option value="resolved">resolved</option>
+                <option value="rejected">rejected</option>
+                <option value="all">all</option>
+              </select>
+              <Button type="button" variant="outline" onClick={() => refetchReviewQueue()} disabled={isReviewQueueFetching}>
+                Yenile
+              </Button>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <Badge variant="muted">Filtre: {reviewStatusFilter}</Badge>
+            <Badge variant="muted">Toplam: {reviewItems.length}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {reviewActionError && <p className="mb-2 text-sm text-red-700">{reviewActionError}</p>}
+          {reviewActionSuccess && <p className="mb-2 text-sm text-green-700">{reviewActionSuccess}</p>}
+          {isReviewQueueLoading ? (
+            <p className="text-sm text-slate-600">Queue yukleniyor...</p>
+          ) : isReviewQueueError ? (
+            <p className="text-sm text-red-700">{reviewQueueError?.message ?? 'Review queue okunamadi.'}</p>
+          ) : reviewItems.length === 0 ? (
+            <p className="text-sm text-slate-600">Review queue kaydi bulunamadi.</p>
+          ) : (
+            <ul className="space-y-3">
+              {reviewItems.map((ticket) => {
+                const isClosed = ticket.status === 'resolved' || ticket.status === 'rejected';
+                const isBusy = reviewActionTicketId === ticket.id;
+                const draft = reviewDraftFor(ticket.id);
+                return (
+                  <li key={ticket.id} className="rounded-md border border-slate-200 p-3">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <Badge variant="muted">{ticket.status}</Badge>
+                      {ticket.risk_level && <Badge variant="muted">risk: {ticket.risk_level}</Badge>}
+                      {ticket.severity && <Badge variant="muted">sev: {ticket.severity}</Badge>}
+                      <Badge variant="muted">conf: {Number(ticket.confidence ?? 0).toFixed(2)}</Badge>
+                    </div>
+                    <p className="text-xs text-slate-600">
+                      id: {ticket.id}
+                      {ticket.assigned_to ? ` | assigned_to: ${ticket.assigned_to}` : ''}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      created: {ticket.created_at ? formatDateTR(ticket.created_at) : 'n/a'}
+                      {' | '}
+                      due: {ticket.due_at ? formatDateTR(ticket.due_at) : 'n/a'}
+                      {' | '}
+                      resolved: {ticket.resolved_at ? formatDateTR(ticket.resolved_at) : 'n/a'}
+                    </p>
+                    {ticket.reason_codes.length > 0 && (
+                      <p className="mt-1 text-xs text-slate-600">reason_codes: {ticket.reason_codes.join(', ')}</p>
+                    )}
+                    {ticket.escalation_reason && (
+                      <p className="mt-1 text-xs text-slate-600">escalation_reason: {ticket.escalation_reason}</p>
+                    )}
+                    {isClosed ? (
+                      <div className="mt-2 rounded-md bg-slate-50 p-2 text-xs text-slate-700">
+                        <p>closure_code: {ticket.closure_code ?? 'n/a'}</p>
+                      </div>
+                    ) : (
+                      <div className="mt-3 space-y-2">
+                        <div className="grid gap-2 md:grid-cols-3">
+                          <Input
+                            value={draft.sla_minutes}
+                            onChange={(event) => updateReviewDraft(ticket.id, { sla_minutes: event.target.value })}
+                            placeholder="SLA (dakika)"
+                            disabled={isBusy}
+                          />
+                          <Input
+                            value={draft.closure_code}
+                            onChange={(event) => updateReviewDraft(ticket.id, { closure_code: event.target.value })}
+                            placeholder="closure_code"
+                            disabled={isBusy}
+                          />
+                          <Input
+                            value={draft.escalation_reason}
+                            onChange={(event) => updateReviewDraft(ticket.id, { escalation_reason: event.target.value })}
+                            placeholder="escalation_reason (opsiyonel)"
+                            disabled={isBusy}
+                          />
+                        </div>
+                        <textarea
+                          value={draft.reviewer_feedback}
+                          onChange={(event) => updateReviewDraft(ticket.id, { reviewer_feedback: event.target.value })}
+                          rows={3}
+                          disabled={isBusy}
+                          placeholder="reviewer_feedback (close icin zorunlu)"
+                          className="w-full resize-y rounded-md border border-input bg-white px-3 py-2 text-sm text-slate-700"
+                        />
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button type="button" variant="outline" disabled={isBusy} onClick={() => handleAssignTicket(ticket.id)}>
+                            Kendime Ata
+                          </Button>
+                          <Button type="button" disabled={isBusy} onClick={() => handleCloseTicket(ticket.id, 'resolved')}>
+                            Resolved
+                          </Button>
+                          <Button type="button" variant="outline" disabled={isBusy} onClick={() => handleCloseTicket(ticket.id, 'rejected')}>
+                            Rejected
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </CardContent>

@@ -2,16 +2,16 @@ import { Module } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
+import { getJwtExpiresIn, getJwtSecret } from "./jwt-config";
 
-const jwtExpiresIn = (process.env.JWT_EXPIRES_IN ?? "15m") as
-  | `${number}${"s" | "m" | "h" | "d"}`
-  | number;
+const jwtExpiresIn = getJwtExpiresIn();
+const jwtSecret = getJwtSecret();
 
 @Module({
   imports: [
     JwtModule.register({
       global: true,
-      secret: process.env.JWT_SECRET ?? "dev-change-me",
+      secret: jwtSecret,
       signOptions: {
         expiresIn: jwtExpiresIn,
       },

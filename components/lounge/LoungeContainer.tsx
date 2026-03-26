@@ -1,8 +1,6 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useSearchContext } from '@/context/SearchContext';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // UI Bileşenleri
@@ -19,23 +17,14 @@ import ZenBreathing from './modules/ZenBreathing';
 import SmartReader from './modules/SmartReader';
 import MiniGame from './modules/MiniGame';
 
-export default function LoungeContainer() {
-  const router = useRouter();
-  
-  // 1. Global Durumu Çek
-  const { isReady, searchResult } = useSearchContext();
-  
+interface LoungeContainerProps {
+  isReady: boolean;
+  onComplete: () => void;
+}
+
+export default function LoungeContainer({ isReady, onComplete }: LoungeContainerProps) {
   // 2. Tab Yönetimi
   const [activeTab, setActiveTab] = useState<'trivia' | 'quote' | 'zen' | 'game' | 'read'>('trivia');
-
-  // Sonuç Sayfasına Git
-  const handleComplete = () => {
-    if (searchResult?.questionId) {
-      router.push(`/questions/${searchResult.questionId}`);
-    } else {
-        router.push('/dashboard');
-    }
-  };
 
   return (
     <AuroraBackground>
@@ -94,7 +83,7 @@ export default function LoungeContainer() {
       </main>
 
       {/* --- 3. ALT KISIM (Footer) --- */}
-      <PulseFooter isReady={isReady} onComplete={handleComplete} />
+      <PulseFooter isReady={isReady} onComplete={onComplete} />
 
     </AuroraBackground>
   );

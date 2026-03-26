@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { rolloutEnabled } from '@/app/api/rag/_lib/rollout';
 
 const FLAG_KEYS = [
   'strict_grounding_v2',
@@ -8,6 +9,7 @@ const FLAG_KEYS = [
   'save_targets_v2',
   'client_translator_draft',
   'memory_dashboard_v1',
+  'rag_v3_single_pipeline_enforced',
 ] as const;
 
 type FlagKey = (typeof FLAG_KEYS)[number];
@@ -21,6 +23,7 @@ const DEFAULT_FLAGS: FlagMap = {
   save_targets_v2: true,
   client_translator_draft: true,
   memory_dashboard_v1: false,
+  rag_v3_single_pipeline_enforced: false,
 };
 
 function withEnvOverrides(base: FlagMap): FlagMap {
@@ -71,12 +74,12 @@ export async function GET() {
   const [globalFlagsResult, bureauFlagsResult] = await Promise.all([
     supabase
       .from('ai_feature_flags')
-      .select('flag_key, is_enabled')
+      .select('flag_key, is_enabled, rollout_percentage')
       .is('bureau_id', null)
       .in('flag_key', [...FLAG_KEYS]),
     supabase
       .from('ai_feature_flags')
-      .select('flag_key, is_enabled')
+      .select('flag_key, is_enabled, rollout_percentage')
       .eq('bureau_id', bureauId)
       .in('flag_key', [...FLAG_KEYS]),
   ]);
@@ -85,12 +88,26 @@ export async function GET() {
 
   for (const row of globalFlagsResult.data ?? []) {
     const key = row.flag_key as FlagKey;
-    if (FLAG_KEYS.includes(key)) merged[key] = Boolean(row.is_enabled);
+    if (FLAG_KEYS.includes(key)) {
+      merged[key] = rolloutEnabled({
+        flagKey: key,
+        isEnabled: Boolean(row.is_enabled),
+        rolloutPercentage: typeof row.rollout_percentage === 'number' ? row.rollout_percentage : null,
+        actorId: user.id,
+      });
+    }
   }
 
   for (const row of bureauFlagsResult.data ?? []) {
     const key = row.flag_key as FlagKey;
-    if (FLAG_KEYS.includes(key)) merged[key] = Boolean(row.is_enabled);
+    if (FLAG_KEYS.includes(key)) {
+      merged[key] = rolloutEnabled({
+        flagKey: key,
+        isEnabled: Boolean(row.is_enabled),
+        rolloutPercentage: typeof row.rollout_percentage === 'number' ? row.rollout_percentage : null,
+        actorId: user.id,
+      });
+    }
   }
 
   const finalFlags = withEnvOverrides(merged);

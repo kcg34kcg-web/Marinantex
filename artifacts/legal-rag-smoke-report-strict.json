@@ -1,0 +1,43 @@
+{
+  "parser_ocr_layout_10pdf": {
+    "name": "parser_ocr_layout_10pdf",
+    "passed": true,
+    "details": "10/10 passed (simulated OCR adapter mode)"
+  },
+  "citation_span_page_anchor": {
+    "name": "citation_span_page_anchor",
+    "passed": true,
+    "details": "evidence_span=yes, page_anchor=3-4"
+  },
+  "pii_redaction_10cases": {
+    "name": "pii_redaction_10cases",
+    "passed": true,
+    "details": "10/10 passed"
+  },
+  "unsupported_claim_detection": {
+    "name": "unsupported_claim_detection",
+    "passed": true,
+    "details": "passed=False, contradiction_count=1"
+  },
+  "delta_comparison": {
+    "name": "delta_comparison",
+    "passed": true,
+    "details": "total_changes=1, critical=1"
+  },
+  "vllm_launch_recipe": {
+    "name": "vllm_launch_recipe",
+    "passed": true,
+    "details": "syntax+dry-run ok"
+  },
+  "sglang_launch_recipe": {
+    "name": "sglang_launch_recipe",
+    "passed": true,
+    "details": "syntax+dry-run ok"
+  },
+  "endpoint_healthcheck": {
+    "name": "endpoint_healthcheck",
+    "passed": false,
+    "details": "curl: (7) Failed to connect to 127.0.0.1 port 8008 after 0 ms: Couldn't connect to server"
+  },
+  "pass_all": false
+}

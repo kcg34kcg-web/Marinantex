@@ -576,10 +576,22 @@ class LLMTieredRouter:
         api_key = settings.openai_api_key
         if isinstance(api_key, str) and api_key.strip():
             return True
-        base_url = getattr(settings, "openai_base_url", None)
+        base_url = LLMTieredRouter._resolve_openai_base_url()
         if isinstance(base_url, str) and base_url.strip():
             return True
         return False
+
+    @staticmethod
+    def _resolve_openai_base_url() -> str:
+        base_url = str(getattr(settings, "openai_base_url", "") or "").strip()
+        if base_url:
+            return base_url
+        backend = str(getattr(settings, "qwen_serving_backend", "") or "").strip().lower()
+        if backend == "sglang":
+            sglang = str(getattr(settings, "sglang_base_url", "") or "").strip()
+            if sglang:
+                return sglang
+        return ""
 
     @staticmethod
     def _resolve_openai_api_key() -> str:
@@ -590,7 +602,7 @@ class LLMTieredRouter:
         key = settings.openai_api_key
         if isinstance(key, str) and key.strip():
             return key.strip()
-        base_url = getattr(settings, "openai_base_url", None)
+        base_url = LLMTieredRouter._resolve_openai_base_url()
         if isinstance(base_url, str) and base_url.strip():
             return "local-openai-compatible"
         return ""
@@ -1220,7 +1232,7 @@ class LLMTieredRouter:
                     "temperature": 0.0,
                     "max_retries": _provider_max_retries,
                 }
-                openai_base_url = str(getattr(settings, "openai_base_url", "") or "").strip()
+                openai_base_url = self._resolve_openai_base_url()
                 if openai_base_url:
                     openai_kwargs["base_url"] = openai_base_url
 
@@ -1318,7 +1330,7 @@ class LLMTieredRouter:
                 "model_kwargs": model_kwargs,
                 "max_retries": _provider_max_retries,
             }
-            openai_base_url = str(getattr(settings, "openai_base_url", "") or "").strip()
+            openai_base_url = self._resolve_openai_base_url()
             if openai_base_url:
                 openai_kwargs["base_url"] = openai_base_url
 

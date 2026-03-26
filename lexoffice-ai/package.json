@@ -11,6 +11,7 @@
     "test": "corepack pnpm -r test",
     "test:unit": "corepack pnpm -r test",
     "e2e:smoke": "./scripts/run-e2e-smoke.sh",
+    "e2e:admin-privacy": "./scripts/run-e2e-admin-privacy.sh",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
     "prepare": "husky install",

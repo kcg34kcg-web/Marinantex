@@ -1,0 +1,58 @@
+version: "2026-03-12"
+name: legal-rag-parser-v3
+
+orchestration:
+  enabled: true
+  engine_order:
+    - mineru
+    - docling
+    - paddleocr_vl
+    - builtin
+  fail_safe_fallback: true
+
+supported_source_formats:
+  - pdf
+  - docx
+  - image
+  - html
+  - eml
+  - zip
+  - json
+  - xml
+  - text
+
+required_outputs:
+  - raw_text
+  - structured_json
+  - markdown
+  - page_anchor_coordinates
+  - parser_confidence
+  - ocr_confidence
+
+structure_processing:
+  reading_order: true
+  segmentation:
+    page: true
+    block: true
+    paragraph: true
+    sentence: true
+  table_extraction: true
+  footnote_handling: true
+  annex_split: true
+  header_footer_suppression: true
+  citation_span_detection: true
+  article_clause_parsing: true
+
+quality_gate:
+  enabled: true
+  min_quality_score: 0.62
+  min_parser_confidence: 0.55
+  min_ocr_confidence: 0.45
+  fail_closed: true
+  reprocess_queue: true
+
+ocr_notes:
+  primary_engine: "pytesseract + adapter"
+  low_confidence_flag: "LOW_OCR_CONFIDENCE"
+  fallback_to_extracted_text: true
+

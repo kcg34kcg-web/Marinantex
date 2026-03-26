@@ -8,6 +8,8 @@ import {
 import { Reflector } from "@nestjs/core";
 import type { DocumentStatus, UserRole } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
+import { AuditService } from "../../audit/audit.service";
+import { assertMatterScope, requestedMatterFromHeaders } from "../policy/matter-scope.policy";
 import {
   DOCUMENT_ACCESS_KEY,
   type DocumentPermission,
@@ -19,6 +21,7 @@ export class DocumentAccessGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -39,6 +42,7 @@ export class DocumentAccessGuard implements CanActivate {
       typeof rawDocumentId === "string" ? rawDocumentId : undefined;
 
     if (!user || !tenantId || !documentId) {
+      await this.writeDenialAudit(request, tenantId, documentId, "authorization_context_missing");
       throw new ForbiddenException("Authorization context missing");
     }
 
@@ -49,6 +53,7 @@ export class DocumentAccessGuard implements CanActivate {
         tenantId: true,
         ownerId: true,
         status: true,
+        canonicalJson: true,
       },
     });
 
@@ -57,7 +62,21 @@ export class DocumentAccessGuard implements CanActivate {
     }
 
     if (document.tenantId !== tenantId || user.tenantId !== tenantId) {
+      await this.writeDenialAudit(request, tenantId, documentId, "cross_tenant_denied");
       throw new ForbiddenException("Cross-tenant access denied");
+    }
+
+    const requestedMatterId = requestedMatterFromHeaders(request.headers as Record<string, unknown>);
+    const documentMatterId = this.extractMatterId(document.canonicalJson);
+    try {
+      assertMatterScope({
+        route: request.route?.path ?? "/documents/:id",
+        requestedMatterId,
+        resourceMatterId: documentMatterId,
+      });
+    } catch {
+      await this.writeDenialAudit(request, tenantId, documentId, "matter_scope_denied");
+      throw new ForbiddenException("Matter scope mismatch");
     }
 
     const allowed = this.evaluatePermission({
@@ -68,6 +87,7 @@ export class DocumentAccessGuard implements CanActivate {
     });
 
     if (!allowed) {
+      await this.writeDenialAudit(request, tenantId, documentId, "object_permission_denied");
       throw new ForbiddenException("Object-level permission denied");
     }
 
@@ -130,5 +150,48 @@ export class DocumentAccessGuard implements CanActivate {
     }
 
     return false;
+  }
+
+  private header(request: AuthenticatedRequest, key: string): string | undefined {
+    const value = request.headers[key];
+    return typeof value === "string" ? value.trim() || undefined : undefined;
+  }
+
+  private extractMatterId(canonicalJson: unknown): string | undefined {
+    if (!canonicalJson || typeof canonicalJson !== "object" || Array.isArray(canonicalJson)) {
+      return undefined;
+    }
+    const payload = canonicalJson as Record<string, unknown>;
+    const matterId = payload.matterId ?? payload.matter_id ?? payload.caseId ?? payload.case_id;
+    if (typeof matterId !== "string") {
+      return undefined;
+    }
+    return matterId.trim() || undefined;
+  }
+
+  private async writeDenialAudit(
+    request: AuthenticatedRequest,
+    tenantId: string | undefined,
+    documentId: string | undefined,
+    reason: string,
+  ): Promise<void> {
+    if (!tenantId) {
+      return;
+    }
+    await this.auditService.write({
+      tenantId,
+      actorUserId: request.user?.sub,
+      action: "AUTH_LOGIN_FAILED",
+      objectType: "AUTH",
+      objectId: documentId,
+      requestId: this.header(request, "x-request-id"),
+      ipAddress: request.ip,
+      userAgent: this.header(request, "user-agent"),
+      metadata: {
+        event: "document_access_denied",
+        reason,
+      },
+      dataClassification: "security",
+    });
   }
 }

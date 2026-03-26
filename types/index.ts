@@ -75,6 +75,10 @@ export interface RagSourceV3 {
   authority_score?: number;
   document_type?: string;
   version_type?: string;
+  citation_date?: string;
+  issuing_authority?: string;
+  decision_no?: string;
+  reference_no?: string;
 }
 
 export interface CitationQualityV3 {
@@ -91,10 +95,14 @@ export interface RagQueryRequestV3 {
   thread_id?: string;
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   case_id?: string;
+  source_types?: string[];
   chat_mode: ChatMode;
   ai_tier: AiTier;
   response_depth: ResponseDepth;
   strict_grounding?: boolean;
+  legal_disclaimer_ack?: boolean;
+  human_responsibility_ack?: boolean;
+  selected_mode?: string;
   as_of_date?: string;
   event_date?: string;
   decision_date?: string;
@@ -117,6 +125,13 @@ export interface RagResponseV3 {
   estimated_cost: number;
   audit_trail_id: string;
   temporal_fields?: TemporalFields;
+  warnings?: string[];
+  review_required?: boolean;
+  review_reason_codes?: string[];
+  low_confidence?: boolean;
+  low_confidence_reason?: string;
+  legal_disclaimer_required?: boolean;
+  human_responsibility_notice?: string;
 }
 
 export interface RagCitationSnapshotItemV3 {
@@ -129,6 +144,10 @@ export interface RagCitationSnapshotItemV3 {
   source_hash?: string;
   doc_version?: string;
   citation_text?: string;
+  citation_date?: string;
+  issuing_authority?: string;
+  decision_no?: string;
+  reference_no?: string;
   metadata?: Record<string, unknown>;
 }
 

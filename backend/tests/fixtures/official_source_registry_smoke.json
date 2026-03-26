@@ -1,0 +1,19 @@
+{
+  "registry_version": "official_source_registry.smoke.v1",
+  "sources": [
+    {
+      "source_registry_id": "resmi_gazete",
+      "source_url": "https://www.resmigazete.gov.tr",
+      "expected_update_interval_hours": 24,
+      "latest_remote_at": "2026-03-10T10:00:00Z",
+      "ingested_latest_at": "2026-03-10T10:30:00Z"
+    },
+    {
+      "source_registry_id": "yargitay",
+      "source_url": "https://karararama.yargitay.gov.tr",
+      "expected_update_interval_hours": 48,
+      "latest_remote_at": "2026-03-10T08:00:00Z",
+      "ingested_latest_at": "2026-03-10T08:10:00Z"
+    }
+  ]
+}

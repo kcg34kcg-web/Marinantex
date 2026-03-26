@@ -1,0 +1,51 @@
+{
+  "registry_version": "official_source_registry.v1",
+  "updated_at": "2026-03-11T00:00:00Z",
+  "sources": [
+    {
+      "source_registry_id": "resmi_gazete",
+      "source_url": "https://www.resmigazete.gov.tr",
+      "expected_update_interval_hours": 24,
+      "metadata": {
+        "source_type": "MEVZUAT",
+        "authority_level": "KANUN"
+      }
+    },
+    {
+      "source_registry_id": "mevzuat_gov_tr",
+      "source_url": "https://www.mevzuat.gov.tr",
+      "expected_update_interval_hours": 24,
+      "metadata": {
+        "source_type": "MEVZUAT",
+        "authority_level": "KANUN"
+      }
+    },
+    {
+      "source_registry_id": "yargitay",
+      "source_url": "https://karararama.yargitay.gov.tr",
+      "expected_update_interval_hours": 48,
+      "metadata": {
+        "source_type": "ICTIHAT",
+        "authority_level": "YARGITAY_DAIRE"
+      }
+    },
+    {
+      "source_registry_id": "danistay",
+      "source_url": "https://karararama.danistay.gov.tr",
+      "expected_update_interval_hours": 48,
+      "metadata": {
+        "source_type": "ICTIHAT",
+        "authority_level": "DANISTAY"
+      }
+    },
+    {
+      "source_registry_id": "anayasa_mahkemesi",
+      "source_url": "https://www.anayasa.gov.tr/tr/kararlar-bilgi-bankasi/",
+      "expected_update_interval_hours": 48,
+      "metadata": {
+        "source_type": "ICTIHAT",
+        "authority_level": "AYM"
+      }
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 
-const DEFAULT_PORTS = [3000, 4000, 8000];
+const DEFAULT_PORTS = [3000, 3001, 4000, 8000];
 const isWindows = process.platform === "win32";
 
 function readPorts() {

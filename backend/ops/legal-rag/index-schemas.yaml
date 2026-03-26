@@ -1,0 +1,77 @@
+version: "2026-03-12"
+vector_index:
+  backend: "pgvector (Supabase/Postgres)"
+  table: "public.rag_chunks"
+  embedding_column: "embedding"
+  dimensions:
+    default: 1536
+    note: "must match EMBEDDING_DIMENSIONS and provider output"
+  chunk_metadata_contract:
+    required_fields:
+      - doc_id
+      - canonical_id
+      - source_type
+      - jurisdiction
+      - authority_level
+      - court
+      - chamber
+      - effective_date
+      - amendment_date
+      - repeal_status
+      - page_start
+      - page_end
+      - section_title
+      - article_no
+      - clause_no
+      - language
+      - parser_confidence
+      - ocr_confidence
+      - pii_status
+      - version_id
+    lineage_fields:
+      - chunk_order
+      - chunk_type
+      - token_count
+      - embedding_version
+      - index_version
+
+lexical_index:
+  backend: "Postgres FTS (tsvector on rag_chunks.text_tsv)"
+  exact_lane_rpc: "public.rag_v3_match_chunks_legal_exact"
+  supported_exact_fields:
+    - article_no
+    - clause_no
+    - source_id
+    - case_no_e
+    - case_no_k
+    - quoted_phrase
+  ranking:
+    bm25_like_rank: "ts_rank_cd"
+    exact_boost: true
+
+retrieval_rpc:
+  doc_shortlist_rpc: "public.rag_v3_doc_shortlist"
+  hybrid_lanes:
+    - dense_vector
+    - sparse_fts
+    - legal_exact
+  fusion:
+    algorithm: RRF
+    default_k: 60
+
+document_table:
+  table: "public.rag_documents"
+  authority_metadata:
+    - authority_level
+    - authority_score
+    - authority_scope
+    - authority_source_id_normalized
+  versioning:
+    - effective_from
+    - effective_to
+    - publish_epoch
+    - revocation_epoch
+    - delta_summary
+    - delta_total_changes
+    - delta_critical_changes
+

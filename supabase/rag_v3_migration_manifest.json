@@ -1,0 +1,74 @@
+{
+  "manifest_version": "rag_v3_migration_manifest.v1",
+  "generated_at": "2026-03-15T00:00:00Z",
+  "steps": [
+    {
+      "path": "supabase/rag_v3_step01_documents_chunks.sql",
+      "sha256": "a3c6629c4e1c125ef91cd8c1b807e9f0191d87ee5ef4d6c02c9af0aeb2197506"
+    },
+    {
+      "path": "supabase/rag_v3_step02_hybrid_lanes.sql",
+      "sha256": "f864e6c143f1e9dcaf53cdc87b69c158b35bc341b45cd86c4697d03f4995e926"
+    },
+    {
+      "path": "supabase/rag_v3_step03_governance_ops.sql",
+      "sha256": "6cd62cfab0f4ec640532920ab8bcc9b3166bc0abaaef1077ba77dff0a18134bc"
+    },
+    {
+      "path": "supabase/rag_v3_step04_chunk_stability.sql",
+      "sha256": "334a74b50f99c0bf7ffe054680f0f58868f66d0de6e0f3489a312fcba46aed8a"
+    },
+    {
+      "path": "supabase/rag_v3_step05_query_trace_contract.sql",
+      "sha256": "069124994d7e6172929e8d7b70e7036d0b2abace999d089bca5a0046870b6601"
+    },
+    {
+      "path": "supabase/rag_v3_step06_classification_rbac_contracts.sql",
+      "sha256": "daca23992d1f8ea195be5221220ddda946e88a2f075fb5cc7920ad23c36f8fb8"
+    },
+    {
+      "path": "supabase/rag_v3_step07_snapshot_revocation_control_plane.sql",
+      "sha256": "56a02045009b5b1d05fa8d5cf225ce8ae91f942badc67545f83bd5367d377c78"
+    },
+    {
+      "path": "supabase/rag_v3_step08_ingest_quality_review_ops.sql",
+      "sha256": "7aa601923b1406957e045a3a1f66d41c00b35cc0543072a758b985e8195957e2"
+    },
+    {
+      "path": "supabase/rag_v3_step09_legal_exact_doc_shortlist.sql",
+      "sha256": "18274755fdda30b8195c90ffaf661f82a9cea6a26a2a552a8eda62af2baf3140"
+    },
+    {
+      "path": "supabase/rag_v3_step10_single_pipeline_rollout.sql",
+      "sha256": "5f549c2184a3a74ece400a5569932ca73b7df9fee99cfd484ff738cface5c212"
+    },
+    {
+      "path": "supabase/rag_v3_step11_chunk_metadata_contract.sql",
+      "sha256": "d4ee3b70700efe600e037f76223ba861774464343d31d03242af4621e10004b4"
+    },
+    {
+      "path": "supabase/rag_v3_step12_audit_trace_completeness.sql",
+      "sha256": "3521027bc9e897e649f8228aa323517f1d0dcd9fe8b21fb44b34d1adcf035ced"
+    },
+    {
+      "path": "supabase/rag_v3_step13_ops_freshness_retention_logs.sql",
+      "sha256": "a12dec050094bc5a0a4c689b9bac661a4623e3ed38459db05f660e089e3e64b1"
+    },
+    {
+      "path": "supabase/rag_v3_step14_chunk_source_span_contract.sql",
+      "sha256": "effe2db9b1ddacb3d15285d8c505d840f46539d4dd8f1eb8ac1254c29c8fa30b"
+    },
+    {
+      "path": "supabase/rag_v3_step15_chunk_source_provenance_contract.sql",
+      "sha256": "99792ddb1700aa1b7a5e40ef9c4409fdca551d20622e7c4d5507751003c5ca4a"
+    },
+    {
+      "path": "supabase/rag_v3_step16_document_metadata_normalization_contract.sql",
+      "sha256": "6f773970b5d11c38e4f7e981211074866bc583e21690b3ded449f24ce1a5dc94"
+    },
+    {
+      "path": "supabase/rag_v3_step17_operational_readiness_evidence_contract.sql",
+      "sha256": "336fa27db082a846bd0a609fe88de47356c2430cc9de1348401f75b4bf6c94c6"
+    }
+  ]
+}

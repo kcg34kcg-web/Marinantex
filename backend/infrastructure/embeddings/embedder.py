@@ -262,14 +262,18 @@ class QueryEmbedder:
         self._provider_fail_open_enabled: bool = bool(
             getattr(settings, "embedding_fail_open_enabled", False)
         )
+        self._force_local_fallback: bool = bool(
+            getattr(settings, "embedding_force_local_fallback", False)
+        )
 
         logger.info(
-            "QueryEmbedder initialised | model=%s | dims=%d | send_dims=%s | batch=%d | retries=%d",
+            "QueryEmbedder initialised | model=%s | dims=%d | send_dims=%s | batch=%d | retries=%d | force_local=%s",
             self._model,
             self._dimensions,
             self._send_dimensions,
             self._batch_size,
             self._max_retries,
+            self._force_local_fallback,
         )
 
     def _local_fallback_embeddings(self, texts: List[str]) -> List[List[float]]:
@@ -403,6 +407,14 @@ class QueryEmbedder:
         Raises:
             HTTPException 503: After all retries exhausted.
         """
+        if self._force_local_fallback:
+            logger.info(
+                "EMBED_FORCE_LOCAL_FALLBACK | count=%d | model=%s",
+                len(texts),
+                self._model,
+            )
+            return self._local_fallback_embeddings(texts)
+
         now = time.time()
         if self._quota_block_until_ts > now:
             remaining = int(max(1, self._quota_block_until_ts - now))

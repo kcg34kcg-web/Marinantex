@@ -3,10 +3,10 @@
 import { createClient } from '@/utils/supabase/client';
 import { useRouter, useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import moment from 'moment';
+import { format, formatDistanceToNow } from 'date-fns';
+import { tr } from 'date-fns/locale';
 import Link from 'next/link';
 import Image from 'next/image';
-import 'moment/locale/tr';
 
 import { 
   ArrowLeft, Loader2, User, MapPin, Ticket, QrCode, Clock, MoreHorizontal,
@@ -89,6 +89,22 @@ const AnimatedBackground = () => {
   );
 };
 
+function formatDatePart(value: Date, pattern: string) {
+  try {
+    return format(value, pattern, { locale: tr });
+  } catch {
+    return '-';
+  }
+}
+
+function formatRelativeDate(value: string) {
+  try {
+    return formatDistanceToNow(new Date(value), { addSuffix: true, locale: tr });
+  } catch {
+    return value;
+  }
+}
+
 export default function PostDetailPage() { 
   const params = useParams(); 
   const id = params?.id as string; 
@@ -125,7 +141,6 @@ export default function PostDetailPage() {
     };
 
     fetchData(); 
-    moment.locale('tr'); 
   }, [id]); 
 
   // --- HEADER (FIXED, ANIMASYONLU BUTON) ---
@@ -209,13 +224,13 @@ export default function PostDetailPage() {
             <div className="w-full md:w-80 bg-slate-50/50 p-6 md:p-8 flex flex-col items-center justify-center text-center gap-4 border-l-0 md:border-l border-slate-100 relative">
                  <div className="flex flex-col items-center">
                     <span className="text-orange-600 font-bold uppercase tracking-widest text-xs mb-1">
-                        {moment(eventDate).format('MMMM')}
+                        {formatDatePart(eventDate, 'MMMM')}
                     </span>
                     <span className="text-5xl font-black text-[#0f172a] tracking-tighter leading-none">
-                        {moment(eventDate).format('DD')}
+                        {formatDatePart(eventDate, 'dd')}
                     </span>
                     <span className="text-slate-500 text-sm font-medium mt-1 flex items-center gap-1.5 bg-white px-3 py-1 rounded-full border border-slate-200 shadow-sm">
-                        <Clock size={12} className="text-orange-500" /> {moment(eventDate).format('HH:mm')}
+                        <Clock size={12} className="text-orange-500" /> {formatDatePart(eventDate, 'HH:mm')}
                     </span>
                  </div>
 
@@ -260,7 +275,7 @@ export default function PostDetailPage() {
                    </div>
                    <div>
                        <div className="text-[#0f172a] font-bold text-lg leading-tight cursor-pointer hover:text-orange-600 transition-colors" onClick={() => router.push(`/profile/${post.user_id}`)}>{post.profiles?.full_name}</div>
-                       <div className="text-xs text-slate-500 font-medium">@{post.profiles?.username} • {moment(post.created_at).fromNow()}</div>
+                       <div className="text-xs text-slate-500 font-medium">@{post.profiles?.username} • {formatRelativeDate(post.created_at)}</div>
                    </div>
                 </div>
                 <p className="text-slate-800 text-lg whitespace-pre-wrap leading-relaxed">{post.content}</p>

@@ -1,0 +1,84 @@
+version: "1.0.0"
+name: "hukuk-rag-redaction-policy"
+default_mode: "reversible"
+external_llm_mode: "irreversible"
+map_backend: "memory"
+map_ttl_seconds: 900
+fail_closed_on_detection_error: true
+entities:
+  - key: "TC_KIMLIK"
+    category: "national_id"
+    strategy: "regex+ner"
+    reversible: true
+    irreversible_token: "[REDACTED_TC_KIMLIK]"
+  - key: "VKN"
+    category: "tax_id"
+    strategy: "regex"
+    reversible: true
+    irreversible_token: "[REDACTED_VKN]"
+  - key: "IBAN"
+    category: "financial"
+    strategy: "regex+ner"
+    reversible: true
+    irreversible_token: "[REDACTED_IBAN]"
+  - key: "PHONE_NUMBER"
+    category: "contact"
+    strategy: "regex+ner"
+    reversible: true
+    irreversible_token: "[REDACTED_PHONE]"
+  - key: "EMAIL_ADDRESS"
+    category: "contact"
+    strategy: "regex+ner"
+    reversible: true
+    irreversible_token: "[REDACTED_EMAIL]"
+  - key: "ADDRESS"
+    category: "location"
+    strategy: "regex+ner"
+    reversible: true
+    irreversible_token: "[REDACTED_ADDRESS]"
+  - key: "BIRTH_DATE"
+    category: "sensitive_personal"
+    strategy: "regex"
+    reversible: true
+    irreversible_token: "[REDACTED_BIRTH_DATE]"
+  - key: "PLATE"
+    category: "transport"
+    strategy: "regex"
+    reversible: true
+    irreversible_token: "[REDACTED_PLATE]"
+  - key: "FILE_NO"
+    category: "case_identifier"
+    strategy: "regex"
+    reversible: true
+    irreversible_token: "[REDACTED_FILE_NO]"
+  - key: "MUSTERI_ADI"
+    category: "client_identity"
+    strategy: "ner+rules"
+    reversible: true
+    irreversible_token: "[REDACTED_CLIENT_NAME]"
+  - key: "TANIK_ADI"
+    category: "witness_identity"
+    strategy: "ner+rules"
+    reversible: true
+    irreversible_token: "[REDACTED_WITNESS_NAME]"
+  - key: "CHILD_NAME"
+    category: "child_data"
+    strategy: "ner+rules"
+    reversible: true
+    irreversible_token: "[REDACTED_CHILD_NAME]"
+  - key: "HEALTH_DATA"
+    category: "sensitive_health"
+    strategy: "ner+rules"
+    reversible: false
+    irreversible_token: "[REDACTED_HEALTH_DATA]"
+routing:
+  before_external_llm: true
+  before_logging: true
+  before_persistence: false
+human_review:
+  enqueue_on:
+    - "HEALTH_DATA"
+    - "CHILD_NAME"
+    - "TC_KIMLIK"
+    - "IBAN"
+  queue: "redaction_review_queue"

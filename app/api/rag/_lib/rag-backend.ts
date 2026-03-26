@@ -1,6 +1,10 @@
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const DEFAULT_BACKEND_URLS = ['http://127.0.0.1:8000', 'http://127.0.0.1:8001'] as const;
 
+function isAbortLikeError(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
+}
+
 function normalizeBackendUrl(raw: string | undefined | null): string | null {
   if (!raw) return null;
   const value = raw.trim();
@@ -70,21 +74,72 @@ export function resolveRagBackendCandidates(): string[] {
   return [...DEFAULT_BACKEND_URLS];
 }
 
+function shouldTryNextCandidate(
+  response: Response,
+  params: {
+    baseUrl: string;
+    normalizedPath: string;
+    candidateIndex: number;
+    candidateCount: number;
+  },
+): boolean {
+  const { baseUrl, normalizedPath, candidateIndex, candidateCount } = params;
+  if (candidateIndex >= candidateCount - 1) return false;
+
+  if (response.status >= 500) return true;
+
+  // Local gelistirmede ilk aday bazen ayakta ama RAG route'u olmayan farkli bir servisi isaret eder.
+  if (
+    isLocalBackend(baseUrl)
+    && normalizedPath.startsWith('/api/v1/rag-v3/')
+    && (response.status === 404 || response.status === 405)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 export async function fetchRagBackend(path: string, init: RequestInit): Promise<Response> {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   const candidates = resolveRagBackendCandidates();
   let lastError: unknown = null;
+  let lastResponse: Response | null = null;
 
   for (let i = 0; i < candidates.length; i += 1) {
     const baseUrl = candidates[i];
+    if (init.signal?.aborted) {
+      lastError = init.signal.reason ?? new Error('RAG backend istegi iptal edildi.');
+      break;
+    }
     try {
-      return await fetch(`${baseUrl}${normalizedPath}`, init);
+      const response = await fetch(`${baseUrl}${normalizedPath}`, init);
+      if (shouldTryNextCandidate(response, {
+        baseUrl,
+        normalizedPath,
+        candidateIndex: i,
+        candidateCount: candidates.length,
+      })) {
+        lastResponse = response;
+        if (init.signal?.aborted) {
+          break;
+        }
+        continue;
+      }
+      return response;
     } catch (error) {
       lastError = error;
+      if (isAbortLikeError(error)) {
+        break;
+      }
       if (i === candidates.length - 1) {
         break;
       }
     }
+  }
+
+  if (lastResponse) {
+    return lastResponse;
   }
 
   const attempted = candidates.join(', ');

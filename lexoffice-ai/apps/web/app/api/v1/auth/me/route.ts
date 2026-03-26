@@ -11,10 +11,12 @@ export async function GET() {
         id: session.user.id,
         email: session.user.email,
         firstName: session.user.firstName,
-        lastName: session.user.lastName
+        lastName: session.user.lastName,
+        mfaEnabled: session.user.mfaEnabled
       },
       tenantId: session.tenantId,
-      expiresAt: session.expiresAt
+      expiresAt: session.expiresAt,
+      mfaVerifiedAt: session.mfaVerifiedAt
     });
   } catch (error) {
     return fail(error);

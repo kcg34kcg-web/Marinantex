@@ -88,7 +88,9 @@ This stack includes:
 - TEI (OpenAI-compatible embeddings endpoint for `bge-m3`)
 - FastAPI backend wired to those local endpoints
 
-Runbook: `docs/setup/step-11-self-host-rag-serving.md`
+Runbook: `docs/setup/step-11-self-host-rag-serving.md` (GPU/Linux)
+
+Mac (Apple Silicon) runbook: `docs/setup/step-11-self-host-rag-serving-mac.md`
 
 ## Environment Variables
 

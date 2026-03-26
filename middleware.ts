@@ -23,9 +23,14 @@ function isPublicNewsRoute(pathname: string): boolean {
   return pathname === '/dashboard/news' || pathname.startsWith('/api/dashboard/news/stream');
 }
 
+function isApiRoute(pathname: string): boolean {
+  return pathname.startsWith('/api/');
+}
+
 function isPublicRoute(pathname: string): boolean {
   return (
     pathname === '/' ||
+    pathname === '/api/health' ||
     isAuthRoute(pathname) ||
     pathname.startsWith('/auth') ||
     pathname.startsWith('/editor') ||
@@ -81,6 +86,13 @@ export async function middleware(request: NextRequest) {
       return response;
     }
 
+    if (isApiRoute(pathname)) {
+      return NextResponse.json(
+        { error: 'Oturum bulunamadi.', error_code: 'AUTH_REQUIRED' },
+        { status: 401 },
+      );
+    }
+
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = '/login';
     loginUrl.searchParams.set('next', pathname);
@@ -96,6 +108,13 @@ export async function middleware(request: NextRequest) {
   if (profileError || !profile) {
     if (pathname.startsWith('/onboarding')) {
       return response;
+    }
+
+    if (isApiRoute(pathname)) {
+      return NextResponse.json(
+        { error: 'Profil bulunamadi.', error_code: 'PROFILE_REQUIRED' },
+        { status: 401 },
+      );
     }
 
     const onboardingUrl = request.nextUrl.clone();

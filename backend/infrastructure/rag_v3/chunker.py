@@ -51,6 +51,7 @@ _HEADING_MARKER_RE = re.compile(r"^\[(H1|H2|H3)\]\s+(.+)$", re.IGNORECASE)
 _PUNCT_RE = re.compile(r"[.;:,!?]")
 _LINE_RE = re.compile(r"^.*$", re.MULTILINE)
 _TOKEN_SPAN_RE = re.compile(r"\S+")
+_PARAGRAPH_BREAK_RE = re.compile(r"\n\s*\n+")
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,8 @@ class LegalChunkDraft:
     page_range: Optional[str]
     char_start: int
     char_end: int
+    paragraph_start: Optional[int] = None
+    paragraph_end: Optional[int] = None
 
 
 class LegalStructuredChunker:
@@ -93,10 +96,14 @@ class LegalStructuredChunker:
 
         folded = _fold_tr(payload).upper()
         page_starts = _page_starts(payload)
+        paragraph_starts = _paragraph_starts(payload)
         heading_map = self._build_heading_map(payload)
 
         article_matches = list(_ARTICLE_BOUNDARY_RE.finditer(folded))
         if not article_matches:
+            heading_chunks = self._chunk_by_headings(payload, page_starts, paragraph_starts)
+            if heading_chunks:
+                return heading_chunks
             return [
                 self._make_chunk(
                     article_no=None,
@@ -107,6 +114,7 @@ class LegalStructuredChunker:
                     raw_start=0,
                     raw_end=len(payload),
                     page_starts=page_starts,
+                    paragraph_starts=paragraph_starts,
                 )
             ]
 
@@ -124,6 +132,7 @@ class LegalStructuredChunker:
                     article_no=article_no,
                     heading_path=heading_path,
                     page_starts=page_starts,
+                    paragraph_starts=paragraph_starts,
                 )
             )
 
@@ -137,6 +146,7 @@ class LegalStructuredChunker:
         article_no: str,
         heading_path: Optional[str],
         page_starts: list[int],
+        paragraph_starts: list[int],
     ) -> list[LegalChunkDraft]:
         article_text = text[article_start:article_end]
         clause_matches = list(_CLAUSE_RE.finditer(article_text))
@@ -151,6 +161,7 @@ class LegalStructuredChunker:
                     raw_start=article_start,
                     raw_end=article_end,
                     page_starts=page_starts,
+                    paragraph_starts=paragraph_starts,
                 )
             ]
 
@@ -176,6 +187,7 @@ class LegalStructuredChunker:
                 clause_start=clause_start,
                 clause_end=clause_end,
                 page_starts=page_starts,
+                paragraph_starts=paragraph_starts,
                 enable_split=token_estimate > self._target_max_tokens,
             )
             if subchunks:
@@ -192,6 +204,68 @@ class LegalStructuredChunker:
                     raw_start=clause_start,
                     raw_end=clause_end,
                     page_starts=page_starts,
+                    paragraph_starts=paragraph_starts,
+                )
+            )
+
+        return chunks
+
+    def _chunk_by_headings(
+        self,
+        text: str,
+        page_starts: list[int],
+        paragraph_starts: list[int],
+    ) -> list[LegalChunkDraft]:
+        heading_points: list[tuple[int, str]] = []
+        active: list[str] = []
+
+        for match in _LINE_RE.finditer(text):
+            line = (match.group(0) or "").strip()
+            if not line:
+                continue
+            marker = _HEADING_MARKER_RE.match(line)
+            if not marker:
+                continue
+
+            level = int(marker.group(1)[1])
+            title = marker.group(2).strip()
+            if not title:
+                continue
+
+            if level == 1:
+                active = [title]
+            elif level == 2:
+                active = [active[0], title] if active else [title]
+            else:
+                if len(active) >= 2:
+                    active = [active[0], active[1], title]
+                elif active:
+                    active = [active[0], title]
+                else:
+                    active = [title]
+
+            heading_points.append((match.start(), " > ".join(active)))
+
+        if len(heading_points) < 2:
+            return []
+
+        chunks: list[LegalChunkDraft] = []
+        for idx, (start, heading_path) in enumerate(heading_points):
+            end = heading_points[idx + 1][0] if idx + 1 < len(heading_points) else len(text)
+            raw = text[start:end]
+            if len(raw.strip()) < 40:
+                continue
+            chunks.append(
+                self._make_chunk(
+                    article_no=None,
+                    clause_no=None,
+                    subclause_no=None,
+                    heading_path=heading_path or None,
+                    raw_text=raw,
+                    raw_start=start,
+                    raw_end=end,
+                    page_starts=page_starts,
+                    paragraph_starts=paragraph_starts,
                 )
             )
 
@@ -206,6 +280,7 @@ class LegalStructuredChunker:
         clause_start: int,
         clause_end: int,
         page_starts: list[int],
+        paragraph_starts: list[int],
         enable_split: bool,
     ) -> list[LegalChunkDraft]:
         if not enable_split:
@@ -236,6 +311,7 @@ class LegalStructuredChunker:
                     raw_start=start,
                     raw_end=end,
                     page_starts=page_starts,
+                    paragraph_starts=paragraph_starts,
                 )
             )
 
@@ -251,8 +327,10 @@ class LegalStructuredChunker:
         raw_start: int,
         raw_end: int,
         page_starts: list[int],
+        paragraph_starts: list[int],
     ) -> LegalChunkDraft:
         text = raw_text.replace("\f", "\n").strip()
+        paragraph_start, paragraph_end = _paragraph_range(raw_start, raw_end, paragraph_starts)
         return LegalChunkDraft(
             article_no=article_no,
             clause_no=clause_no,
@@ -262,6 +340,8 @@ class LegalStructuredChunker:
             page_range=_page_range(raw_start, raw_end, page_starts),
             char_start=raw_start,
             char_end=raw_end,
+            paragraph_start=paragraph_start,
+            paragraph_end=paragraph_end,
         )
 
     def _build_heading_map(self, text: str) -> dict[int, str]:
@@ -416,3 +496,22 @@ def _page_range(start: int, end: int, starts: list[int]) -> str:
     if first == last:
         return str(first)
     return f"{first}-{last}"
+
+
+def _paragraph_starts(text: str) -> list[int]:
+    starts = [0]
+    for match in _PARAGRAPH_BREAK_RE.finditer(text or ""):
+        next_start = match.end()
+        if next_start < len(text):
+            starts.append(next_start)
+    return starts
+
+
+def _paragraph_for_offset(offset: int, starts: list[int]) -> int:
+    return max(1, bisect.bisect_right(starts, max(0, offset)))
+
+
+def _paragraph_range(start: int, end: int, starts: list[int]) -> tuple[int, int]:
+    first = _paragraph_for_offset(start, starts)
+    last = _paragraph_for_offset(max(start, end - 1), starts)
+    return (first, last)

@@ -1,0 +1,71 @@
+{
+  "job": "rag_v3_official_source_freshness_scheduler",
+  "generated_at": "2026-03-11T17:18:54.698095+00:00",
+  "registry_version": "official_source_registry.v1",
+  "threshold_hours": 24,
+  "dry_run": true,
+  "source_count": 5,
+  "state_counts": {
+    "fresh": 0,
+    "stale": 5,
+    "unknown": 0,
+    "error": 0
+  },
+  "records": [
+    {
+      "source_registry_id": "resmi_gazete",
+      "source_url": "https://www.resmigazete.gov.tr",
+      "latest_remote_at": null,
+      "ingested_latest_at": null,
+      "lag_hours": 25.0,
+      "freshness_state": "stale",
+      "metadata": {
+        "reason": "no_ingested_snapshot"
+      }
+    },
+    {
+      "source_registry_id": "mevzuat_gov_tr",
+      "source_url": "https://www.mevzuat.gov.tr",
+      "latest_remote_at": null,
+      "ingested_latest_at": null,
+      "lag_hours": 25.0,
+      "freshness_state": "stale",
+      "metadata": {
+        "reason": "no_ingested_snapshot"
+      }
+    },
+    {
+      "source_registry_id": "yargitay",
+      "source_url": "https://karararama.yargitay.gov.tr",
+      "latest_remote_at": null,
+      "ingested_latest_at": null,
+      "lag_hours": 25.0,
+      "freshness_state": "stale",
+      "metadata": {
+        "reason": "no_ingested_snapshot"
+      }
+    },
+    {
+      "source_registry_id": "danistay",
+      "source_url": "https://karararama.danistay.gov.tr",
+      "latest_remote_at": null,
+      "ingested_latest_at": null,
+      "lag_hours": 25.0,
+      "freshness_state": "stale",
+      "metadata": {
+        "reason": "no_ingested_snapshot"
+      }
+    },
+    {
+      "source_registry_id": "anayasa_mahkemesi",
+      "source_url": "https://www.anayasa.gov.tr/tr/kararlar-bilgi-bankasi/",
+      "latest_remote_at": null,
+      "ingested_latest_at": null,
+      "lag_hours": 25.0,
+      "freshness_state": "stale",
+      "metadata": {
+        "reason": "no_ingested_snapshot"
+      }
+    }
+  ]
+}

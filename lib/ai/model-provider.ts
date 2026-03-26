@@ -14,8 +14,10 @@ interface LegalModelSelection {
   modelId: string;
 }
 
-const SUMMARY_PRIMARY_MODEL_ID = 'gemini-2.5-flash-lite';
+const SUMMARY_PRIMARY_MODEL_ID = 'gemini-2.0-flash';
 const SUMMARY_FALLBACK_MODEL_ID = 'gemini-2.0-flash-lite';
+const FORCE_GEMINI_SUMMARY =
+  (process.env.NEWS_FORCE_GEMINI_SUMMARY ?? 'true').toLowerCase() !== 'false';
 
 export const getLegalModel = (tier: LegalModelTier = 'drafting'): SupportedModel => {
   if (!serverEnv.GOOGLE_GENERATIVE_AI_API_KEY) {
@@ -70,6 +72,15 @@ export async function resolveLegalModelWithFallback(tier: LegalModelTier = 'draf
         model: fallbackSummaryModel,
         providerName: serverEnv.COHERE_API_KEY ? 'cohere' : 'openai',
         modelId: serverEnv.COHERE_API_KEY ? 'command-r' : 'gpt-4o-mini',
+      };
+    }
+
+    if (FORCE_GEMINI_SUMMARY) {
+      const forcedSummaryModel = google(SUMMARY_PRIMARY_MODEL_ID) as SupportedModel;
+      return {
+        model: forcedSummaryModel,
+        providerName: 'google',
+        modelId: SUMMARY_PRIMARY_MODEL_ID,
       };
     }
 

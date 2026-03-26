@@ -17,6 +17,8 @@ import {
 } from '@/app/api/rag/_lib/error-contract';
 import { fetchRagBackend, getRagBackendForLogs } from '@/app/api/rag/_lib/rag-backend';
 import { enforceRagRouteRateLimit } from '@/app/api/rag/_lib/rate-limit';
+import { isTimeoutError } from '@/app/api/rag/_lib/timeout';
+import { resolveRequestedMatterId, validateMatterScope } from '@/app/api/rag/_lib/matter-policy';
 import { createClient } from '@/utils/supabase/server';
 
 const QUERY_FLAG_KEYS = ['strict_grounding_v2', 'tier_selector_ui', 'router_hybrid_v3'] as const;
@@ -114,12 +116,22 @@ type RagV3Citation = {
   clause_no?: string | null;
   subclause_no?: string | null;
   page_range?: string | null;
+  source_char_start?: number | null;
+  source_char_end?: number | null;
+  paragraph_start?: number | null;
+  paragraph_end?: number | null;
+  section_path?: string | null;
+  source_url?: string | null;
   final_score?: number;
   temporal_version?: string | null;
   evidence_text?: string | null;
   evidence_start?: number | null;
   evidence_end?: number | null;
   evidence_overlap?: number | null;
+  citation_date?: string | null;
+  issuing_authority?: string | null;
+  decision_no?: string | null;
+  reference_no?: string | null;
 };
 
 type RagV3Fingerprint = {
@@ -131,6 +143,7 @@ type RagV3Fingerprint = {
 type RagV3Structured = {
   confidence?: number;
   warnings?: string[];
+  legal_disclaimer?: string;
 };
 
 type RagV3CostEstimate = {
@@ -152,6 +165,12 @@ type RagV3QueryPayload = {
   citations: RagV3Citation[];
   fingerprint: RagV3Fingerprint;
   structured: RagV3Structured;
+  review_required?: boolean;
+  review_reason_codes?: string[];
+  low_confidence?: boolean;
+  low_confidence_reason?: string;
+  legal_disclaimer_required?: boolean;
+  human_responsibility_notice?: string;
   estimated_cost?: number;
   cost_estimate?: RagV3CostEstimate;
   contract_version?: string;
@@ -186,8 +205,8 @@ function toPageNo(value: string | null | undefined): number | undefined {
 
 function sourceClass(sourceType: string): string {
   const lowered = sourceType.toLowerCase();
-  if (lowered.includes('law') || lowered.includes('legislation') || lowered.includes('kanun')) return 'kanun';
   if (lowered.includes('case') || lowered.includes('ictihat') || lowered.includes('mahkeme')) return 'ictihat';
+  if (lowered.includes('law') || lowered.includes('legislation') || lowered.includes('kanun')) return 'kanun';
   return 'ikincil_kaynak';
 }
 
@@ -246,6 +265,16 @@ function normalizeRagV3Response(body: unknown): RagV3QueryPayload | null {
     citations,
     fingerprint,
     structured,
+    review_required: typeof obj.review_required === 'boolean' ? obj.review_required : undefined,
+    review_reason_codes: Array.isArray(obj.review_reason_codes)
+      ? obj.review_reason_codes.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : undefined,
+    low_confidence: typeof obj.low_confidence === 'boolean' ? obj.low_confidence : undefined,
+    low_confidence_reason: typeof obj.low_confidence_reason === 'string' ? obj.low_confidence_reason : undefined,
+    legal_disclaimer_required:
+      typeof obj.legal_disclaimer_required === 'boolean' ? obj.legal_disclaimer_required : undefined,
+    human_responsibility_notice:
+      typeof obj.human_responsibility_notice === 'string' ? obj.human_responsibility_notice : undefined,
     estimated_cost: estimatedCost,
     cost_estimate: costEstimate,
     contract_version: typeof obj.contract_version === 'string' ? obj.contract_version : undefined,
@@ -297,12 +326,16 @@ function adaptRagV3ToLegacy(
       citation.article_no ? `madde=${citation.article_no}` : null,
       citation.clause_no ? `fikra=${citation.clause_no}` : null,
       citation.subclause_no ? `bent=${citation.subclause_no}` : null,
+      citation.decision_no ? `karar=${citation.decision_no}` : null,
+      citation.reference_no ? `ref=${citation.reference_no}` : null,
     ]
       .filter(Boolean)
       .join('; ');
     const content = [
       citation.title ? `Baslik: ${citation.title}` : null,
       anchor ? `Atif: ${anchor}` : null,
+      citation.issuing_authority ? `Kurum/Mahkeme: ${citation.issuing_authority}` : null,
+      citation.citation_date ? `Tarih: ${citation.citation_date}` : null,
       citation.temporal_version ? `Versiyon: ${citation.temporal_version}` : null,
       citation.evidence_text ? `Kanit: ${citation.evidence_text}` : null,
       citation.page_range ? `Sayfa: ${citation.page_range}` : null,
@@ -324,6 +357,10 @@ function adaptRagV3ToLegacy(
       page_no: toPageNo(citation.page_range),
       final_score: typeof citation.final_score === 'number' ? citation.final_score : undefined,
       quality_source_class: sourceClass(sourceType),
+      citation_date: citation.citation_date ?? undefined,
+      issuing_authority: citation.issuing_authority ?? undefined,
+      decision_no: citation.decision_no ?? undefined,
+      reference_no: citation.reference_no ?? undefined,
     };
   });
 
@@ -410,12 +447,27 @@ function adaptRagV3ToLegacy(
     temporal_fields: options.temporal,
     legal_disclaimer: {
       disclaimer_text:
-        'Nihai hukuki gorus yerine gecmez. Kritik adimlardan once birincil kaynak dogrulamasi yapin.',
-      severity: 'info',
-      requires_expert: false,
-      disclaimer_types: ['GENEL_HUKUKI'],
+        payload.structured?.legal_disclaimer?.trim()
+        || payload.human_responsibility_notice?.trim()
+        || 'Nihai hukuki gorus yerine gecmez. Kritik adimlardan once birincil kaynak dogrulamasi yapin.',
+      severity: payload.low_confidence || payload.review_required ? 'warning' : 'info',
+      requires_expert: Boolean(payload.review_required),
+      disclaimer_types: payload.low_confidence
+        ? ['GENEL_HUKUKI', 'DUSUK_GUVEN']
+        : ['GENEL_HUKUKI'],
     },
     aym_warnings: [],
+    warnings: [
+      ...(payload.low_confidence ? ['low_confidence'] : []),
+      ...(payload.review_required ? ['review_required'] : []),
+      ...(payload.review_reason_codes ?? []),
+    ],
+    review_required: Boolean(payload.review_required),
+    review_reason_codes: payload.review_reason_codes ?? [],
+    low_confidence: Boolean(payload.low_confidence),
+    low_confidence_reason: payload.low_confidence_reason ?? '',
+    legal_disclaimer_required: Boolean(payload.legal_disclaimer_required),
+    human_responsibility_notice: payload.human_responsibility_notice ?? '',
   };
 }
 
@@ -430,6 +482,7 @@ const requestSchema = z.object({
   ai_tier: z.nativeEnum(AiTier).default(AiTier.HAZIR_CEVAP),
   response_depth: z.nativeEnum(ResponseDepth).default(ResponseDepth.STANDARD),
   case_id: z.string().uuid().optional(),
+  source_types: z.array(z.string().min(1).max(64)).max(16).optional(),
   as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-AA-GG formati gerekli.').optional(),
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-AA-GG formati gerekli.').optional(),
   decision_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-AA-GG formati gerekli.').optional(),
@@ -437,6 +490,9 @@ const requestSchema = z.object({
   // Backward-compat alias, mapped to max_sources when max_sources is absent.
   top_k: z.number().int().min(1).max(20).optional(),
   strict_grounding: z.boolean().optional(),
+  legal_disclaimer_ack: z.boolean().optional(),
+  human_responsibility_ack: z.boolean().optional(),
+  selected_mode: z.string().max(40).optional(),
   active_document_ids: z.array(z.string().uuid()).optional(),
   save_mode: z.nativeEnum(SaveMode).optional(),
   client_action: z.nativeEnum(ClientAction).optional(),
@@ -487,7 +543,7 @@ export async function POST(req: Request) {
     }
 
     const { bureauId, userId, accessLevel, planTier, messagesToday, tokensUsedMonth } = context;
-    const rateLimit = enforceRagRouteRateLimit({
+    const rateLimit = await enforceRagRouteRateLimit({
       request: req,
       routeKey: 'query_proxy',
       userId,
@@ -498,6 +554,15 @@ export async function POST(req: Request) {
 
     const flags = await resolveQueryFlags(supabase, bureauId);
     const { top_k, ...restPayload } = parsed.data;
+    const matterScopeError = validateMatterScope({
+      headers: req.headers,
+      payloadMatterId: restPayload.case_id ?? null,
+      route: '/api/rag',
+    });
+    if (matterScopeError) {
+      return matterScopeError;
+    }
+    const requestedMatterId = resolveRequestedMatterId(req.headers) ?? restPayload.case_id ?? null;
     const effectiveTier = flags.tier_selector_ui ? restPayload.ai_tier : AiTier.HAZIR_CEVAP;
     const effectiveStrictGrounding = flags.strict_grounding_v2
       ? (
@@ -511,16 +576,32 @@ export async function POST(req: Request) {
     const effectiveTopK = clampTopK(
       restPayload.max_sources ?? top_k ?? 10,
     );
+    const policyContext: Record<string, unknown> = requestedMatterId
+      ? { matter_id: requestedMatterId, case_id: requestedMatterId }
+      : {};
+    policyContext.chat_mode = restPayload.chat_mode;
+    policyContext.response_depth = restPayload.response_depth;
+    if (restPayload.thread_id) {
+      policyContext.thread_id = restPayload.thread_id;
+    }
+    if (restPayload.active_document_ids && restPayload.active_document_ids.length > 0) {
+      policyContext.active_document_ids = restPayload.active_document_ids;
+    }
     const upstreamPayload = {
       query: restPayload.query,
       history: restPayload.history,
       top_k: effectiveTopK,
       jurisdiction: 'TR',
+      source_types: restPayload.source_types,
       as_of_date: restPayload.as_of_date,
       event_date: restPayload.event_date,
       decision_date: restPayload.decision_date,
       acl_tags: aclTagsForAccessLevel(accessLevel),
       requested_tier: requestedTierNumber,
+      legal_disclaimer_ack: restPayload.legal_disclaimer_ack ?? false,
+      human_responsibility_ack: restPayload.human_responsibility_ack ?? false,
+      selected_mode: restPayload.selected_mode?.trim() || restPayload.chat_mode,
+      policy_context: policyContext,
     };
     const timeoutMs = TIER_TIMEOUT_MS[effectiveTier] ?? 95_000;
 
@@ -539,6 +620,9 @@ export async function POST(req: Request) {
     }
     if (bureauId) {
       headers['X-Bureau-ID'] = bureauId;
+    }
+    if (requestedMatterId) {
+      headers['X-Matter-ID'] = requestedMatterId;
     }
     if (context.accessToken) {
       headers.Authorization = `Bearer ${context.accessToken}`;
@@ -584,6 +668,14 @@ export async function POST(req: Request) {
         retryable: true,
       });
     }
+    if (normalized.status === 'ok' && normalized.citations.length === 0) {
+      return ragProxyErrorResponse({
+        status: 422,
+        errorCode: 'UNGROUNDED_OK_RESPONSE',
+        message: 'Kaynaksiz yanit kabul edilmedi.',
+        retryable: false,
+      });
+    }
     const noSourceHardFail =
       effectiveStrictGrounding
       && normalized.status === 'no_answer'
@@ -605,14 +697,23 @@ export async function POST(req: Request) {
     });
     return NextResponse.json(adapted, { status: 200 });
   } catch (err) {
+    const timedOut = isTimeoutError(err);
     const message =
-      err instanceof Error && err.name === 'AbortError'
+      timedOut
         ? 'Istek zaman asimina ugradi. Lutfen tekrar deneyin.'
         : 'Sunucu baglanti hatasi.';
-    console.error('[RAG proxy]', err, { backendCandidates: getRagBackendForLogs() });
+    console.error(
+      JSON.stringify({
+        event: 'rag_proxy_exception',
+        route: '/api/rag',
+        error_code: timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
+        message: err instanceof Error ? err.message : 'unknown_error',
+        backend_candidates: getRagBackendForLogs(),
+      }),
+    );
     return ragProxyErrorResponse({
       status: 502,
-      errorCode: err instanceof Error && err.name === 'AbortError' ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
+      errorCode: timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
       message,
       retryable: true,
     });

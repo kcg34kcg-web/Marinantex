@@ -1,0 +1,54 @@
+profile: production
+
+backend:
+  image:
+    repository: marinantex/backend-rag
+    tag: production
+  replicaCount: 3
+  env:
+    ENVIRONMENT: production
+    QWEN_SERVING_BACKEND: vllm
+    OPENAI_BASE_URL: http://vllm:8000/v1
+    SGLANG_BASE_URL: http://sglang:30000/v1
+    EMBEDDING_BASE_URL: http://tei-embed:8080/v1
+    RAG_V3_RERANKER_BASE_URL: http://reranker:8080/v1
+    RAG_V3_REQUIRE_LEGAL_DISCLAIMER_ACK: "true"
+    RAG_V3_CITATION_REQUIRE_CORE_FIELDS: "true"
+    RAG_V3_NO_ANSWER_ON_CLAIM_VERIFICATION_FAIL: "true"
+
+redis:
+  enabled: true
+
+teiEmbed:
+  enabled: true
+  modelId: Qwen/Qwen3-Embedding-8B
+
+reranker:
+  enabled: true
+  modelId: Qwen/Qwen3-Reranker-8B
+
+vllm:
+  enabled: true
+  model: Qwen/Qwen3.5-35B-A3B
+  maxModelLen: 32768
+  gpuMemoryUtilization: 0.93
+  quantizationFallbackOrder:
+    - fp8
+    - gptq
+    - awq
+
+sglang:
+  enabled: true
+  model: Qwen/Qwen3.5-35B-A3B
+  maxModelLen: 32768
+
+hpa:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 65
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+

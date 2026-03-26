@@ -12,11 +12,12 @@ import { cn } from '@/lib/utils';
 interface OfficeDashboardProps {
   activeRole: 'lawyer' | 'assistant';
   initialTab?: 'notifications' | 'team' | 'documents' | 'hmk' | 'feed';
+  initialTeamThreadId?: string;
 }
 
 type OfficeTab = 'notifications' | 'team' | 'documents' | 'hmk' | 'feed';
 
-export function OfficeDashboard({ activeRole, initialTab }: OfficeDashboardProps) {
+export function OfficeDashboard({ activeRole, initialTab, initialTeamThreadId }: OfficeDashboardProps) {
   const [activeTab, setActiveTab] = useState<OfficeTab>(initialTab ?? 'notifications');
 
   const roleLabel = activeRole === 'assistant' ? 'Asistan' : 'Avukat';
@@ -77,7 +78,7 @@ export function OfficeDashboard({ activeRole, initialTab }: OfficeDashboardProps
       <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
         <div className="rounded-xl border border-slate-200 bg-white p-3">
           {activeTab === 'notifications' ? <OfficeNotificationFeed /> : null}
-          {activeTab === 'team' ? <OfficeTeamPanel activeRole={activeRole} /> : null}
+          {activeTab === 'team' ? <OfficeTeamPanel activeRole={activeRole} initialThreadId={initialTeamThreadId} /> : null}
           {activeTab === 'feed' ? <OfficeFeedPanel activeRole={activeRole} /> : null}
           {activeTab === 'documents' ? <OfficeDocumentAnalyzeForm activeRole={activeRole} /> : null}
           {activeTab === 'hmk' ? <OfficeHmkConfirmForm /> : null}

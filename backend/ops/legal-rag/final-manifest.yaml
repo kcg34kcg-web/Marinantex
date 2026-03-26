@@ -1,0 +1,70 @@
+version: "2026-03-12"
+name: "hukuk-rag-ai-agent-production-manifest"
+owner: "mlops-platform"
+status: "remediation-complete-with-host-constraints"
+
+profiles:
+  dev:
+    llm: "Qwen/Qwen3.5-9B"
+    embedding: "Qwen/Qwen3-Embedding-0.6B"
+    reranker: "Qwen/Qwen3-Reranker-0.6B"
+  staging:
+    llm: "Qwen/Qwen3.5-27B"
+    embedding: "Qwen/Qwen3-Embedding-4B"
+    reranker: "Qwen/Qwen3-Reranker-4B"
+  prod:
+    llm: "Qwen/Qwen3.5-35B-A3B"
+    embedding: "Qwen/Qwen3-Embedding-8B"
+    reranker: "Qwen/Qwen3-Reranker-8B"
+
+components:
+  parser_orchestration: enabled
+  metadata_authority_tagging: enabled
+  dedup_delta: enabled
+  hybrid_retrieval: enabled
+  rerank: enabled
+  claim_verifier: enabled
+  pii_redaction: enabled
+  human_review_gate: enabled
+  qwen_dual_serving: enabled
+
+artifacts:
+  audit_report: backend/ops/legal-rag/current-state.md
+  gap_analysis: backend/ops/legal-rag/gap-analysis.md
+  implementation_plan: backend/ops/legal-rag/implementation-plan.md
+  changes_applied: backend/ops/legal-rag/changes-applied.md
+  config_bundle: backend/ops/legal-rag/config-bundle.md
+  model_manifest: backend/ops/legal-rag/model-manifest.yaml
+  service_endpoints: backend/ops/legal-rag/service-endpoints.yaml
+  index_schemas: backend/ops/legal-rag/index-schemas.yaml
+  retrieval_pipeline: backend/ops/legal-rag/retrieval-pipeline.yaml
+  rerank_pipeline: backend/ops/legal-rag/rerank-pipeline.yaml
+  parser_pipeline: backend/ops/legal-rag/parser-pipeline.yaml
+  redaction_policy: backend/ops/policies/redaction-policy.yaml
+  operations_runbook: backend/ops/legal-rag/operations-runbook.md
+  rollback_plan: backend/ops/legal-rag/rollback-plan.md
+  validation_results: backend/ops/legal-rag/validation-results.md
+
+validation_scripts:
+  gpu_strict_bootstrap: backend/scripts/legal_rag_gpu_strict_bootstrap.sh
+  evaluation: backend/scripts/legal_rag_eval.py
+  smoke: backend/scripts/legal_rag_smoke.py
+  benchmark: backend/scripts/legal_rag_benchmark.py
+  acceptance: backend/scripts/legal_rag_acceptance.py
+  prod_readiness: backend/scripts/legal_rag_prod_readiness.py
+
+validation_artifacts:
+  evaluation_report: artifacts/legal-rag-eval-report.json
+  smoke_report: artifacts/legal-rag-smoke-report.json
+  benchmark_report: artifacts/legal-rag-benchmark-report.json
+  acceptance_report: artifacts/legal-rag-acceptance-report.json
+  prod_readiness_report: artifacts/legal-rag-prod-readiness-report.json
+  prod_readiness_acceptance_report: artifacts/prod-readiness/legal-rag-acceptance-report.json
+  retrieval_quality_report: artifacts/retrieval-quality-report.json
+  reranker_calibration_report: artifacts/reranker-calibration-report.json
+
+validation_status:
+  acceptance_pass_all: true
+  smoke_strict_live_endpoints: false
+  smoke_auto_with_mock_endpoints: true
+  prod_readiness_strict_pass_all: false

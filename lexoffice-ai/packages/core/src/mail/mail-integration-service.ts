@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@lexoffice/db";
 import { MailProviderRegistry, type SupportedMailProvider } from "@lexoffice/mail";
 import { AuditService } from "../audit/audit-service";
+import { AppError } from "../errors/app-error";
 import { MailboxService } from "./mailbox-service";
 
 export type BuildOAuthUrlInput = {
@@ -88,6 +89,13 @@ export class MailIntegrationService {
   async ingestWebhook(input: IngestWebhookInput): Promise<IngestWebhookResult> {
     const adapter = this.providerRegistry.get(input.provider);
     const secret = resolveWebhookSecret(input.provider);
+    if (isProviderRunningLive(input.provider) && !isNonEmptyString(secret)) {
+      throw new AppError(
+        "WEBHOOK_SECRET_MISSING",
+        `${input.provider} webhook secret tanımlı değil. Canlı webhook trafiği imzasız kabul edilmez.`,
+        500
+      );
+    }
     const events = await adapter.parseWebhookEvent({
       rawBody: input.rawBody,
       headers: input.headers,
@@ -97,7 +105,9 @@ export class MailIntegrationService {
     const providerAccountIds = [
       ...new Set(events.map((event) => event.providerAccountId).filter(isNonEmptyString))
     ];
-    if (providerAccountIds.length === 0) {
+    const mailboxEmails = [...new Set(events.map((event) => event.mailboxEmail).filter(isNonEmptyString))];
+
+    if (providerAccountIds.length === 0 && mailboxEmails.length === 0) {
       return {
         eventCount: events.length,
         syncTargets: []
@@ -107,9 +117,28 @@ export class MailIntegrationService {
     const connections = await this.prisma.mailboxConnection.findMany({
       where: {
         provider: input.provider,
-        providerAccountId: {
-          in: providerAccountIds
-        }
+        OR: [
+          ...(providerAccountIds.length > 0
+            ? [
+                {
+                  providerAccountId: {
+                    in: providerAccountIds
+                  }
+                }
+              ]
+            : []),
+          ...(mailboxEmails.length > 0
+            ? [
+                {
+                  mailbox: {
+                    email: {
+                      in: mailboxEmails.map((email) => email.toLowerCase())
+                    }
+                  }
+                }
+              ]
+            : [])
+        ]
       },
       select: {
         tenantId: true,
@@ -162,6 +191,38 @@ function resolveWebhookSecret(provider: SupportedMailProvider): string | undefin
   }
 
   return process.env.IMAP_SMTP_WEBHOOK_SECRET;
+}
+
+function isProviderRunningLive(provider: SupportedMailProvider): boolean {
+  if (process.env.MAIL_PROVIDER_FORCE_STUB === "true") {
+    return false;
+  }
+
+  if (process.env.MAIL_PROVIDER_LIVE === "false") {
+    return false;
+  }
+
+  if (process.env.MAIL_PROVIDER_LIVE === "true") {
+    return true;
+  }
+
+  if (provider === "GMAIL") {
+    return hasValue(process.env.GMAIL_CLIENT_ID) && hasValue(process.env.GMAIL_CLIENT_SECRET);
+  }
+
+  if (provider === "MICROSOFT_365") {
+    return hasValue(process.env.MICROSOFT_CLIENT_ID) && hasValue(process.env.MICROSOFT_CLIENT_SECRET);
+  }
+
+  if (provider === "YANDEX") {
+    return hasValue(process.env.YANDEX_CLIENT_ID) && hasValue(process.env.YANDEX_CLIENT_SECRET);
+  }
+
+  return hasValue(process.env.IMAP_SMTP_WEBHOOK_SECRET);
+}
+
+function hasValue(value: string | undefined): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function isNonEmptyString(value: string | undefined): value is string {

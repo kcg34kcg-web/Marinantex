@@ -136,4 +136,93 @@ describe("MailThreadService", () => {
     expect(result.providerMessageId.startsWith("local-")).toBe(true);
     expect(tx.mailRecipient.createMany).toHaveBeenCalledTimes(1);
   });
+
+  it("state güncellemesinde thread içindeki tüm mesajları senkronlar", async () => {
+    const tx = {
+      mailMessage: {
+        updateMany: vi.fn().mockResolvedValue({ count: 3 }),
+        count: vi.fn().mockResolvedValue(1)
+      },
+      mailThread: {
+        update: vi.fn().mockResolvedValue(undefined)
+      }
+    };
+
+    const prisma = {
+      mailMessage: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "cmf9s25x70000a9k0msg0001",
+          threadId: "cmf9s25x70000a9k0thread01",
+          state: "RECEIVED"
+        })
+      },
+      $transaction: vi.fn().mockImplementation(
+        async (callback: (trx: typeof tx) => Promise<[{ count: number }, number]>) => callback(tx)
+      )
+    } as unknown as PrismaClient;
+
+    const auditService = {
+      log: vi.fn().mockResolvedValue(undefined)
+    } as unknown as AuditService;
+
+    const service = new MailThreadService(prisma, auditService);
+
+    const result = await service.updateMessageState("cmf9s25x70000a9k0user0001", {
+      tenantId: "cmf9s25x70000a9k0demo1234",
+      messageId: "cmf9s25x70000a9k0msg0001",
+      state: "ARCHIVED"
+    });
+
+    expect(tx.mailMessage.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: "cmf9s25x70000a9k0demo1234",
+        threadId: "cmf9s25x70000a9k0thread01",
+        deletedAt: null
+      },
+      data: {
+        state: "ARCHIVED"
+      }
+    });
+    expect(result.affectedMessageCount).toBe(3);
+    expect(result.state).toBe("ARCHIVED");
+  });
+
+  it("liste görünümünde temsil mesajını aktif filtreye göre seçer", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+
+    const prisma = {
+      mailThread: {
+        findMany
+      }
+    } as unknown as PrismaClient;
+
+    const auditService = {
+      log: vi.fn().mockResolvedValue(undefined)
+    } as unknown as AuditService;
+
+    const service = new MailThreadService(prisma, auditService);
+
+    await service.listThreads({
+      tenantId: "cmf9s25x70000a9k0demo1234",
+      view: "unread",
+      readStatus: "all",
+      withAttachments: false,
+      onlyStarred: false,
+      sortBy: "date",
+      sortDirection: "desc",
+      limit: 25
+    });
+
+    const args = findMany.mock.calls[0]?.[0] as {
+      include: {
+        messages: {
+          where: {
+            isRead?: boolean;
+          };
+        };
+      };
+    };
+
+    expect(args.include.messages.where.isRead).toBe(false);
+  });
 });

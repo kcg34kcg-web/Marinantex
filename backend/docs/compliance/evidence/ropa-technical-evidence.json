@@ -1,0 +1,16 @@
+{
+  "contract_version": "rag_v3.ropa.technical.evidence.v1",
+  "generated_at": "2026-03-15T00:00:00Z",
+  "processing_activities": [
+    {
+      "activity": "rag_query_processing",
+      "data_classes": ["legal_text", "metadata", "tenant_scope"],
+      "controls": ["tenant_guard", "strict_grounding", "audit_trace"]
+    },
+    {
+      "activity": "retention_deletion_pipeline",
+      "data_classes": ["rag_documents", "rag_chunks", "audit_logs"],
+      "controls": ["retention_log", "legal_hold", "delete_mode_contract"]
+    }
+  ]
+}

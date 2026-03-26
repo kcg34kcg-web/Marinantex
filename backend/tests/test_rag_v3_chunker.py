@@ -100,3 +100,22 @@ def test_overlap_is_not_applied_across_different_articles() -> None:
     assert len(chunks) == 2
     assert chunks[1].article_no == "2"
     assert not chunks[1].text.startswith("Birinci madde fikra metni.")
+
+
+def test_case_law_heading_segments_are_chunked_without_article_markers() -> None:
+    chunker = LegalStructuredChunker()
+    text = (
+        "[H1] Yargitay 9 HD\n"
+        "[H2] OLAY\n"
+        "Taraflar arasinda is akdinin feshi uyusmazligi vardir.\n"
+        "[H2] GEREKCE\n"
+        "Mahkeme ihbar suresinin dort hafta oldugunu kabul etmistir.\n"
+        "[H2] HUKUM\n"
+        "Temyiz istemi reddedilmistir.\n"
+    )
+
+    chunks = chunker.chunk(text)
+
+    assert len(chunks) >= 2
+    assert any((chunk.heading_path or "").endswith("OLAY") for chunk in chunks)
+    assert any((chunk.heading_path or "").endswith("GEREKCE") for chunk in chunks)

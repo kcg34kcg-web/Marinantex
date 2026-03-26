@@ -5,6 +5,18 @@ const config = [
   {
     ignores: ['node_modules/**', '.next/**', 'out/**', 'coverage/**', 'backend/**', 'dist/**', 'package-lock.json'],
   },
+  {
+    files: ['**/*.{js,mjs,cjs,jsx}'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      parserOptions: {
+        ecmaFeatures: {
+          jsx: true,
+        },
+      },
+    },
+  },
   prettier,
 ];
 

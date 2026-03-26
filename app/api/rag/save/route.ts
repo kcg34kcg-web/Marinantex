@@ -9,6 +9,8 @@ import { z } from 'zod';
 import { ClientAction, ResponseType, SaveMode, SaveTarget } from '@/types';
 import { resolveBureauContext } from '@/app/api/rag/_lib/bureau-context';
 import { fetchRagBackend, getRagBackendForLogs } from '@/app/api/rag/_lib/rag-backend';
+import { isTimeoutError } from '@/app/api/rag/_lib/timeout';
+import { resolveRequestedMatterId, validateMatterScope } from '@/app/api/rag/_lib/matter-policy';
 import { createClient } from '@/utils/supabase/server';
 
 const SAVE_FLAG_KEYS = ['save_targets_v2', 'client_translator_draft'] as const;
@@ -146,6 +148,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Buro baglami bulunamadi. Profilinizi kontrol edin.' }, { status: 401 });
     }
 
+    const matterScopeError = validateMatterScope({
+      headers: req.headers,
+      payloadMatterId: parsed.data.case_id ?? null,
+      route: '/api/rag/save',
+    });
+    if (matterScopeError) {
+      return matterScopeError;
+    }
+    const requestedMatterId = resolveRequestedMatterId(req.headers) ?? parsed.data.case_id ?? null;
+
     const flags = await resolveSaveFlags(supabase, bureauId);
     if (!flags.save_targets_v2) {
       return NextResponse.json(
@@ -170,8 +182,13 @@ export async function POST(req: Request) {
         'Content-Type': 'application/json',
         'X-Bureau-ID': bureauId,
         'X-User-ID': userId,
+        ...(requestedMatterId ? { 'X-Matter-ID': requestedMatterId } : {}),
       },
-      body: JSON.stringify(parsed.data),
+      body: JSON.stringify({
+        ...parsed.data,
+        case_id: requestedMatterId,
+        matter_id: requestedMatterId,
+      }),
       signal: AbortSignal.timeout(60_000),
     });
 
@@ -188,10 +205,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json(body, { status: 200 });
   } catch (err) {
-    const message =
-      err instanceof Error && err.name === 'AbortError'
-        ? 'Kaydetme istegi zaman asimina ugradi. Lutfen tekrar deneyin.'
-        : 'Kaydetme servisine baglanilamadi.';
+    const message = isTimeoutError(err)
+      ? 'Kaydetme istegi zaman asimina ugradi. Lutfen tekrar deneyin.'
+      : 'Kaydetme servisine baglanilamadi.';
     console.error('[RAG save proxy]', err, { backendCandidates: getRagBackendForLogs() });
     return NextResponse.json({ error: message }, { status: 502 });
   }

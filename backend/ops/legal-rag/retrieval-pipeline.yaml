@@ -1,0 +1,78 @@
+version: "2026-03-12"
+name: legal-rag-retrieval-v3
+
+flow:
+  - ingestion
+  - parse_ocr
+  - metadata_authority_tagging
+  - dedup_delta
+  - structure_aware_chunking
+  - embedding
+  - vector_index
+  - lexical_index
+  - query_planner
+  - hybrid_retrieval
+  - rerank
+  - answer_draft
+  - claim_verification
+  - citation_assembly
+  - human_review_gate
+  - final_answer
+
+planner:
+  enabled: true
+  model: "Qwen3.5-4B or deterministic planner"
+  classes:
+    - mevzuat_sorusu
+    - ictihat_sorusu
+    - sozlesme_belge_inceleme
+    - ozetleme
+    - karsilastirma_delta
+    - pii_redaction
+    - citation_verification
+    - arastirma_deep_search
+
+hybrid:
+  dense_top_k: 50
+  sparse_top_k: 50
+  exact_top_k: 24
+  rrf_k: 60
+  lane_weights:
+    dense: 1.0
+    sparse: 1.0
+    exact: 1.25
+  doc_shortlist:
+    enabled: true
+    k: 12
+    authority_weighted: true
+
+filters:
+  temporal:
+    as_of_date: true
+    event_date: true
+    decision_date: true
+  metadata:
+    - jurisdiction
+    - source_type
+    - authority_level
+    - court
+    - chamber
+    - effective_date
+    - repeal_status
+  access:
+    - classification
+    - acl_tags
+    - bureau_id
+
+citation_rules:
+  require_core_fields: true
+  include_page_anchor: true
+  include_article_clause: true
+  no_hallucinated_citation: true
+
+safety:
+  no_answer_on_low_support: true
+  unsupported_claim_blocks_final: true
+  legal_disclaimer_ack_required: true
+  human_review_enabled: true
+

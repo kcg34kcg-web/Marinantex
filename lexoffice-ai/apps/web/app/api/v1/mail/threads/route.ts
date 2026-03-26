@@ -18,6 +18,15 @@ export async function GET(request: Request) {
       tenantId,
       mailboxId: searchParams.get("mailboxId") ?? undefined,
       query: searchParams.get("query") ?? undefined,
+      view: searchParams.get("view") ?? "inbox",
+      labelId: searchParams.get("labelId") ?? undefined,
+      readStatus: searchParams.get("readStatus") ?? "all",
+      dateFrom: searchParams.get("dateFrom") ?? undefined,
+      dateTo: searchParams.get("dateTo") ?? undefined,
+      withAttachments: searchParams.get("withAttachments") === "true",
+      onlyStarred: searchParams.get("onlyStarred") === "true",
+      sortBy: searchParams.get("sortBy") ?? "date",
+      sortDirection: searchParams.get("sortDirection") ?? "desc",
       limit: searchParams.get("limit") ?? 25,
       cursor: searchParams.get("cursor") ?? undefined
     });

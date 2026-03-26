@@ -1,0 +1,41 @@
+profile: dev
+
+backend:
+  image:
+    repository: marinantex/backend-rag
+    tag: dev
+  replicaCount: 1
+  env:
+    ENVIRONMENT: development
+    QWEN_SERVING_BACKEND: auto
+    OPENAI_BASE_URL: http://vllm:8000/v1
+    SGLANG_BASE_URL: http://sglang:30000/v1
+    EMBEDDING_BASE_URL: http://tei-embed:8080/v1
+    RAG_V3_RERANKER_BASE_URL: http://reranker:8080/v1
+
+redis:
+  enabled: true
+
+teiEmbed:
+  enabled: true
+  modelId: Qwen/Qwen3-Embedding-0.6B
+
+reranker:
+  enabled: true
+  modelId: Qwen/Qwen3-Reranker-0.6B
+
+vllm:
+  enabled: true
+  model: Qwen/Qwen3.5-9B
+  maxModelLen: 8192
+  gpuMemoryUtilization: 0.9
+
+sglang:
+  enabled: false
+  model: Qwen/Qwen3.5-9B
+  maxModelLen: 8192
+
+nodeSelectors: {}
+tolerations: []
+affinity: {}
+

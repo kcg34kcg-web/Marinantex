@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { logDashboardAudit } from '@/lib/dashboard/audit';
+import { syncTaskReminderTimelineEvents } from '@/lib/dashboard/calendar-sync';
 
 const createBulkCaseTaskSchema = z.object({
   caseIds: z.array(z.string().uuid()).min(1).max(100),
@@ -10,6 +11,16 @@ const createBulkCaseTaskSchema = z.object({
   dueAt: z.string().datetime().optional(),
   assignedTo: z.string().uuid().optional(),
 });
+
+type CreatedTaskRow = {
+  id: string;
+  case_id: string | null;
+  title: string;
+  description: string | null;
+  due_at: string | null;
+  priority: 'low' | 'normal' | 'high';
+  assigned_to: string | null;
+};
 
 export async function POST(request: Request) {
   const access = await requireInternalOfficeUser();
@@ -53,25 +64,58 @@ export async function POST(request: Request) {
     updated_at: now,
   }));
 
-  const { error } = await admin.from('office_tasks').insert(inserts);
+  const insertResult = await admin
+    .from('office_tasks')
+    .insert(inserts)
+    .select('id, case_id, title, description, due_at, priority, assigned_to');
 
-  if (error) {
+  if (insertResult.error || !insertResult.data) {
     return Response.json({ error: 'Toplu görev oluşturulamadı.' }, { status: 500 });
   }
 
+  const createdTasks = insertResult.data as CreatedTaskRow[];
+  const tasksWithCase = createdTasks.filter((item): item is CreatedTaskRow & { case_id: string } => Boolean(item.case_id));
+
   await admin.from('case_timeline_events').insert(
-    cases.map((item) => ({
-      case_id: item.id,
-      event_type: 'reminder',
-      title: 'Toplu görev oluşturuldu',
-      description: payload.title,
-      metadata: {
-        priority: payload.priority,
-        dueAt: payload.dueAt ?? null,
-        assignedTo: payload.assignedTo ?? access.userId,
-      },
-      created_by: access.userId,
-    }))
+    tasksWithCase.map((item) => ({
+        case_id: item.case_id,
+        event_type: 'user_action',
+        title: 'Toplu gorev olusturuldu',
+        description: item.title,
+        metadata: {
+          taskId: item.id,
+          priority: item.priority,
+          dueAt: item.due_at,
+          assignedTo: item.assigned_to,
+          calendarSync: {
+            source: 'office_task',
+          },
+        },
+        created_by: access.userId,
+      }))
+  );
+
+  await Promise.all(
+    tasksWithCase.map(async (item) => {
+        try {
+          await syncTaskReminderTimelineEvents(admin, {
+            caseId: item.case_id,
+            taskId: item.id,
+            taskTitle: item.title,
+            taskDescription: item.description ?? null,
+            dueAt: item.due_at,
+            createdBy: access.userId,
+            priority: item.priority,
+            assignedTo: item.assigned_to,
+            taskType: null,
+            deadlineType: null,
+            riskLevel: null,
+            confidentiality: null,
+          });
+        } catch (syncError) {
+          console.error('bulk_task_calendar_sync_failed', syncError);
+        }
+      })
   );
 
   await logDashboardAudit(admin, {

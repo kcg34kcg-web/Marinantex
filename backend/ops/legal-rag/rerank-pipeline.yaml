@@ -1,0 +1,45 @@
+version: "2026-03-12"
+name: legal-rag-rerank-v3
+
+stage_1:
+  source: hybrid_retrieval_output
+  candidate_pool_limit: 64
+
+stage_2:
+  reranker_enabled: true
+  provider: auto
+  local_model_preference:
+    - Qwen/Qwen3-Reranker-8B
+    - Qwen/Qwen3-Reranker-4B
+    - Qwen/Qwen3-Reranker-0.6B
+  http_provider_contract:
+    endpoints:
+      - /rerank
+      - /v1/rerank
+    accepted_response_shapes:
+      - results[index,relevance_score]
+      - data[index,score]
+      - scores[]
+
+scoring:
+  combine_weights:
+    retrieval_score_weight: 0.70
+    reranker_score_weight: 0.30
+  min_score_threshold: 0.05
+  dynamic_top_n:
+    default: 12
+    exhaustive_mode: 18
+    pii_redaction_mode: 0
+
+latency_control:
+  reranker_timeout_seconds: 4.0
+  request_timeout_seconds: 3.0
+  fallback_on_timeout: lexical_retrieval_order
+
+quality:
+  health_checks:
+    score_spread_min: 0.05
+    margin_tracking: true
+  release_gate:
+    calibration_script: backend/scripts/reranker_calibration_gate.py
+

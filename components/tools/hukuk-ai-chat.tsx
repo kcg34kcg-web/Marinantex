@@ -65,6 +65,10 @@ interface Source {
   char_start?: number;
   char_end?: number;
   source_url?: string;
+  citation_date?: string;
+  issuing_authority?: string;
+  decision_no?: string;
+  reference_no?: string;
   authority_score?: number;
   final_score?: number;
   recency_score?: number;
@@ -216,15 +220,15 @@ const TIER_OPTIONS: Array<{
     tier: 2,
     label: 'Düşünceli',
     description: 'Hız-doğruluk dengesi',
-    modelHint: 'Gemini 2.0 Flash',
+    modelHint: 'Qwen Instruct + Ortak RAG',
     badgeColor: 'bg-blue-100 text-blue-800',
   },
   {
     value: AiTier.UZMAN,
     tier: 3,
     label: 'Uzman',
-    description: 'Kaynaklı uzman analiz',
-    modelHint: 'OpenAI (gpt-4o)',
+    description: 'Trigger bazli derin analiz',
+    modelHint: 'Qwen Thinking + Ortak RAG',
     badgeColor: 'bg-indigo-100 text-indigo-800',
   },
   {
@@ -232,7 +236,7 @@ const TIER_OPTIONS: Array<{
     tier: 4,
     label: 'Muazzam',
     description: 'Maksimum kapsam ve derinlik',
-    modelHint: 'OpenAI (gpt-4.1)',
+    modelHint: 'Claude Sonnet 4.6',
     badgeColor: 'bg-amber-100 text-amber-800',
   },
 ];
@@ -331,6 +335,7 @@ export function HukukAiChat() {
   const [chatMode, setChatMode] = useState<ChatMode>(ChatMode.GENERAL_CHAT);
   const [selectedTier, setSelectedTier] = useState<AiTier>(AiTier.DUSUNCELI);
   const [query, setQuery] = useState('');
+  const [legalDisclaimerAccepted, setLegalDisclaimerAccepted] = useState(false);
   const [lastSubmittedQuery, setLastSubmittedQuery] = useState('');
   const [queryCaseId, setQueryCaseId] = useState('');
   const [asOfDate, setAsOfDate] = useState('');
@@ -537,6 +542,14 @@ export function HukukAiChat() {
     return () => clearTimeout(timeoutId);
   }, [isEditingUserMessage]);
 
+  async function readJsonSafe(response: Response): Promise<unknown> {
+    try {
+      return await response.json();
+    } catch {
+      return null;
+    }
+  }
+
   function normalizeError(payload: unknown): RagUiError {
     if (!payload || typeof payload !== 'object') {
       return { message: 'Bir hata olustu.' };
@@ -583,6 +596,18 @@ export function HukukAiChat() {
             'Uzman / Muazzam seciminde OpenAI modeli zorunludur. OPENAI_API_KEY veya tier model ayarlari kontrol edilmeli.',
         };
       }
+    }
+
+    const messageToken = message.toLowerCase();
+    if (
+      messageToken.includes('insufficient_quota')
+      || messageToken.includes('embedding_retries_exhausted')
+      || (messageToken.includes('quota') && messageToken.includes('openai'))
+    ) {
+      return {
+        code,
+        message: 'AI kota limiti asildi. OPENAI API kotasi/faturalama durumunu kontrol edin.',
+      };
     }
 
     return { message, code };
@@ -979,6 +1004,13 @@ export function HukukAiChat() {
   async function submitQuery(rawQuery: string) {
     const normalizedQuery = rawQuery.trim();
     if (!normalizedQuery) return;
+    if (!legalDisclaimerAccepted) {
+      setError({
+        message:
+          'Devam etmek icin hukuki sorumlulugun insanda kaldigini kabul etmeniz gerekir.',
+      });
+      return;
+    }
 
     const normalizedCaseId = queryCaseId.trim();
     if (normalizedCaseId && !isUuid(normalizedCaseId)) {
@@ -1046,6 +1078,16 @@ export function HukukAiChat() {
         ai_tier: featureFlags.tier_selector_ui ? selectedTier : AiTier.HAZIR_CEVAP,
         response_depth: ResponseDepth.STANDARD,
         strict_grounding: featureFlags.strict_grounding_v2,
+        legal_disclaimer_ack: legalDisclaimerAccepted,
+        human_responsibility_ack: legalDisclaimerAccepted,
+        selected_mode:
+          selectedTier === AiTier.HAZIR_CEVAP
+            ? 'safe_intent'
+            : selectedTier === AiTier.UZMAN
+              ? 'thinking'
+              : selectedTier === AiTier.MUAZZAM
+                ? 'premium'
+                : 'default_legal',
       };
       const recentHistory = threadMessages
         .filter((message) => (message.role === 'user' || message.role === 'assistant') && Boolean(message.content?.trim()))
@@ -1071,11 +1113,23 @@ export function HukukAiChat() {
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
+      const data = await readJsonSafe(res);
 
       if (!res.ok) {
-        setError(normalizeError(data));
+        const parsedError = normalizeError(data);
+        if (
+          parsedError.message === 'Bir hata olustu.'
+          && !data
+        ) {
+          setError({ message: `RAG istegi basarisiz oldu (HTTP ${res.status}).` });
+        } else {
+          setError(parsedError);
+        }
       } else {
+        if (!data || typeof data !== 'object') {
+          setError({ message: 'RAG yaniti okunamadi. Lutfen tekrar deneyin.' });
+          return;
+        }
         const nextResult = data as RagResponse;
         setResult(nextResult);
 
@@ -1178,6 +1232,10 @@ export function HukukAiChat() {
       char_end: source.char_end,
       doc_version: source.version_type,
       citation_text: source.citation ?? source.title ?? `Kaynak ${index + 1}`,
+      citation_date: source.citation_date,
+      issuing_authority: source.issuing_authority,
+      decision_no: source.decision_no,
+      reference_no: source.reference_no,
       metadata: {
         source_origin: source.source_origin ?? 'unknown',
         authority_score: source.authority_score,
@@ -1723,6 +1781,16 @@ export function HukukAiChat() {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 px-1">
+                    <label className="mr-2 inline-flex items-center gap-2 text-[11px] text-slate-600">
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5 rounded border-slate-300"
+                        checked={legalDisclaimerAccepted}
+                        onChange={(event) => setLegalDisclaimerAccepted(event.target.checked)}
+                        disabled={isUiBusy}
+                      />
+                      Nihai hukuki sorumluluk insandadir
+                    </label>
                     <Button
                       type="button"
                       variant="ghost"
@@ -1781,7 +1849,7 @@ export function HukukAiChat() {
 
                     <Button
                       type="submit"
-                      disabled={isUiBusy || !query.trim()}
+                      disabled={isUiBusy || !query.trim() || !legalDisclaimerAccepted}
                       className={cn(
                         'ml-auto h-8 w-8 rounded-full bg-white p-0 text-slate-900 shadow-md hover:bg-slate-100',
                         sendButtonAnimation > 0 && 'is-strike',
@@ -2485,6 +2553,16 @@ export function HukukAiChat() {
                             Analiz tarihi: {temporalFields.as_of_date}
                           </Badge>
                         )}
+                        {result.low_confidence && (
+                          <Badge variant="muted" className="text-xs text-amber-700">
+                            Dusuk guven
+                          </Badge>
+                        )}
+                        {result.review_required && (
+                          <Badge variant="muted" className="text-xs text-red-700">
+                            Uzman incelemesi gerekli
+                          </Badge>
+                        )}
                       </div>
                     </div>
                   </details>
@@ -2495,6 +2573,19 @@ export function HukukAiChat() {
                       {result.legal_disclaimer?.disclaimer_text ||
                         'Nihai hukuki gorus yerine gecmez. Kritik bilgiler resmi kaynaklarla dogrulanmalidir.'}
                     </p>
+                    {result.legal_disclaimer_required && (
+                      <p className="mt-1 text-[11px] font-medium text-amber-900">
+                        Zorunlu Bildirim: Bu sistem kaynakli arastirma asistanidir; nihai hukuki sorumluluk kullanicidadir.
+                      </p>
+                    )}
+                    {result.human_responsibility_notice && (
+                      <p className="mt-1 text-[11px] text-amber-900">{result.human_responsibility_notice}</p>
+                    )}
+                    {result.review_required && result.review_reason_codes && result.review_reason_codes.length > 0 && (
+                      <p className="mt-1 text-[11px] text-amber-900">
+                        Review nedeni: {result.review_reason_codes.join(' | ')}
+                      </p>
+                    )}
                   </section>
 
                   <section className="space-y-2">
@@ -3017,6 +3108,16 @@ export function HukukAiChat() {
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
+              <label className="inline-flex items-center gap-2 text-[11px] text-slate-600">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 rounded border-slate-300"
+                  checked={legalDisclaimerAccepted}
+                  onChange={(event) => setLegalDisclaimerAccepted(event.target.checked)}
+                  disabled={isUiBusy}
+                />
+                Nihai hukuki sorumluluk insandadir
+              </label>
               <Button
                 type="button"
                 variant="ghost"
@@ -3057,7 +3158,7 @@ export function HukukAiChat() {
               )}
               <Button
                 type="submit"
-                disabled={isUiBusy || !query.trim()}
+                disabled={isUiBusy || !query.trim() || !legalDisclaimerAccepted}
                 className={cn(
                   'h-9 w-9 rounded-full bg-slate-900 p-0 text-white hover:bg-slate-700',
                   sendButtonAnimation > 0 && 'is-strike',

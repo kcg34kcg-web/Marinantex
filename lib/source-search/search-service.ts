@@ -9,6 +9,43 @@ import type {
 import { sanitizeFilters } from '@/lib/source-search/types';
 
 export const SEARCH_PAGE_SIZE = 10;
+export type SearchBackendMode = 'mock' | 'live';
+const DOCUMENT_CACHE_MAX_ITEMS = 1000;
+
+export interface LiveSearchAdapter {
+  search(input: SearchRequestInput): Promise<SearchResultPayload>;
+}
+
+export class SearchBackendContractError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(code: string, message: string, status = 503) {
+    super(message);
+    this.name = 'SearchBackendContractError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+let liveSearchAdapter: LiveSearchAdapter | null = null;
+const documentCache = new Map<string, DocumentRecord>();
+
+function rememberDocuments(items: DocumentRecord[]): void {
+  for (const item of items) {
+    if (!item?.id) {
+      continue;
+    }
+    documentCache.set(item.id, item);
+  }
+  while (documentCache.size > DOCUMENT_CACHE_MAX_ITEMS) {
+    const oldest = documentCache.keys().next().value;
+    if (!oldest) {
+      break;
+    }
+    documentCache.delete(oldest);
+  }
+}
 
 interface ScoredDocument {
   document: DocumentRecord;
@@ -65,6 +102,10 @@ function parseCaseNumbersFromQuery(query: string): { esasNo?: string; kararNo?: 
 }
 
 function matchesFilters(document: DocumentRecord, tab: SearchTab, filters: SearchFilters): boolean {
+  if (filters.source_type && !contains(toLower(document.source_type), filters.source_type)) {
+    return false;
+  }
+
   if (tab === 'ictihat') {
     if (!contains(toLower(document.source_name), filters.source_name ?? '')) {
       return false;
@@ -75,13 +116,17 @@ function matchesFilters(document: DocumentRecord, tab: SearchTab, filters: Searc
     if (!contains(toLower(document.chamber), filters.chamber ?? '')) {
       return false;
     }
-    if (!contains(toLower(document.esas_no), filters.esas_no ?? '')) {
+    if (!contains(toLower(document.esas_no), filters.esas_no ?? filters.docket_no ?? '')) {
       return false;
     }
-    if (!contains(toLower(document.karar_no), filters.karar_no ?? '')) {
+    if (!contains(toLower(document.karar_no), filters.karar_no ?? filters.decision_no ?? '')) {
       return false;
     }
-    if (!matchesDateRange(document.decision_date, filters.decision_date_from, filters.decision_date_to)) {
+    if (!matchesDateRange(
+      document.decision_date,
+      filters.decision_date_from ?? filters.date_from,
+      filters.decision_date_to ?? filters.date_to,
+    )) {
       return false;
     }
     return true;
@@ -94,7 +139,10 @@ function matchesFilters(document: DocumentRecord, tab: SearchTab, filters: Searc
     if (!contains(toLower(document.title), filters.law_no ?? '')) {
       return false;
     }
-    if (!contains(toLower(document.title), filters.article ?? '') && !contains(toLower(document.snippet), filters.article ?? '')) {
+    if (
+      !contains(toLower(document.title), filters.article ?? filters.article_no ?? '')
+      && !contains(toLower(document.snippet), filters.article ?? filters.article_no ?? '')
+    ) {
       return false;
     }
     if (!contains(toLower(document.source_name), filters.official_gazette ?? '')) {
@@ -194,7 +242,15 @@ export function parseFiltersParam(rawFilters: string | null): SearchFilters {
 }
 
 export function getDocumentById(id: string): DocumentRecord | null {
-  return MOCK_DOCUMENTS.find((document) => document.id === id) ?? null;
+  const cached = documentCache.get(id);
+  if (cached) {
+    return cached;
+  }
+  const fallback = MOCK_DOCUMENTS.find((document) => document.id === id) ?? null;
+  if (fallback) {
+    rememberDocuments([fallback]);
+  }
+  return fallback;
 }
 
 export function searchDocuments(input: SearchRequestInput): SearchResultPayload {
@@ -229,7 +285,7 @@ export function searchDocuments(input: SearchRequestInput): SearchResultPayload 
       ? ['Bazi kaynaklar canli sorguda kullanima acik degil; redirect veya metadata fallback devrede.']
       : [];
 
-  return {
+  const payload = {
     items: pagedItems,
     total,
     page: input.page,
@@ -238,6 +294,39 @@ export function searchDocuments(input: SearchRequestInput): SearchResultPayload 
     partial_sources: partialSources,
     adapters,
   };
+  rememberDocuments(payload.items);
+  return payload;
+}
+
+export function registerLiveSearchAdapter(adapter: LiveSearchAdapter): void {
+  liveSearchAdapter = adapter;
+}
+
+export function clearLiveSearchAdapter(): void {
+  liveSearchAdapter = null;
+}
+
+export function hasLiveSearchAdapter(): boolean {
+  return liveSearchAdapter !== null;
+}
+
+export async function searchDocumentsByBackend(
+  input: SearchRequestInput,
+  mode: SearchBackendMode,
+): Promise<SearchResultPayload> {
+  if (mode === 'live') {
+    if (!liveSearchAdapter) {
+      throw new SearchBackendContractError(
+        'LIVE_SEARCH_ADAPTER_NOT_REGISTERED',
+        'Canli arama adaptoru kayitli degil.',
+        503,
+      );
+    }
+    const payload = await liveSearchAdapter.search(input);
+    rememberDocuments(payload.items);
+    return payload;
+  }
+  return searchDocuments(input);
 }
 
 export function suggestQueries(query: string, tab?: SearchTab): string[] {
@@ -246,7 +335,13 @@ export function suggestQueries(query: string, tab?: SearchTab): string[] {
     return [];
   }
 
-  const scope = tab ? MOCK_DOCUMENTS.filter((document) => document.source_type === tab) : MOCK_DOCUMENTS;
+  const cachedDocuments = Array.from(documentCache.values());
+  const scope = tab
+    ? cachedDocuments.filter((document) => document.source_type === tab)
+    : cachedDocuments;
+  if (scope.length === 0) {
+    return [];
+  }
   const candidates = new Set<string>();
 
   for (const document of scope) {
@@ -262,4 +357,3 @@ export function suggestQueries(query: string, tab?: SearchTab): string[] {
 
   return Array.from(candidates).slice(0, 8);
 }
-

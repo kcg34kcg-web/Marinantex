@@ -1,5 +1,7 @@
 import { prisma } from "@lexoffice/db";
+import { PERMISSIONS } from "@lexoffice/core";
 import { Topbar } from "@/components/app/topbar";
+import { services } from "@/lib/services";
 import { getTenantContext } from "@/lib/tenant-context";
 
 export default async function AIWorkspacePage({
@@ -8,7 +10,8 @@ export default async function AIWorkspacePage({
   params: Promise<{ tenantSlug: string }>;
 }) {
   const { tenantSlug } = await params;
-  const { tenant } = await getTenantContext(tenantSlug);
+  const { tenant, session } = await getTenantContext(tenantSlug);
+  await services.rbacService.requirePermission(session.userId, tenant.id, PERMISSIONS.AI_WORKSPACE);
 
   const latestMessages = await prisma.aIMessage.findMany({
     where: { tenantId: tenant.id },

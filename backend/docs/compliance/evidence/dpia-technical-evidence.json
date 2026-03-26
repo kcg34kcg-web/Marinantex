@@ -1,0 +1,12 @@
+{
+  "contract_version": "rag_v3.dpia.technical.evidence.v1",
+  "generated_at": "2026-03-15T00:00:00Z",
+  "control_owner": "platform-security",
+  "evidence": {
+    "runtime_security_contract": "backend/infrastructure/security/runtime_contract.py",
+    "tenant_isolation": true,
+    "strict_grounding_gate": true,
+    "alerting_incident_pipeline": true,
+    "retention_evidence_endpoint": "/api/v1/rag-v3/compliance-evidence"
+  }
+}

@@ -5,3 +5,6 @@ export * from "./adapters/gmail-provider-adapter";
 export * from "./adapters/microsoft-graph-mail-adapter";
 export * from "./adapters/yandex-mail-adapter";
 export * from "./adapters/imap-smtp-adapter";
+export * from "./provisioning/types";
+export * from "./provisioning/mock-provisioning-adapter";
+export * from "./provisioning/provisioning-registry";

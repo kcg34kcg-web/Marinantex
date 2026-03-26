@@ -1,0 +1,24 @@
+{
+  "evaluation": {
+    "name": "evaluation",
+    "returncode": 0,
+    "passed": true,
+    "output_file": "/Users/kerimcanguzel/Desktop/Marinantex/artifacts/prod-readiness/legal-rag-eval-report.json",
+    "stderr": ""
+  },
+  "smoke": {
+    "name": "smoke",
+    "returncode": 1,
+    "passed": false,
+    "output_file": "/Users/kerimcanguzel/Desktop/Marinantex/artifacts/prod-readiness/legal-rag-smoke-report.json",
+    "stderr": ""
+  },
+  "benchmark": {
+    "name": "benchmark",
+    "returncode": 0,
+    "passed": true,
+    "output_file": "/Users/kerimcanguzel/Desktop/Marinantex/artifacts/prod-readiness/legal-rag-benchmark-report.json",
+    "stderr": ""
+  },
+  "pass_all": false
+}

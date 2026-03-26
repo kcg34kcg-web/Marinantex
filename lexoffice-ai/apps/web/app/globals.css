@@ -4,8 +4,92 @@
 
 :root {
   color-scheme: light;
+  --app-sidebar-width: 16rem;
+  --app-topbar-py: 0.75rem;
+  --app-sidebar-link-py: 0.5rem;
+  --app-sidebar-link-px: 0.75rem;
+  --app-mail-row-py: 0.5rem;
 }
 
 body {
   @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+html[data-density="compact"] {
+  --app-sidebar-width: 14rem;
+  --app-topbar-py: 0.5rem;
+  --app-sidebar-link-py: 0.35rem;
+  --app-sidebar-link-px: 0.6rem;
+  --app-mail-row-py: 0.35rem;
+}
+
+.app-topbar {
+  padding-top: var(--app-topbar-py) !important;
+  padding-bottom: var(--app-topbar-py) !important;
+}
+
+.app-sidebar {
+  width: var(--app-sidebar-width) !important;
+}
+
+.app-sidebar-link {
+  padding-top: var(--app-sidebar-link-py) !important;
+  padding-bottom: var(--app-sidebar-link-py) !important;
+  padding-left: var(--app-sidebar-link-px) !important;
+  padding-right: var(--app-sidebar-link-px) !important;
+}
+
+.app-mail-row {
+  padding-top: var(--app-mail-row-py) !important;
+  padding-bottom: var(--app-mail-row-py) !important;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+html[data-theme="dark"] body {
+  background-color: #0b1220;
+  color: #e2e8f0;
+}
+
+html[data-theme="dark"] .bg-white {
+  background-color: #111827 !important;
+}
+
+html[data-theme="dark"] .bg-slate-50 {
+  background-color: #0f172a !important;
+}
+
+html[data-theme="dark"] .bg-slate-100 {
+  background-color: #111827 !important;
+}
+
+html[data-theme="dark"] .border-slate-100,
+html[data-theme="dark"] .border-slate-200,
+html[data-theme="dark"] .border-slate-300 {
+  border-color: #334155 !important;
+}
+
+html[data-theme="dark"] .text-slate-900 {
+  color: #f8fafc !important;
+}
+
+html[data-theme="dark"] .text-slate-800,
+html[data-theme="dark"] .text-slate-700,
+html[data-theme="dark"] .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+html[data-theme="dark"] .text-slate-500,
+html[data-theme="dark"] .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select {
+  background-color: #0f172a !important;
+  color: #e2e8f0 !important;
+  border-color: #334155 !important;
 }

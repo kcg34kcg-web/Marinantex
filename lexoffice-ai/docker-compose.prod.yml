@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   web:
     build:
@@ -12,6 +10,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - clamav
 
   worker:
     build:
@@ -22,6 +21,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - clamav
 
   postgres:
     image: postgres:16-alpine
@@ -38,6 +38,12 @@ services:
     volumes:
       - redis_prod_data:/data
 
+  clamav:
+    image: clamav/clamav:stable
+    volumes:
+      - clamav_prod_data:/var/lib/clamav
+
 volumes:
   postgres_prod_data:
   redis_prod_data:
+  clamav_prod_data:

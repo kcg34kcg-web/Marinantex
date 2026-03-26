@@ -1,0 +1,95 @@
+version: "2026-03-12"
+owner: "mlops-platform"
+
+profiles:
+  production:
+    llm:
+      primary: "Qwen/Qwen3.5-35B-A3B"
+      optional_high_capacity:
+        - "Qwen/Qwen3.5-122B-A10B"
+        - "Qwen/Qwen3.5-397B-A17B"
+      fallback:
+        - "Qwen/Qwen3.5-27B"
+        - "Qwen/Qwen3.5-9B"
+    embedding:
+      primary: "Qwen/Qwen3-Embedding-8B"
+      fallback:
+        - "Qwen/Qwen3-Embedding-4B"
+        - "Qwen/Qwen3-Embedding-0.6B"
+    reranker:
+      primary: "Qwen/Qwen3-Reranker-8B"
+      fallback:
+        - "Qwen/Qwen3-Reranker-4B"
+        - "Qwen/Qwen3-Reranker-0.6B"
+    planner_router:
+      primary: "Qwen/Qwen3.5-9B"
+      fallback: "Qwen/Qwen3.5-4B"
+    parser_layout_ocr:
+      primary: "MinerU2.5 + Docling"
+      fallback: "PaddleOCR-VL"
+    claim_verifier:
+      primary: "Main Qwen structured extraction + semantic verifier"
+      fallback: "lexical-only verification mode"
+    pii_ner_redaction:
+      primary: "Presidio + GLiNER + legal regex/rules"
+      fallback: "regex/rule-only redaction"
+    metadata_authority:
+      primary: "rule+pattern extractor (legal authority taxonomy)"
+    dedup_delta:
+      primary: "hash + normalized hash + simhash/minhash + article diff"
+    doc_level_retriever:
+      primary: "authority-weighted parent-child retriever"
+    summarizer:
+      primary: "main Qwen model (neutral/client-safe modes)"
+    human_review_assist:
+      primary: "rule+risk based review ticket prioritizer"
+
+  staging:
+    llm:
+      primary: "Qwen/Qwen3.5-27B"
+      fallback: ["Qwen/Qwen3.5-9B"]
+    embedding:
+      primary: "Qwen/Qwen3-Embedding-4B"
+      fallback: ["Qwen/Qwen3-Embedding-0.6B"]
+    reranker:
+      primary: "Qwen/Qwen3-Reranker-4B"
+      fallback: ["Qwen/Qwen3-Reranker-0.6B"]
+
+  development:
+    llm:
+      primary: "Qwen/Qwen3.5-9B"
+      fallback: ["Qwen/Qwen3.5-7B-Instruct"]
+    embedding:
+      primary: "Qwen/Qwen3-Embedding-0.6B"
+      fallback: ["BAAI/bge-m3"]
+    reranker:
+      primary: "Qwen/Qwen3-Reranker-0.6B"
+      fallback: ["BAAI/bge-reranker-v2-m3"]
+
+runtime_constraints:
+  max_context_tokens:
+    production: 32768
+    staging: 16384
+    development: 8192
+  quantization_fallback_order:
+    - fp8
+    - gptq
+    - awq
+
+serving:
+  openai_compatible: true
+  primary_engine: vllm
+  secondary_engine: sglang
+  routes:
+    llm: "/v1/chat/completions"
+    embeddings: "/v1/embeddings"
+    rerank: "/v1/rerank"
+  features:
+    reasoning_parser: true
+    tool_calling: true
+    long_context: true
+    structured_json_output: true
+    citation_friendly_prompting: true
+    prefix_caching: true
+    batching: true
+

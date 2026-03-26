@@ -1,0 +1,8 @@
+{
+  "evidence_version": "security.rotation.v1",
+  "kms_key_id": "kms/legal-rag/primary",
+  "rotated_at": "2026-03-11T09:00:00Z",
+  "rotated_by": "platform-security@marinantex.local",
+  "change_ticket": "SEC-ROT-2026-0311",
+  "notes": "Production key rotation evidence artifact for runtime startup contract checks."
+}

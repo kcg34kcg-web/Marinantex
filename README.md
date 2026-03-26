@@ -35,6 +35,7 @@ npm install
 # Run development server
 npm run dev
 # Open http://localhost:3000
+# Mail workspace: http://localhost:3001 (auto-starts with dev)
 
 # Quality checks
 npm run check
@@ -61,6 +62,23 @@ npm run format:check
   1.  Google (`GOOGLE_GENERATIVE_AI_API_KEY`)
   2.  Cohere (`COHERE_API_KEY`)
   3.  OpenAI (`OPENAI_API_KEY`)
+
+### Source Search Live Adapter
+
+- `/api/search` can run in two backend modes:
+  - `SEARCH_BACKEND_MODE=live` (default, RAG v3 backed live retrieval)
+  - `SEARCH_BACKEND_MODE=mock` (only when `SEARCH_ALLOW_MOCK=true`)
+- Production guardrail: when runtime is production, mock mode is fail-closed (`PRODUCTION_REQUIRES_LIVE_SEARCH`).
+- Production guardrail: live backend URL must be explicitly configured (`SEARCH_LIVE_RAG_BACKEND_URL` or `SEARCH_LIVE_RAG_BACKEND_URLS`), localhost fallback is disabled.
+- Live adapter env knobs:
+  - `SEARCH_LIVE_RAG_BACKEND_URL` / `SEARCH_LIVE_RAG_BACKEND_URLS`
+  - `SEARCH_LIVE_TIMEOUT_MS`
+  - `SEARCH_LIVE_RAG_TIER`, `SEARCH_LIVE_JURISDICTION`, `SEARCH_LIVE_ACL_TAGS`
+  - optional `SEARCH_LIVE_BUREAU_ID`, `SEARCH_LIVE_USER_ID`, `SEARCH_LIVE_ACCESS_LEVEL`, `SEARCH_LIVE_BEARER_TOKEN`
+- Live smoke command (expects web app on `:3000`): `npm run smoke:search:live`
+- Evidence gap report command: `npm run report:evidence:gaps`
+- Metadata quality backfill command: `npm run backfill:rag:metadata-quality`
+- Coverage evidence seed command (ictihat + model-lane traces): `npm run seed:rag:evidence`
 
 ### Litigation Intelligence Hardening (Step 3)
 

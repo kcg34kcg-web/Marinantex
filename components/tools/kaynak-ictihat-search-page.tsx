@@ -33,6 +33,8 @@ interface SearchApiResponse {
   warnings: string[];
   adapters: SourceAdapterStatus[];
   latency_ms: number;
+  search_mode?: string;
+  is_mock?: boolean;
 }
 
 interface ErrorApiResponse {
@@ -428,13 +430,27 @@ export function KaynakIctihatSearchPage() {
         </aside>
 
         <div className="space-y-3">
+          {result?.is_mock ? (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
+              <div className="mb-1 flex items-center gap-2 font-medium">
+                <AlertTriangle className="h-4 w-4" />
+                Mock Arama Modu
+              </div>
+              <p>Bu ekrandaki arama sonuclari demo/mock veri uzerinden uretiliyor; canli resmi kaynak teyidi saglamaz.</p>
+            </div>
+          ) : null}
+
           {result?.warnings.length ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
               <div className="mb-1 flex items-center gap-2 font-medium">
                 <AlertTriangle className="h-4 w-4" />
-                Bazi kaynaklar yanit vermedi
+                Uyari
               </div>
-              <p>{result.warnings[0]}</p>
+              <div className="space-y-1">
+                {result.warnings.slice(0, 3).map((warning) => (
+                  <p key={warning}>{warning}</p>
+                ))}
+              </div>
             </div>
           ) : null}
 

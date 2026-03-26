@@ -1,10 +1,22 @@
 # Production Hardening Checklist
 
-- [ ] HTTPS zorunlu + HSTS
-- [ ] Rate limiting (auth, ai, sync trigger)
-- [ ] CSP/CSRF policy aktif
-- [ ] Session cookie `httpOnly`, `secure`, `sameSite=lax`
-- [ ] Audit log immutable sink (WORM/SIEM) entegrasyonu
-- [ ] Backup + restore tatbikatı
-- [ ] DR hedefleri (RPO/RTO) dokümante
-- [ ] Queue DLQ izleme paneli
+- [ ] HTTPS zorunlu, HSTS açık, yalnızca TLS 1.2+ kabul ediliyor
+- [ ] Reverse proxy seviyesinde `X-Forwarded-*` güvenli doğrulanıyor
+- [ ] Session cookie `httpOnly`, `secure`, `sameSite=lax|strict`, domain/path scope kısıtlı
+- [ ] `AUTH_SECRET` ve token key'leri prod secret manager üzerinden inject ediliyor
+- [ ] DB/Redis/S3 erişimleri private network ve firewall allowlist ile sınırlandı
+- [ ] Rate limiting aktif: `/auth/*`, `/ai/*`, `/mail/sync/trigger`, webhook ingest
+- [ ] Abuse detection: login brute-force ve API burst alarmları tanımlı
+- [ ] CSP, CSRF, XSS header politikaları prod reverse proxy ile doğrulandı
+- [ ] Upload güvenliği: MIME whitelist, boyut limiti, malware scan hook etkin
+- [ ] Attachment erişimi signed URL + kısa TTL + tenant scoped policy ile korunuyor
+- [ ] Tenant isolation kontrolleri için release öncesi regression test seti koşuluyor
+- [ ] Audit log immutable sink (WORM/SIEM) ve hash-chain doğrulama aktif
+- [ ] Security event logları merkezi platforma (SIEM) akıyor
+- [ ] Queue retry/backoff/DLQ metrikleri dashboard + alarm ile izleniyor
+- [ ] Webhook signature doğrulama zorunlu ve replay protection uygulanıyor
+- [ ] Backup planı: full + incremental, restore tatbikatı en az aylık
+- [ ] DR hedefleri (RPO/RTO) dokümante ve runbook erişilebilir
+- [ ] Retention policy (mail, audit, security events) tenant planına göre enforce ediliyor
+- [ ] SLO/SLI tanımlı: auth latency, mail sync freshness, AI action latency
+- [ ] Incident response runbook (P1/P2) + on-call rotası tanımlı

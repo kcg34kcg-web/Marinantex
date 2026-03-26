@@ -20,9 +20,37 @@
       "react-hot-toast": ["./shims/react-hot-toast"],
       "framer-motion": ["./shims/framer-motion"],
       "@radix-ui/react-hover-card": ["./shims/radix-hover-card"],
-      "browser-image-compression": ["./shims/browser-image-compression"]
+      "browser-image-compression": ["./shims/browser-image-compression"],
+      "@tanstack/react-virtual": ["./shims/tanstack-react-virtual"],
+      "@cosmograph/react": ["./shims/cosmograph-react"]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "next-env.d.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "components/**/*.ts",
+    "components/**/*.tsx",
+    "hooks/**/*.ts",
+    "hooks/**/*.tsx",
+    "lib/**/*.ts",
+    "lib/**/*.tsx",
+    "shims/**/*.ts",
+    "shims/**/*.tsx",
+    "types/**/*.ts",
+    "types/**/*.tsx",
+    "utils/**/*.ts",
+    "utils/**/*.tsx",
+    "middleware.ts",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "apps/**",
+    "backend/**",
+    "lexoffice-ai/**",
+    "tests/**",
+    "**/*.test.ts",
+    "**/*.spec.ts"
+  ]
 }

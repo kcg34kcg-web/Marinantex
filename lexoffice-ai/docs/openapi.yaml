@@ -57,6 +57,29 @@ paths:
       summary: Mailbox bağlama
       responses:
         "200": { description: Mailbox connected }
+  /mailboxes/provision:
+    post:
+      summary: Managed mailbox provisioning
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenantId, domainId, localPart]
+              properties:
+                tenantId: { type: string }
+                domainId: { type: string }
+                localPart: { type: string }
+                displayName: { type: string }
+                provider:
+                  type: string
+                  enum: [MANAGED, GMAIL, MICROSOFT_365, YANDEX, IMAP_SMTP]
+                aliasLocalParts:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200": { description: Mailbox provision edildi }
   /integrations/mail/oauth/start:
     get:
       summary: Mail provider OAuth başlat
@@ -139,16 +162,106 @@ paths:
   /ai/mail-actions:
     post:
       summary: Mail AI aksiyonu çalıştır
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tenantId: { type: string }
+                threadId: { type: string }
+                action:
+                  type: string
+                  enum:
+                    - MAIL_SUMMARY
+                    - MAIL_REPLY_PROFESSIONAL
+                    - MAIL_REPLY_SHORT
+                    - MAIL_REPLY_FORMAL
+                    - THREAD_TASK_EXTRACTION
+                    - THREAD_ACTION_LIST
+                    - THREAD_MATTER_SUMMARY
+                    - SENSITIVE_DATA_CHECK
+                preferredLanguage: { type: string, enum: [tr, en] }
+                messageId: { type: string }
+                stream: { type: boolean }
       responses:
         "200": { description: Suggestion üretildi }
+  /ai/mail-actions/stream:
+    post:
+      summary: Mail AI aksiyonunu SSE ile stream et
+      responses:
+        "200": { description: text/event-stream döner }
   /ai/feedback:
     post:
       summary: AI suggestion feedback
       responses:
         "200": { description: Feedback kaydedildi }
+  /ai/stats:
+    get:
+      summary: Tenant AI suggestion metrikleri
+      parameters:
+        - in: query
+          name: tenantId
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: AI stats döner }
   /settings/tenant:
     post:
       summary: Tenant profil ayarlarını güncelle
+      responses:
+        "200": { description: Güncellendi }
+  /clients:
+    get:
+      summary: Client listesi
+      parameters:
+        - in: query
+          name: tenantId
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Başarılı }
+    post:
+      summary: Client oluştur
+      responses:
+        "200": { description: Oluşturuldu }
+  /matters:
+    get:
+      summary: Matter listesi
+      parameters:
+        - in: query
+          name: tenantId
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Başarılı }
+    post:
+      summary: Matter oluştur
+      responses:
+        "200": { description: Oluşturuldu }
+  /tasks:
+    get:
+      summary: Task listesi
+      parameters:
+        - in: query
+          name: tenantId
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Başarılı }
+    post:
+      summary: Task oluştur
+      responses:
+        "200": { description: Oluşturuldu }
+  /tasks/{taskId}/status:
+    post:
+      summary: Task durum güncelle
+      parameters:
+        - in: path
+          name: taskId
+          required: true
+          schema: { type: string }
       responses:
         "200": { description: Güncellendi }
   /webhooks/mail/{provider}:

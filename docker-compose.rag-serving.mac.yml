@@ -1,0 +1,84 @@
+name: marinantex-rag-mac
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: marinantex-rag-redis-mac
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - rag-serving-mac-network
+
+  backend-rag:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: marinantex-backend-rag-mac
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+      - ./.env.local
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      REDIS_URL: redis://redis:6379
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-}
+      DATABASE_URL: ${DATABASE_URL:-}
+      PII_ENCRYPTION_KEY: ${PII_ENCRYPTION_KEY:-dev-key-change}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret-change}
+      QWEN_SERVING_BACKEND: ${QWEN_SERVING_BACKEND:-openai}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://host.docker.internal:1234/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-local-openai-compatible}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-https://api.openai.com/v1}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+      EMBEDDING_SEND_DIMENSIONS_PARAM: ${EMBEDDING_SEND_DIMENSIONS_PARAM:-true}
+      RAG_V3_RERANKER_PROVIDER: ${RAG_V3_RERANKER_PROVIDER:-local}
+      RAG_V3_RERANKER_BASE_URL: ${RAG_V3_RERANKER_BASE_URL:-}
+      RAG_V3_RERANKER_API_KEY: ${RAG_V3_RERANKER_API_KEY:-}
+      AI_TIER_HAZIR_PROVIDER: openai
+      AI_TIER_HAZIR_MODEL: ${AI_TIER_HAZIR_MODEL:-Qwen/Qwen3-Next-80B-A3B-Instruct}
+      AI_TIER_HAZIR_FALLBACK_PROVIDER: openai
+      AI_TIER_HAZIR_FALLBACK_MODEL: ${AI_TIER_HAZIR_FALLBACK_MODEL:-Qwen/Qwen3-Next-80B-A3B-Instruct}
+      AI_TIER_DUSUNCELI_PROVIDER: openai
+      AI_TIER_DUSUNCELI_MODEL: ${AI_TIER_DUSUNCELI_MODEL:-Qwen/Qwen3-Next-80B-A3B-Instruct}
+      AI_TIER_DUSUNCELI_FALLBACK_PROVIDER: openai
+      AI_TIER_DUSUNCELI_FALLBACK_MODEL: ${AI_TIER_DUSUNCELI_FALLBACK_MODEL:-Qwen/Qwen3-Next-80B-A3B-Instruct}
+      AI_TIER_UZMAN_PROVIDER: openai
+      AI_TIER_UZMAN_MODEL: ${AI_TIER_UZMAN_MODEL:-Qwen/Qwen3-Next-80B-A3B-Thinking}
+      AI_TIER_UZMAN_FALLBACK_PROVIDER: openai
+      AI_TIER_UZMAN_FALLBACK_MODEL: ${AI_TIER_UZMAN_FALLBACK_MODEL:-Qwen/Qwen3-Next-80B-A3B-Instruct}
+      AI_TIER_MUAZZAM_PROVIDER: openai
+      AI_TIER_MUAZZAM_MODEL: ${AI_TIER_MUAZZAM_MODEL:-Qwen/Qwen3-Next-80B-A3B-Thinking}
+      AI_TIER_MUAZZAM_FALLBACK_PROVIDER: openai
+      AI_TIER_MUAZZAM_FALLBACK_MODEL: ${AI_TIER_MUAZZAM_FALLBACK_MODEL:-Qwen/Qwen3-Next-80B-A3B-Instruct}
+      LLM_TIER1_MODEL: ${LLM_TIER1_MODEL:-Qwen/Qwen3-Next-80B-A3B-Instruct}
+      LLM_TIER2_MODEL: ${LLM_TIER2_MODEL:-Qwen/Qwen3-Next-80B-A3B-Instruct}
+      LLM_TIER3_MODEL: ${LLM_TIER3_MODEL:-Qwen/Qwen3-Next-80B-A3B-Thinking}
+      LLM_TIER4_MODEL: ${LLM_TIER4_MODEL:-Qwen/Qwen3-Next-80B-A3B-Thinking}
+      LLM_TIER4_USE_REASONING: ${LLM_TIER4_USE_REASONING:-false}
+      RAG_V3_TENANT_HARD_FAIL_MISSING_BUREAU: ${RAG_V3_TENANT_HARD_FAIL_MISSING_BUREAU:-true}
+    ports:
+      - "${RAG_API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health > /dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    networks:
+      - rag-serving-mac-network
+
+networks:
+  rag-serving-mac-network:
+    driver: bridge

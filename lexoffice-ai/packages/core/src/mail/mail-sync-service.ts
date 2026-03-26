@@ -11,15 +11,18 @@ import {
 import { NotFoundError } from "../errors/app-error";
 import { AuditService } from "../audit/audit-service";
 import { QUEUES } from "../jobs/queue-constants";
+import { ProviderTokenService } from "./provider-token-service";
 
 export class MailSyncService {
   private readonly providerRegistry: MailProviderRegistry;
+  private readonly providerTokenService: ProviderTokenService;
 
   constructor(
     private readonly prisma: PrismaClient,
     private readonly auditService: AuditService
   ) {
     this.providerRegistry = new MailProviderRegistry();
+    this.providerTokenService = new ProviderTokenService(prisma);
   }
 
   async triggerSync(actorUserId: string | undefined, payload: TriggerSyncInput) {
@@ -128,7 +131,9 @@ export class MailSyncService {
       where: {
         correlationId: job.correlationId,
         queueName: QUEUES.MAIL_SYNC,
-        status: "QUEUED"
+        status: {
+          in: ["QUEUED", "FAILED"]
+        }
       },
       data: {
         status: "RUNNING",
@@ -169,11 +174,8 @@ export class MailSyncService {
         syncResult = this.createMockSyncResult(mailbox.id);
       } else {
         const adapter = this.providerRegistry.get(mailbox.provider);
-        syncResult = await this.syncViaAdapter(
-          adapter,
-          connection.accessTokenEncrypted,
-          mailbox.id
-        );
+        const accessToken = await this.providerTokenService.resolveAccessToken(connection);
+        syncResult = await this.syncViaAdapter(adapter, accessToken, mailbox.id);
       }
 
       await this.persistSyncResult(mailbox.tenantId, mailbox.id, syncResult);
@@ -253,14 +255,10 @@ export class MailSyncService {
     accessToken: string,
     mailboxId: string
   ): Promise<SyncResult> {
-    try {
-      return await adapter.syncMessages(accessToken, {
-        mailboxId,
-        maxResults: 25
-      });
-    } catch {
-      return this.createMockSyncResult(mailboxId);
-    }
+    return adapter.syncMessages(accessToken, {
+      mailboxId,
+      maxResults: 25
+    });
   }
 
   private createMockSyncResult(mailboxId: string): SyncResult {
@@ -294,6 +292,7 @@ export class MailSyncService {
     syncResult: SyncResult
   ): Promise<void> {
     for (const providerMessage of syncResult.messages) {
+      const classification = classifyProviderMessage(providerMessage);
       const thread = await this.prisma.mailThread.upsert({
         where: {
           tenantId_mailboxId_providerThreadId: {
@@ -339,7 +338,7 @@ export class MailSyncService {
             threadId: thread.id,
             providerMessageId: providerMessage.id,
             direction: "INBOUND",
-            state: "RECEIVED",
+            state: classification.state,
             subject: providerMessage.subject ?? null,
             snippet: providerMessage.snippet ?? null,
             bodyText: providerMessage.snippet ?? null,
@@ -349,7 +348,11 @@ export class MailSyncService {
             sentAt: providerMessage.sentAt ?? null,
             receivedAt: providerMessage.receivedAt ?? null,
             isRead: providerMessage.isRead,
-            isStarred: providerMessage.isStarred
+            isStarred: providerMessage.isStarred,
+            providerRawPayload: {
+              labelsOrFolders: providerMessage.labelsOrFolders,
+              classification
+            }
           }
         });
 
@@ -363,4 +366,104 @@ export class MailSyncService {
       }
     }
   }
+}
+
+function classifyProviderMessage(providerMessage: ProviderMessage): {
+  state: "RECEIVED" | "SENT" | "ARCHIVED" | "TRASH" | "SPAM";
+  spamSignals: string[];
+  phishingSignals: string[];
+} {
+  const normalizedLabels = providerMessage.labelsOrFolders.map((label) => label.toLowerCase());
+  const spamSignals: string[] = [];
+  const phishingSignals: string[] = [];
+  const searchableText = `${providerMessage.subject ?? ""} ${providerMessage.snippet ?? ""}`.toLowerCase();
+
+  if (matchesLabel(normalizedLabels, ["spam", "junk", "phishing"])) {
+    spamSignals.push("provider_spam_container");
+    return {
+      state: "SPAM",
+      spamSignals,
+      phishingSignals
+    };
+  }
+
+  if (matchesLabel(normalizedLabels, ["trash", "deleted", "bin"])) {
+    return {
+      state: "TRASH",
+      spamSignals,
+      phishingSignals
+    };
+  }
+
+  if (matchesLabel(normalizedLabels, ["sent"])) {
+    return {
+      state: "SENT",
+      spamSignals,
+      phishingSignals
+    };
+  }
+
+  if (matchesLabel(normalizedLabels, ["archive", "allmail", "all_mail"])) {
+    return {
+      state: "ARCHIVED",
+      spamSignals,
+      phishingSignals
+    };
+  }
+
+  const spamKeywordPatterns = [
+    "act now",
+    "free money",
+    "winner",
+    "lottery",
+    "urgent transfer",
+    "bitcoin",
+    "claim reward",
+    "kazandınız",
+    "ödül",
+    "hemen tıkla"
+  ];
+  const phishingPatterns = [
+    "verify account",
+    "password reset",
+    "confirm identity",
+    "suspended account",
+    "security alert",
+    "hesabınızı doğrulayın",
+    "şifre sıfırlama",
+    "kimlik doğrula"
+  ];
+
+  const spamKeywordHit = spamKeywordPatterns.some((keyword) => searchableText.includes(keyword));
+  if (spamKeywordHit) {
+    spamSignals.push("spam_keyword_pattern");
+  }
+
+  const phishingHit = phishingPatterns.some((keyword) => searchableText.includes(keyword));
+  if (phishingHit) {
+    phishingSignals.push("phishing_keyword_pattern");
+  }
+
+  const sender = providerMessage.fromEmail.toLowerCase();
+  if (sender.includes("+") || sender.includes("noreply")) {
+    spamSignals.push("sender_pattern");
+  }
+
+  if (spamSignals.length >= 2 || (spamSignals.length > 0 && phishingSignals.length > 0)) {
+    return {
+      state: "SPAM",
+      spamSignals,
+      phishingSignals
+    };
+  }
+
+  return {
+    state: "RECEIVED",
+    spamSignals,
+    phishingSignals
+  };
+}
+
+function matchesLabel(labels: string[], patterns: string[]): boolean {
+  return labels.some((label) => patterns.some((pattern) => label.includes(pattern)));
 }

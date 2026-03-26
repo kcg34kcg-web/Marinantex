@@ -2,10 +2,21 @@
 
 - [ ] Her endpointte tenant access assertion var mı?
 - [ ] Her kritik endpoint RBAC kontrolü yapıyor mu?
+- [ ] Service katmanında tenant filtresi zorunlu (route dışında da) uygulanıyor mu?
+- [ ] Multi-tenant sorgularda `tenantId` composite indexlerinden yararlanılıyor mu?
 - [ ] Input validation Zod ile sağlandı mı?
+- [ ] Validation hataları kullanıcıya güvenli/anonim mesajla dönüyor mu?
 - [ ] SQL injection riski için ham query yerine Prisma kullanılıyor mu?
+- [ ] Dinamik sorgu/sıralama alanları allowlist ile sınırlandı mı?
 - [ ] XSS için user-generated HTML sanitize ediliyor mu? (TODO)
+- [ ] Markdown/HTML render alanlarında script/style injection engelleniyor mu?
 - [ ] Dosya upload MIME/content sniffing uygulanıyor mu? (TODO)
+- [ ] Upload edilen dosya adları normalize edilip path traversal engelleniyor mu?
 - [ ] SSRF riskli URL fetch akışlarında allowlist var mı? (TODO)
+- [ ] Webhook callback/raw-body doğrulamasında canonical signature kontrolü var mı?
 - [ ] Açık redirect engelleri mevcut mu?
+- [ ] OAuth state/nonce doğrulaması zorunlu mu?
+- [ ] Session fixation ve replay risklerine karşı session rotate/revoke akışı var mı?
 - [ ] Hata mesajlarında hassas bilgi sızmıyor mu?
+- [ ] Loglarda token, parola, ham prompt, PII maskeleniyor mu?
+- [ ] AI çıktıları için human-in-the-loop ve audit kaydı zorunlu mu?

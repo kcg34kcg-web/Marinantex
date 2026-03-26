@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -52,7 +50,16 @@ services:
       - "1025:1025"
       - "8025:8025"
 
+  clamav:
+    image: clamav/clamav:stable
+    container_name: lexoffice-clamav
+    ports:
+      - "3310:3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  clamav_data:

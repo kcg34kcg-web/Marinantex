@@ -3,7 +3,7 @@ import { createClient } from '@/utils/supabase/server';
 import { redirect } from 'next/navigation';
 
 interface OfficePageProps {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; threadId?: string }>;
 }
 
 export default async function OfficePage({ searchParams }: OfficePageProps) {
@@ -30,6 +30,7 @@ export default async function OfficePage({ searchParams }: OfficePageProps) {
     params.tab === 'team' || params.tab === 'documents' || params.tab === 'hmk' || params.tab === 'notifications' || params.tab === 'feed'
       ? params.tab
       : undefined;
+  const initialThreadId = typeof params.threadId === 'string' && params.threadId.length > 0 ? params.threadId : undefined;
 
-  return <OfficeDashboard activeRole={activeRole} initialTab={initialTab} />;
+  return <OfficeDashboard activeRole={activeRole} initialTab={initialTab} initialTeamThreadId={initialThreadId} />;
 }

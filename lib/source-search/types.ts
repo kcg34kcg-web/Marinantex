@@ -7,11 +7,17 @@ export type SearchSort = (typeof SEARCH_SORTS)[number];
 export type SourceType = SearchTab;
 
 export type SearchFilterKey =
+  | 'source_type'
   | 'source_name'
   | 'court'
   | 'chamber'
+  | 'date_from'
+  | 'date_to'
   | 'decision_date_from'
   | 'decision_date_to'
+  | 'article_no'
+  | 'docket_no'
+  | 'decision_no'
   | 'esas_no'
   | 'karar_no'
   | 'law_name'
@@ -51,10 +57,12 @@ export interface DocumentRecord {
 }
 
 export type AdapterMode = 'ACTIVE' | 'NOT_IMPLEMENTED_YET' | 'REDIRECT_ONLY_MVP';
+export type AdapterScope = 'case_law' | 'legislation' | 'academic' | 'web';
 
 export interface SourceAdapterStatus {
   adapter_id: string;
   tab: SearchTab;
+  scope?: AdapterScope;
   source_name: string;
   mode: AdapterMode;
   verification_required: boolean;
@@ -91,11 +99,17 @@ export interface BookmarkRecord {
 }
 
 const FILTER_KEYS: SearchFilterKey[] = [
+  'source_type',
   'source_name',
   'court',
   'chamber',
+  'date_from',
+  'date_to',
   'decision_date_from',
   'decision_date_to',
+  'article_no',
+  'docket_no',
+  'decision_no',
   'esas_no',
   'karar_no',
   'law_name',
@@ -144,6 +158,26 @@ export function sanitizeFilters(filters: unknown): SearchFilters {
     if (trimmed) {
       cleaned[key] = trimmed;
     }
+  }
+
+  const docketNo = cleaned.docket_no;
+  const decisionNo = cleaned.decision_no;
+  const articleNo = cleaned.article_no;
+  if (docketNo && !cleaned.esas_no) {
+    cleaned.esas_no = docketNo;
+  }
+  if (decisionNo && !cleaned.karar_no) {
+    cleaned.karar_no = decisionNo;
+  }
+  if (articleNo && !cleaned.article) {
+    cleaned.article = articleNo;
+  }
+
+  if (cleaned.date_from && !cleaned.decision_date_from) {
+    cleaned.decision_date_from = cleaned.date_from;
+  }
+  if (cleaned.date_to && !cleaned.decision_date_to) {
+    cleaned.decision_date_to = cleaned.date_to;
   }
 
   return cleaned;

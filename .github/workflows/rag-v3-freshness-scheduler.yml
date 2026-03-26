@@ -1,0 +1,80 @@
+name: "RAG v3 Official Source Freshness Scheduler"
+
+on:
+  schedule:
+    - cron: "20 3 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run in dry-run mode (no DB writes)"
+        required: false
+        default: "false"
+      fail_on_stale:
+        description: "Fail workflow if stale sources are detected"
+        required: false
+        default: "true"
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  freshness-monitor:
+    name: "Official Source Freshness Monitor"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Resolve scheduler flags
+        id: flags
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "dry_run=${{ github.event.inputs.dry_run }}" >> "$GITHUB_OUTPUT"
+            echo "fail_on_stale=${{ github.event.inputs.fail_on_stale }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+            echo "fail_on_stale=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run freshness monitor (dry-run fallback when secrets missing)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ENVIRONMENT: "production"
+        run: |
+          EXTRA_FLAGS=""
+          if [ "${{ steps.flags.outputs.dry_run }}" = "true" ]; then
+            EXTRA_FLAGS="$EXTRA_FLAGS --dry-run"
+          fi
+          if [ "${{ steps.flags.outputs.fail_on_stale }}" = "true" ]; then
+            EXTRA_FLAGS="$EXTRA_FLAGS --fail-on-stale"
+          fi
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+            EXTRA_FLAGS="$EXTRA_FLAGS --dry-run"
+          fi
+          python scripts/official_source_freshness_scheduler.py \
+            --fail-on-error \
+            --output official-source-freshness-scheduler-report.json \
+            $EXTRA_FLAGS
+
+      - name: Upload freshness scheduler report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-source-freshness-scheduler-report
+          path: backend/official-source-freshness-scheduler-report.json
+          retention-days: 30

@@ -13,6 +13,7 @@ EXPECTED_FLAG_KEYS = {
     "save_targets_v2",
     "client_translator_draft",
     "memory_dashboard_v1",
+    "rag_v3_single_pipeline_enforced",
 }
 
 
@@ -31,6 +32,7 @@ def test_feature_flags_snapshot_reflects_model_overrides() -> None:
             "save_targets_v2": False,
             "client_translator_draft": True,
             "memory_dashboard_v1": True,
+            "rag_v3_single_pipeline_enforced": True,
         }
     )
     snapshot = overridden.feature_flags_snapshot()
@@ -40,6 +42,7 @@ def test_feature_flags_snapshot_reflects_model_overrides() -> None:
     assert snapshot["save_targets_v2"] is False
     assert snapshot["client_translator_draft"] is True
     assert snapshot["memory_dashboard_v1"] is True
+    assert snapshot["rag_v3_single_pipeline_enforced"] is True
 
 
 class _MockRPC:

@@ -22,6 +22,8 @@ import uuid
 
 from infrastructure.config import settings
 from infrastructure.security.kvkk_redactor import kvkk_redactor
+from infrastructure.security.pii_ner import pii_ner_engine
+from infrastructure.security.redaction_store import redaction_map_store
 
 logger = logging.getLogger("babylexit.privacy")
 
@@ -52,6 +54,11 @@ class PrivacyMiddleware(BaseHTTPMiddleware):
         # Masking token storage (in-memory for PHASE 1)
         # TODO: Move to Redis in PHASE 2 for distributed systems
         self.mask_store: Dict[str, Dict[str, str]] = {}
+        self._redaction_store = redaction_map_store
+        self._legal_term_re = re.compile(
+            r"\b(?:mahkemesi|kanunu|kanun|yargitay|danistay|anayasa|ceza|hukuk|teblig|yonetmelik)\b",
+            re.IGNORECASE,
+        )
     
     async def dispatch(self, request: Request, call_next):
         """
@@ -75,6 +82,9 @@ class PrivacyMiddleware(BaseHTTPMiddleware):
                 
                 # 3. Replace request body with masked version
                 request._body = masked_body.encode()
+
+                if mask_id in self.mask_store and self.mask_store[mask_id]:
+                    await self._redaction_store.set_map(mask_id=mask_id, values=self.mask_store[mask_id])
                 
                 # Log PII detection
                 if mask_map:
@@ -87,11 +97,9 @@ class PrivacyMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             
             # 5. Unmask PII in response (if any)
-            if mask_id in self.mask_store:
-                response = await self._unmask_response(response, mask_id)
-                
-                # Clean up mask store
-                del self.mask_store[mask_id]
+            response = await self._unmask_response(response, mask_id)
+            await self._redaction_store.delete_map(mask_id=mask_id)
+            self.mask_store.pop(mask_id, None)
             
             return response
         
@@ -151,6 +159,8 @@ class PrivacyMiddleware(BaseHTTPMiddleware):
         masked_text = text
         mask_map = {}
         detection_counts = {}
+        redaction_mode = str(getattr(settings, "kvkk_redaction_mode", "reversible") or "reversible").strip().lower()
+        reversible = redaction_mode != "irreversible"
         
         for pii_type, pattern in self.patterns.items():
             matches = pattern.findall(text)
@@ -160,17 +170,59 @@ class PrivacyMiddleware(BaseHTTPMiddleware):
                 
                 for match in matches:
                     # Generate unique mask token
-                    mask_token = f"[MASKED_{pii_type.upper()}_{uuid.uuid4().hex[:8]}]"
+                    if reversible:
+                        mask_token = f"[MASKED_{pii_type.upper()}_{uuid.uuid4().hex[:8]}]"
+                    else:
+                        mask_token = f"[REDACTED_{pii_type.upper()}]"
                     
                     # Store original value for unmasking
-                    if mask_id not in self.mask_store:
-                        self.mask_store[mask_id] = {}
-                    
-                    self.mask_store[mask_id][mask_token] = match
+                    if reversible:
+                        if mask_id not in self.mask_store:
+                            self.mask_store[mask_id] = {}
+                        self.mask_store[mask_id][mask_token] = match
                     
                     # Replace in text
                     masked_text = masked_text.replace(match, mask_token, 1)
-        
+
+        if bool(getattr(settings, "kvkk_model_ner_enabled", False)):
+            try:
+                ner_detections = pii_ner_engine.detect(
+                    text=text,
+                    entities=[
+                        "PERSON",
+                        "LOCATION",
+                        "PHONE_NUMBER",
+                        "EMAIL_ADDRESS",
+                        "IBAN_CODE",
+                    ],
+                    score_threshold=float(getattr(settings, "kvkk_model_ner_score_threshold", 0.55) or 0.55),
+                )
+            except Exception:
+                if bool(getattr(settings, "kvkk_fail_closed_on_ner_error", True)):
+                    raise
+                ner_detections = []
+            for entity in ner_detections:
+                span = str(entity.text or "").strip()
+                if not span:
+                    continue
+                if span.startswith("[MASKED_"):
+                    continue
+                if span not in masked_text:
+                    continue
+                if self._legal_term_re.search(span):
+                    # Prevent over-redaction on legal institution terms.
+                    continue
+                pii_type = str(entity.entity_type or "pii").lower()
+                detection_counts[pii_type] = int(detection_counts.get(pii_type, 0)) + 1
+                if reversible:
+                    mask_token = f"[MASKED_{pii_type.upper()}_{uuid.uuid4().hex[:8]}]"
+                    if mask_id not in self.mask_store:
+                        self.mask_store[mask_id] = {}
+                    self.mask_store[mask_id][mask_token] = span
+                else:
+                    mask_token = f"[REDACTED_{pii_type.upper()}]"
+                masked_text = masked_text.replace(span, mask_token, 1)
+
         return masked_text, detection_counts
     
     async def _unmask_response(self, response: Response, mask_id: str) -> Response:
@@ -184,7 +236,10 @@ class PrivacyMiddleware(BaseHTTPMiddleware):
         If the mask store has no entries for this request (e.g. no PII was
         detected), the original response is returned unchanged.
         """
-        if mask_id not in self.mask_store or not self.mask_store[mask_id]:
+        mask_map = dict(self.mask_store.get(mask_id) or {})
+        if not mask_map:
+            mask_map = await self._redaction_store.get_map(mask_id=mask_id)
+        if not mask_map:
             return response
 
         try:
@@ -201,13 +256,13 @@ class PrivacyMiddleware(BaseHTTPMiddleware):
             body_text = body_bytes.decode("utf-8", errors="replace")
 
             # Replace each mask token with the original PII value
-            for mask_token, original_value in self.mask_store[mask_id].items():
+            for mask_token, original_value in mask_map.items():
                 body_text = body_text.replace(mask_token, original_value)
 
             logger.debug(
                 "PRIVACY_UNMASK | mask_id=%s | tokens_restored=%d",
                 mask_id[:8],
-                len(self.mask_store[mask_id]),
+                len(mask_map),
             )
 
             return StarletteResponse(

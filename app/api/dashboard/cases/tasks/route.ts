@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { logDashboardAudit } from '@/lib/dashboard/audit';
+import { syncTaskReminderTimelineEvents } from '@/lib/dashboard/calendar-sync';
 
 const taskTypeSchema = z.enum([
   'follow_up',
@@ -172,8 +173,8 @@ export async function POST(request: Request) {
 
   await admin.from('case_timeline_events').insert({
     case_id: payload.caseId,
-    event_type: 'reminder',
-    title: 'Yeni görev oluşturuldu',
+    event_type: 'user_action',
+    title: 'Yeni gorev olusturuldu',
     description: payload.title,
     metadata: {
       taskId: data.id,
@@ -186,9 +187,31 @@ export async function POST(request: Request) {
       confidentiality: payload.confidentiality ?? 'team',
       references: normalizedReferences,
       relatedDocumentIds: relatedDocuments.map((item) => item.id),
+      calendarSync: {
+        source: 'office_task',
+      },
     },
     created_by: access.userId,
   });
+
+  try {
+    await syncTaskReminderTimelineEvents(admin, {
+      caseId: payload.caseId,
+      taskId: data.id,
+      taskTitle: payload.title,
+      taskDescription: taskDescription ?? null,
+      dueAt: payload.dueAt ?? null,
+      createdBy: access.userId,
+      priority: payload.priority,
+      assignedTo: payload.assignedTo ?? access.userId,
+      taskType: payload.taskType ?? 'follow_up',
+      deadlineType: payload.deadlineType ?? 'due_date',
+      riskLevel: payload.riskLevel ?? 'medium',
+      confidentiality: payload.confidentiality ?? 'team',
+    });
+  } catch (syncError) {
+    console.error('task_calendar_sync_failed', syncError);
+  }
 
   await logDashboardAudit(admin, {
     actorUserId: access.userId,

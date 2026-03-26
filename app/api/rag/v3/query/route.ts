@@ -4,6 +4,8 @@ import { resolveBureauContext } from '@/app/api/rag/_lib/bureau-context';
 import { ragProxyErrorResponse } from '@/app/api/rag/_lib/error-contract';
 import { fetchRagBackend, getRagBackendForLogs } from '@/app/api/rag/_lib/rag-backend';
 import { enforceRagRouteRateLimit } from '@/app/api/rag/_lib/rate-limit';
+import { isTimeoutError } from '@/app/api/rag/_lib/timeout';
+import { resolveRequestedMatterId, validateMatterScope } from '@/app/api/rag/_lib/matter-policy';
 import { createClient } from '@/utils/supabase/server';
 
 const querySchema = z.object({
@@ -14,11 +16,15 @@ const querySchema = z.object({
   })).max(20).optional(),
   top_k: z.number().int().min(8).max(12).optional(),
   jurisdiction: z.string().min(2).max(10).optional(),
+  source_types: z.array(z.string().min(1).max(64)).max(16).optional(),
   as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   decision_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   requested_tier: z.number().int().min(1).max(4).optional(),
   acl_tags: z.array(z.string().min(1).max(64)).max(16).optional(),
+  legal_disclaimer_ack: z.boolean().optional(),
+  human_responsibility_ack: z.boolean().optional(),
+  selected_mode: z.string().max(40).optional(),
 });
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -34,6 +40,24 @@ function pickErrorMessage(body: unknown): string {
   const detailObj = asObject(bodyObj.detail);
   if (typeof detailObj?.message === 'string') return detailObj.message;
   return 'RAG v3 query istegi basarisiz oldu.';
+}
+
+function normalizeQueryResponse(body: unknown): {
+  status: 'ok' | 'no_answer';
+  citations: unknown[];
+  payload: Record<string, unknown>;
+} | null {
+  const payload = asObject(body);
+  if (!payload) {
+    return null;
+  }
+  const statusToken = String(payload.status ?? 'ok').trim().toLowerCase();
+  const status = statusToken === 'no_answer' ? 'no_answer' : statusToken === 'ok' ? 'ok' : null;
+  if (!status) {
+    return null;
+  }
+  const citations = Array.isArray(payload.citations) ? payload.citations : [];
+  return { status, citations, payload };
 }
 
 function aclTagsForAccessLevel(accessLevel: 'OWNER' | 'MEMBER' | 'READ_ONLY'): string[] {
@@ -91,7 +115,7 @@ export async function POST(request: Request) {
         message: 'Buro baglami bulunamadi. Lutfen tekrar giris yapin.',
       });
     }
-    const rateLimit = enforceRagRouteRateLimit({
+    const rateLimit = await enforceRagRouteRateLimit({
       request,
       routeKey: 'v3_query',
       userId,
@@ -99,12 +123,23 @@ export async function POST(request: Request) {
     if (rateLimit.limited && rateLimit.response) {
       return rateLimit.response;
     }
+    const matterScopeError = validateMatterScope({
+      headers: request.headers,
+      route: '/api/rag/v3/query',
+    });
+    if (matterScopeError) {
+      return matterScopeError;
+    }
+    const requestedMatterId = resolveRequestedMatterId(request.headers);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Bureau-ID': bureauId,
       'X-User-ID': userId,
       'X-Access-Level': accessLevel,
     };
+    if (requestedMatterId) {
+      headers['X-Matter-ID'] = requestedMatterId;
+    }
     if (accessToken) {
       headers.Authorization = `Bearer ${accessToken}`;
     }
@@ -116,11 +151,16 @@ export async function POST(request: Request) {
         history: parsed.data.history,
         top_k: parsed.data.top_k ?? 10,
         jurisdiction: parsed.data.jurisdiction ?? 'TR',
+        source_types: parsed.data.source_types,
         as_of_date: parsed.data.as_of_date,
         event_date: parsed.data.event_date,
         decision_date: parsed.data.decision_date,
         requested_tier: parsed.data.requested_tier ?? 2,
         acl_tags: parsed.data.acl_tags ?? aclTagsForAccessLevel(accessLevel),
+        legal_disclaimer_ack: parsed.data.legal_disclaimer_ack ?? false,
+        human_responsibility_ack: parsed.data.human_responsibility_ack ?? false,
+        selected_mode: parsed.data.selected_mode ?? '',
+        policy_context: requestedMatterId ? { matter_id: requestedMatterId, case_id: requestedMatterId } : {},
       }),
       signal: AbortSignal.timeout(120_000),
     });
@@ -133,6 +173,13 @@ export async function POST(request: Request) {
     }
 
     if (!upstream.ok) {
+      console.warn(
+        JSON.stringify({
+          event: 'rag_v3_query_backend_rejected',
+          route: '/api/rag/v3/query',
+          status: upstream.status,
+        }),
+      );
       return ragProxyErrorResponse({
         status: upstream.status,
         errorCode: 'RAG_BACKEND_ERROR',
@@ -140,17 +187,41 @@ export async function POST(request: Request) {
         retryable: upstream.status >= 500,
       });
     }
-
-    return NextResponse.json(body, { status: 200 });
+    const normalized = normalizeQueryResponse(body);
+    if (!normalized) {
+      return ragProxyErrorResponse({
+        status: 502,
+        errorCode: 'INVALID_BACKEND_RESPONSE',
+        message: 'RAG v3 query yaniti gecersiz.',
+        retryable: false,
+      });
+    }
+    if (normalized.status === 'ok' && normalized.citations.length === 0) {
+      return ragProxyErrorResponse({
+        status: 422,
+        errorCode: 'UNGROUNDED_OK_RESPONSE',
+        message: 'Kaynaksiz yanit kabul edilmedi.',
+        retryable: false,
+      });
+    }
+    return NextResponse.json(normalized.payload, { status: 200 });
   } catch (err) {
-    const message =
-      err instanceof Error && err.name === 'AbortError'
-        ? 'RAG v3 query istegi zaman asimina ugradi.'
-        : 'RAG v3 query servisine baglanilamadi.';
-    console.error('[RAG v3 query proxy]', err, { backendCandidates: getRagBackendForLogs() });
+    const timedOut = isTimeoutError(err);
+    const message = timedOut
+      ? 'RAG v3 query istegi zaman asimina ugradi.'
+      : 'RAG v3 query servisine baglanilamadi.';
+    console.error(
+      JSON.stringify({
+        event: 'rag_v3_query_proxy_exception',
+        route: '/api/rag/v3/query',
+        error_code: timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
+        message: err instanceof Error ? err.message : 'unknown_error',
+        backend_candidates: getRagBackendForLogs(),
+      }),
+    );
     return ragProxyErrorResponse({
       status: 502,
-      errorCode: err instanceof Error && err.name === 'AbortError' ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
+      errorCode: timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
       message,
       retryable: true,
     });

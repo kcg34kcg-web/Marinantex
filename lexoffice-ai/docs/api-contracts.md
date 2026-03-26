@@ -84,6 +84,14 @@ Tüm endpointlerde giriş/çıkış doğrulaması `@lexoffice/contracts` içinde
 - Request: provider + token set + mailbox profile
 - Response: bağlı mailbox kaydı
 
+### `POST /api/v1/mailboxes/provision`
+
+- Auth: Session zorunlu
+- Permission: `mailbox.create` + `domain.manage`
+- Request: `tenantId`, `domainId`, `localPart`, `displayName?`, `provider?`, `aliasLocalParts[]`
+- Response: provision edilen mailbox + adapter sonucu
+- Not: İlk sürümde provisioning adapter’ları mock modda çalışır; sözleşme production canlı adapter’a hazırdır.
+
 ### `GET /api/v1/mail/threads?tenantId=...`
 
 - Auth: Session zorunlu
@@ -117,6 +125,20 @@ Tüm endpointlerde giriş/çıkış doğrulaması `@lexoffice/contracts` içinde
 - Permission: `mail.send`
 - Request: sender mailbox + recipients + body + attachments
 - Response: `messageId`, `threadId`, `providerMessageId`
+
+### `POST /api/v1/mail/send/schedule`
+
+- Auth: Session zorunlu
+- Permission: `mail.send`
+- Request: `mail.send` payload + `scheduledAt` (ISO datetime), `undoWindowSeconds?`
+- Response: `scheduledDraftId`, `scheduledAt`, `correlationId`
+
+### `POST /api/v1/mail/send/scheduled/{scheduledDraftId}/cancel`
+
+- Auth: Session zorunlu
+- Permission: `mail.send`
+- Request: `tenantId`
+- Response: `{ scheduledDraftId, canceled: true }`
 
 ### `POST /api/v1/mail/sync/trigger`
 
@@ -154,14 +176,77 @@ Tüm endpointlerde giriş/çıkış doğrulaması `@lexoffice/contracts` içinde
 - Response: `{ received, eventCount, queuedSyncJobs }`
 - Not: eşleşen provider account için incremental sync kuyruğa alınır
 
+## CRM / Matter / Task
+
+### `GET /api/v1/clients?tenantId=...`
+
+- Auth: Session zorunlu
+- Permission: `client.matter.access`
+- Query: `query?`, `limit?`
+- Response: client listesi
+
+### `POST /api/v1/clients`
+
+- Auth: Session zorunlu
+- Permission: `client.matter.access`
+- Request: `tenantId`, `name`, `email?`, `code?`, `status?`
+- Response: oluşturulan client
+
+### `GET /api/v1/matters?tenantId=...`
+
+- Auth: Session zorunlu
+- Permission: `client.matter.access`
+- Query: `clientId?`, `status?`, `limit?`
+- Response: matter listesi + client özeti
+
+### `POST /api/v1/matters`
+
+- Auth: Session zorunlu
+- Permission: `client.matter.access`
+- Request: `tenantId`, `clientId`, `title`, `referenceNo?`
+- Response: oluşturulan matter
+
+### `GET /api/v1/tasks?tenantId=...`
+
+- Auth: Session zorunlu
+- Permission: `client.matter.access`
+- Query: `matterId?`, `status?`, `assignedToId?`, `limit?`
+- Response: task listesi
+
+### `POST /api/v1/tasks`
+
+- Auth: Session zorunlu
+- Permission: `client.matter.access`
+- Request: `tenantId`, `title`, `matterId?`, `priority?`, `dueAt?`
+- Response: oluşturulan task
+
+### `POST /api/v1/tasks/{taskId}/status`
+
+- Auth: Session zorunlu
+- Permission: `client.matter.access`
+- Request: `tenantId`, `status`
+- Response: güncellenen task
+
 ## AI
 
 ### `POST /api/v1/ai/mail-actions`
 
 - Auth: Session zorunlu
 - Permission: `ai.workspace`
-- Request: `tenantId`, `threadId`, `action`, `preferredLanguage`, `messageId?`
-- Response: suggestion + usage metering + `humanApprovalRequired`
+- Request: `tenantId`, `threadId`, `action`, `preferredLanguage`, `messageId?`, `stream?`
+- Response: suggestion + structured output + usage metering + `humanApprovalRequired`
+
+### `POST /api/v1/ai/mail-actions/stream`
+
+- Auth: Session zorunlu
+- Permission: `ai.workspace` + `mail.ai.compose`
+- Request: `tenantId`, `threadId`, `action`, `preferredLanguage`, `messageId?`, `stream=true`
+- Response: `text/event-stream`
+- Events:
+- `meta`: `aiMessageId`, `structuredOutput`, `usage`, `humanApprovalRequired`
+- `chunk`: `content`
+- `done`: `{ completed: true }`
+- `error`: stream error payload
 
 ### `POST /api/v1/ai/feedback`
 
@@ -169,6 +254,12 @@ Tüm endpointlerde giriş/çıkış doğrulaması `@lexoffice/contracts` içinde
 - Permission: `ai.workspace`
 - Request: `tenantId`, `aiMessageId`, `accepted`
 - Response: `{ success: true }`
+
+### `GET /api/v1/ai/stats?tenantId=...`
+
+- Auth: Session zorunlu
+- Permission: `ai.workspace`
+- Response: tenant AI suggestion istatistikleri (totals, acceptance rate, token usage, action kırılımı)
 
 ## Settings
 

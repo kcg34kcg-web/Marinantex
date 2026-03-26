@@ -45,6 +45,11 @@ from application.use_cases.query_legal_rag import (
 from domain.entities.tenant import AccessLevel, TenantContext
 from infrastructure.config import settings
 from infrastructure.database.supabase_audit_repository import supabase_audit_repository
+from infrastructure.security.matter_scope import (
+    MatterScopeViolation,
+    assert_matter_scope,
+    resolve_requested_matter_id,
+)
 
 logger = logging.getLogger("babylexit.routes.rag")
 
@@ -132,6 +137,15 @@ async def rag_query(
         HTTPException 422: Hard-Fail — no sources found.
         HTTPException 503: Supabase unreachable.
     """
+    if bool(getattr(settings, "rag_v3_single_pipeline_enforced", False)):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=(
+                "Legacy /api/v1/rag/query pipeline is disabled. "
+                "Use /api/v1/rag-v3/query."
+            ),
+        )
+
     # Resolve bureau context injected by TenantMiddleware.
     tenant_context: Optional[TenantContext] = (
         getattr(request.state, "tenant", None)
@@ -187,6 +201,27 @@ async def rag_query(
         getattr(request_body, "decision_date", None),
     )
 
+    requested_matter_id = resolve_requested_matter_id(request.headers)
+    try:
+        assert_matter_scope(
+            route="/api/v1/rag/query",
+            requested_matter_id=requested_matter_id,
+            payload_matter_id=getattr(request_body, "case_id", None),
+        )
+    except MatterScopeViolation as exc:
+        logger.warning(
+            "RAG_ROUTE_DENIAL_AUDIT | route=%s | reason=%s | bureau=%s | requested_matter=%s | payload_matter=%s",
+            exc.route,
+            exc.reason,
+            effective_bureau_id,
+            requested_matter_id,
+            getattr(request_body, "case_id", None),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=exc.to_detail(),
+        ) from exc
+
     # Build the framework-agnostic DTO for the use case.
     # execute_for_api() calls rag_service internally, persists the audit
     # trail as a side effect, and returns the full RAGResponse (Pydantic).
@@ -209,7 +244,16 @@ async def rag_query(
         client_action=request_body.client_action.value if getattr(request_body, "client_action", None) else None,
     )
 
-    return await _rag_use_case.execute_for_api(dto)
+    try:
+        return await _rag_use_case.execute_for_api(dto)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.error("RAG_ROUTE_QUERY_EXCEPTION | reason=%s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="RAG query unavailable.",
+        ) from exc
 
 
 @router.post(
@@ -308,6 +352,27 @@ async def rag_save_output(
         request_body.save_mode.value,
         request_body.client_action.value,
     )
+
+    requested_matter_id = resolve_requested_matter_id(request.headers)
+    try:
+        assert_matter_scope(
+            route="/api/v1/rag/save",
+            requested_matter_id=requested_matter_id,
+            payload_matter_id=getattr(request_body, "case_id", None),
+        )
+    except MatterScopeViolation as exc:
+        logger.warning(
+            "RAG_ROUTE_DENIAL_AUDIT | route=%s | reason=%s | bureau=%s | requested_matter=%s | payload_matter=%s",
+            exc.route,
+            exc.reason,
+            effective_bureau_id,
+            requested_matter_id,
+            getattr(request_body, "case_id", None),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=exc.to_detail(),
+        ) from exc
 
     try:
         return await save_output_service.save(

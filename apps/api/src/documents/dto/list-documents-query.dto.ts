@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { IsEnum, IsOptional, Min } from "class-validator";
+import { IsEnum, IsOptional, IsString, Min } from "class-validator";
 import type { DocumentStatus, DocumentType } from "@prisma/client";
 
 export class ListDocumentsQueryDto {
@@ -26,4 +26,8 @@ export class ListDocumentsQueryDto {
   @Type(() => Number)
   @Min(1)
   limit?: number;
+
+  @IsOptional()
+  @IsString()
+  matterId?: string;
 }

@@ -104,12 +104,26 @@ export class DocumentsService {
 
   async list(tenantId: string, query: ListDocumentsQueryDto) {
     const take = Math.min(query.limit ?? 20, 100);
+    const matterId = query.matterId?.trim() || undefined;
+
+    const where: Prisma.DocumentWhereInput = {
+      tenantId,
+      status: query.status,
+      type: query.type,
+      ...(matterId
+        ? {
+            OR: [
+              { canonicalJson: { path: ["matterId"], equals: matterId } },
+              { canonicalJson: { path: ["matter_id"], equals: matterId } },
+              { canonicalJson: { path: ["caseId"], equals: matterId } },
+              { canonicalJson: { path: ["case_id"], equals: matterId } },
+            ],
+          }
+        : {}),
+    };
+
     return this.prisma.document.findMany({
-      where: {
-        tenantId,
-        status: query.status,
-        type: query.type,
-      },
+      where,
       orderBy: { updatedAt: "desc" },
       take,
       select: {

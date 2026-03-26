@@ -2,6 +2,7 @@ import type { PrismaClient } from "@lexoffice/db";
 import { connectMailboxSchema, listMailboxesSchema, type ConnectMailboxInput, type ListMailboxesInput } from "@lexoffice/contracts";
 import { ConflictError } from "../errors/app-error";
 import { AuditService } from "../audit/audit-service";
+import { encryptSecret } from "../security/secret-crypto";
 
 export class MailboxService {
   constructor(
@@ -64,16 +65,16 @@ export class MailboxService {
           userId: actorUserId,
           provider: input.provider,
           providerAccountId: input.providerAccountId,
-          accessTokenEncrypted: input.accessToken,
-          refreshTokenEncrypted: input.refreshToken ?? null,
+          accessTokenEncrypted: encryptSecret(input.accessToken),
+          refreshTokenEncrypted: input.refreshToken ? encryptSecret(input.refreshToken) : null,
           scopes: input.scopes,
           status: "CONNECTED"
         },
         update: {
           mailboxId: createdMailbox.id,
           userId: actorUserId,
-          accessTokenEncrypted: input.accessToken,
-          refreshTokenEncrypted: input.refreshToken ?? null,
+          accessTokenEncrypted: encryptSecret(input.accessToken),
+          refreshTokenEncrypted: input.refreshToken ? encryptSecret(input.refreshToken) : null,
           scopes: input.scopes,
           status: "CONNECTED",
           lastError: null

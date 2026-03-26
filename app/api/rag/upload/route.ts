@@ -4,6 +4,8 @@ import { resolveBureauContext } from '@/app/api/rag/_lib/bureau-context';
 import { ragProxyErrorResponse } from '@/app/api/rag/_lib/error-contract';
 import { fetchRagBackend, getRagBackendForLogs } from '@/app/api/rag/_lib/rag-backend';
 import { enforceRagRouteRateLimit } from '@/app/api/rag/_lib/rate-limit';
+import { isTimeoutError } from '@/app/api/rag/_lib/timeout';
+import { resolveRequestedMatterId, validateMatterScope } from '@/app/api/rag/_lib/matter-policy';
 import { createClient } from '@/utils/supabase/server';
 
 export const runtime = 'nodejs';
@@ -21,7 +23,7 @@ const uploadSchema = z.object({
   citation: z.string().max(500).optional(),
   source_type: z.string().min(1).max(120).optional(),
   source_id: z.string().min(1).max(120).optional(),
-  source_format: z.enum(['text', 'pdf', 'html', 'docx']).optional(),
+  source_format: z.enum(['text', 'pdf', 'html', 'docx', 'xml', 'json']).optional(),
   binary_base64: z.string().max(BINARY_BASE64_MAX_LEN).optional(),
   ocr_required: z.boolean().optional(),
   fallback_text: z.string().max(600_000).optional(),
@@ -109,9 +111,24 @@ function isLegacyDocFile(file: File): boolean {
   return file.type === 'application/msword' || name.endsWith('.doc');
 }
 
+function isHtmlFile(file: File): boolean {
+  const name = file.name.toLowerCase();
+  return file.type === 'text/html' || name.endsWith('.html') || name.endsWith('.htm');
+}
+
+function isXmlFile(file: File): boolean {
+  const name = file.name.toLowerCase();
+  return file.type === 'application/xml' || file.type === 'text/xml' || name.endsWith('.xml');
+}
+
+function isJsonFile(file: File): boolean {
+  const name = file.name.toLowerCase();
+  return file.type === 'application/json' || name.endsWith('.json');
+}
+
 type UploadExtraction = {
   rawText: string;
-  sourceFormat: 'text' | 'pdf' | 'docx';
+  sourceFormat: 'text' | 'pdf' | 'docx' | 'html' | 'xml' | 'json';
   binaryBase64?: string;
   ocrRequired?: boolean;
   fallbackText?: string;
@@ -160,6 +177,27 @@ async function extractUploadContentFromFile(file: File): Promise<UploadExtractio
 
   if (isLegacyDocFile(file)) {
     throw new Error('Legacy .doc format desteklenmiyor. Lutfen dosyayi .docx veya PDF olarak yukleyin.');
+  }
+
+  if (isHtmlFile(file)) {
+    return {
+      rawText: (await file.text()).trim(),
+      sourceFormat: 'html',
+    };
+  }
+
+  if (isXmlFile(file)) {
+    return {
+      rawText: (await file.text()).trim(),
+      sourceFormat: 'xml',
+    };
+  }
+
+  if (isJsonFile(file)) {
+    return {
+      rawText: (await file.text()).trim(),
+      sourceFormat: 'json',
+    };
   }
 
   const plainText = (await file.text())
@@ -290,7 +328,7 @@ export async function POST(request: Request) {
     }
 
     const { bureauId, userId, accessLevel } = context;
-    const rateLimit = enforceRagRouteRateLimit({
+    const rateLimit = await enforceRagRouteRateLimit({
       request,
       routeKey: 'upload_ingest',
       userId,
@@ -305,6 +343,15 @@ export async function POST(request: Request) {
         message: 'Buro baglami bulunamadi.',
       });
     }
+    const matterScopeError = validateMatterScope({
+      headers: request.headers,
+      payloadMatterId: parsed.data.case_id ?? null,
+      route: '/api/rag/upload',
+    });
+    if (matterScopeError) {
+      return matterScopeError;
+    }
+    const requestedMatterId = resolveRequestedMatterId(request.headers) ?? parsed.data.case_id ?? null;
 
     const sourceUrl =
       parsed.data.source_url?.trim()
@@ -324,6 +371,7 @@ export async function POST(request: Request) {
         'X-Bureau-ID': bureauId,
         'X-User-ID': userId,
         'X-Access-Level': accessLevel,
+        ...(requestedMatterId ? { 'X-Matter-ID': requestedMatterId } : {}),
       },
       body: JSON.stringify({
         title: parsed.data.file_name,
@@ -340,7 +388,8 @@ export async function POST(request: Request) {
           source_url: sourceUrl,
           file_url: sourceUrl,
           citation,
-          case_id: parsed.data.case_id ?? null,
+          case_id: requestedMatterId,
+          matter_id: requestedMatterId,
           file_name: parsed.data.file_name,
           ingest_channel: 'ui_upload',
           binary_base64: parsed.data.binary_base64 ?? null,
@@ -408,14 +457,14 @@ export async function POST(request: Request) {
       { status: 200 },
     );
   } catch (err) {
-    const message =
-      err instanceof Error && err.name === 'AbortError'
-        ? 'Belge ingest istegi zaman asimina ugradi. Lutfen tekrar deneyin.'
-        : 'Belge upload servisine baglanilamadi.';
+    const timedOut = isTimeoutError(err);
+    const message = timedOut
+      ? 'Belge ingest istegi zaman asimina ugradi. Lutfen tekrar deneyin.'
+      : 'Belge upload servisine baglanilamadi.';
     console.error('[RAG upload proxy]', err, { backendCandidates: getRagBackendForLogs() });
     return ragProxyErrorResponse({
       status: 502,
-      errorCode: err instanceof Error && err.name === 'AbortError' ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
+      errorCode: timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
       message,
       retryable: true,
     });

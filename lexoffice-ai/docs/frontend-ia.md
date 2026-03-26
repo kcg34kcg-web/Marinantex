@@ -59,6 +59,7 @@
 - Mail list selection state
 - Compose draft state + autosave timers
 - AI action request/response state
+- AI SSE stream state + tenant AI metrics state
 - Wizard step states
 
 - **Data Fetching**
@@ -84,6 +85,7 @@
 - Sync error banner + retry action
 - Token expired reconnect prompt
 - AI action failure state + fallback message
+- AI stream failure state + non-stream fallback
 
 ## Mobile Davranışları
 

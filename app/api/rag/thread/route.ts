@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { ChatMode, ResponseType } from '@/types';
 import { resolveBureauContext } from '@/app/api/rag/_lib/bureau-context';
+import { resolveRequestedMatterId, validateMatterScope } from '@/app/api/rag/_lib/matter-policy';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { createClient } from '@/utils/supabase/server';
 
@@ -31,6 +32,17 @@ interface RequestContext {
   supabase: Awaited<ReturnType<typeof createClient>>;
   userId: string;
   bureauId: string;
+}
+
+function logRouteException(route: string, method: string, error: unknown): void {
+  console.error(
+    JSON.stringify({
+      event: 'rag_route_exception',
+      route,
+      method,
+      error: error instanceof Error ? error.message : 'unknown_error',
+    }),
+  );
 }
 
 async function resolveContext(): Promise<RequestContext | NextResponse> {
@@ -77,6 +89,7 @@ async function ensureThreadOwnership(
 async function handleBootstrap(
   payload: Extract<ThreadRequest, { action: 'bootstrap' }>,
   ctx: RequestContext,
+  requestHeaders: Headers,
 ) {
   let threadId = payload.thread_id ?? null;
   let threadCaseId = payload.case_id ?? null;
@@ -84,6 +97,14 @@ async function handleBootstrap(
   if (threadId) {
     const thread = await ensureThreadOwnership(ctx, threadId);
     if (thread instanceof NextResponse) return thread;
+
+    const matterScopeError = validateMatterScope({
+      headers: requestHeaders,
+      payloadMatterId: payload.case_id ?? null,
+      resourceMatterId: thread.case_id,
+      route: '/api/rag/thread',
+    });
+    if (matterScopeError) return matterScopeError;
 
     threadCaseId = thread.case_id;
     const shouldUpdateCase = payload.case_id && payload.case_id !== thread.case_id;
@@ -107,12 +128,19 @@ async function handleBootstrap(
       threadCaseId = (updates.case_id as string | undefined) ?? thread.case_id;
     }
   } else {
+    const matterScopeError = validateMatterScope({
+      headers: requestHeaders,
+      payloadMatterId: payload.case_id ?? null,
+      route: '/api/rag/thread',
+    });
+    if (matterScopeError) return matterScopeError;
+    const requestedMatterId = resolveRequestedMatterId(requestHeaders) ?? payload.case_id ?? null;
     const { data: createdThread, error: createThreadError } = await ctx.supabase
       .from('ai_threads')
       .insert({
         bureau_id: ctx.bureauId,
         user_id: ctx.userId,
-        case_id: payload.case_id ?? null,
+        case_id: requestedMatterId,
         chat_mode: payload.chat_mode,
         title: payload.user_message.trim().slice(0, 120),
         metadata: {
@@ -128,7 +156,7 @@ async function handleBootstrap(
     }
 
     threadId = createdThread.id;
-    threadCaseId = payload.case_id ?? null;
+    threadCaseId = requestedMatterId;
   }
 
   const { data: userMessage, error: userMessageError } = await ctx.supabase
@@ -163,9 +191,17 @@ async function handleBootstrap(
 async function handleAppendAssistant(
   payload: Extract<ThreadRequest, { action: 'append_assistant' }>,
   ctx: RequestContext,
+  requestHeaders: Headers,
 ) {
   const ownership = await ensureThreadOwnership(ctx, payload.thread_id);
   if (ownership instanceof NextResponse) return ownership;
+
+  const matterScopeError = validateMatterScope({
+    headers: requestHeaders,
+    resourceMatterId: ownership.case_id,
+    route: '/api/rag/thread',
+  });
+  if (matterScopeError) return matterScopeError;
 
   let admin;
   try {
@@ -209,56 +245,80 @@ async function handleAppendAssistant(
 }
 
 export async function POST(request: Request) {
-  const parsed = requestSchema.safeParse(await request.json());
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.issues.map((issue) => issue.message).join(' ') },
-      { status: 400 },
-    );
+  try {
+    let rawBody: unknown;
+    try {
+      rawBody = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Request body JSON formatinda olmali.' }, { status: 400 });
+    }
+
+    const parsed = requestSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues.map((issue) => issue.message).join(' ') },
+        { status: 400 },
+      );
+    }
+
+    const ctx = await resolveContext();
+    if (ctx instanceof NextResponse) return ctx;
+
+    if (parsed.data.action === 'bootstrap') {
+      return handleBootstrap(parsed.data, ctx, request.headers);
+    }
+
+    return handleAppendAssistant(parsed.data, ctx, request.headers);
+  } catch (error) {
+    logRouteException('/api/rag/thread', 'POST', error);
+    return NextResponse.json({ error: 'Thread istegi islenemedi.' }, { status: 503 });
   }
-
-  const ctx = await resolveContext();
-  if (ctx instanceof NextResponse) return ctx;
-
-  if (parsed.data.action === 'bootstrap') {
-    return handleBootstrap(parsed.data, ctx);
-  }
-
-  return handleAppendAssistant(parsed.data, ctx);
 }
 
 export async function GET(request: Request) {
-  const ctx = await resolveContext();
-  if (ctx instanceof NextResponse) return ctx;
+  try {
+    const ctx = await resolveContext();
+    if (ctx instanceof NextResponse) return ctx;
 
-  const { searchParams } = new URL(request.url);
-  const threadId = searchParams.get('thread_id')?.trim() ?? '';
-  if (!threadId) {
-    return NextResponse.json({ error: 'thread_id zorunludur.' }, { status: 400 });
+    const { searchParams } = new URL(request.url);
+    const threadId = searchParams.get('thread_id')?.trim() ?? '';
+    if (!threadId) {
+      return NextResponse.json({ error: 'thread_id zorunludur.' }, { status: 400 });
+    }
+
+    const ownership = await ensureThreadOwnership(ctx, threadId);
+    if (ownership instanceof NextResponse) return ownership;
+
+    const matterScopeError = validateMatterScope({
+      headers: request.headers,
+      resourceMatterId: ownership.case_id,
+      route: '/api/rag/thread',
+    });
+    if (matterScopeError) return matterScopeError;
+
+    const { data, error } = await ctx.supabase
+      .from('ai_messages')
+      .select('id, role, content, response_type, model_used, source_count, created_at')
+      .eq('thread_id', threadId)
+      .eq('bureau_id', ctx.bureauId)
+      .order('created_at', { ascending: true })
+      .limit(200);
+
+    if (error) {
+      return NextResponse.json({ error: 'Thread mesajlari okunamadi.' }, { status: 503 });
+    }
+
+    return NextResponse.json(
+      {
+        thread_id: threadId,
+        case_id: ownership.case_id,
+        chat_mode: ownership.chat_mode,
+        messages: data ?? [],
+      },
+      { status: 200 },
+    );
+  } catch (error) {
+    logRouteException('/api/rag/thread', 'GET', error);
+    return NextResponse.json({ error: 'Thread istegi islenemedi.' }, { status: 503 });
   }
-
-  const ownership = await ensureThreadOwnership(ctx, threadId);
-  if (ownership instanceof NextResponse) return ownership;
-
-  const { data, error } = await ctx.supabase
-    .from('ai_messages')
-    .select('id, role, content, response_type, model_used, source_count, created_at')
-    .eq('thread_id', threadId)
-    .eq('bureau_id', ctx.bureauId)
-    .order('created_at', { ascending: true })
-    .limit(200);
-
-  if (error) {
-    return NextResponse.json({ error: 'Thread mesajlari okunamadi.' }, { status: 503 });
-  }
-
-  return NextResponse.json(
-    {
-      thread_id: threadId,
-      case_id: ownership.case_id,
-      chat_mode: ownership.chat_mode,
-      messages: data ?? [],
-    },
-    { status: 200 },
-  );
 }

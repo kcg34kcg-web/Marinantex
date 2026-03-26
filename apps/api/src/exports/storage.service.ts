@@ -7,6 +7,16 @@ interface UploadedObjectResult {
   etag: string | null;
 }
 
+const INSECURE_S3_DEFAULTS = {
+  accessKeyId: "minioadmin",
+  secretAccessKey: "minioadmin123",
+} as const;
+
+function isTrueFlag(value: string | undefined): boolean {
+  const token = (value ?? "").trim().toLowerCase();
+  return token === "1" || token === "true" || token === "yes" || token === "on";
+}
+
 @Injectable()
 export class StorageService {
   private readonly client: S3Client;
@@ -15,14 +25,36 @@ export class StorageService {
   constructor() {
     const endpoint = process.env.S3_ENDPOINT?.trim();
     this.bucket = process.env.S3_BUCKET?.trim() || "documents";
+    const nodeEnv = (process.env.NODE_ENV ?? "development").trim().toLowerCase();
+    const isProduction = nodeEnv === "production";
+    const allowInsecureDevFallback = isTrueFlag(process.env.S3_ALLOW_INSECURE_DEV_FALLBACK);
+    const rawAccessKeyId = process.env.S3_ACCESS_KEY?.trim() ?? "";
+    const rawSecretAccessKey = process.env.S3_SECRET_KEY?.trim() ?? "";
+
+    let accessKeyId = rawAccessKeyId;
+    let secretAccessKey = rawSecretAccessKey;
+    if (!accessKeyId || !secretAccessKey) {
+      if (allowInsecureDevFallback && !isProduction) {
+        accessKeyId = INSECURE_S3_DEFAULTS.accessKeyId;
+        secretAccessKey = INSECURE_S3_DEFAULTS.secretAccessKey;
+      } else {
+        throw new Error("S3_ACCESS_KEY and S3_SECRET_KEY are required for storage exports.");
+      }
+    }
+    const usingInsecureDefaults =
+      accessKeyId === INSECURE_S3_DEFAULTS.accessKeyId &&
+      secretAccessKey === INSECURE_S3_DEFAULTS.secretAccessKey;
+    if (usingInsecureDefaults && isProduction) {
+      throw new Error("Insecure S3 default credentials are not allowed in production.");
+    }
 
     this.client = new S3Client({
       region: process.env.S3_REGION?.trim() || "us-east-1",
       endpoint: endpoint && endpoint.length > 0 ? endpoint : undefined,
       forcePathStyle: true,
       credentials: {
-        accessKeyId: process.env.S3_ACCESS_KEY?.trim() || "minioadmin",
-        secretAccessKey: process.env.S3_SECRET_KEY?.trim() || "minioadmin123",
+        accessKeyId,
+        secretAccessKey,
       },
     });
   }

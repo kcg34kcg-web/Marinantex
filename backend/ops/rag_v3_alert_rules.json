@@ -1,0 +1,96 @@
+{
+  "contract_version": "rag_v3.alert_rules.v1",
+  "updated_at": "2026-03-11T00:00:00Z",
+  "rules": [
+    {
+      "name": "rag_v3_retrieval_success_low",
+      "metric": "rag_v3_retrieval_success_rate",
+      "operator": "<",
+      "threshold": 0.92,
+      "window_minutes": 15,
+      "severity": "critical",
+      "summary": "Retrieval success rate dropped below production baseline."
+    },
+    {
+      "name": "rag_v3_empty_result_high",
+      "metric": "rag_v3_empty_result_rate",
+      "operator": ">",
+      "threshold": 0.25,
+      "window_minutes": 30,
+      "severity": "high",
+      "summary": "Empty result ratio exceeds acceptable level."
+    },
+    {
+      "name": "rag_v3_low_confidence_high",
+      "metric": "rag_v3_low_confidence_rate",
+      "operator": ">",
+      "threshold": 0.35,
+      "window_minutes": 30,
+      "severity": "high",
+      "summary": "Low-confidence answer ratio is too high."
+    },
+    {
+      "name": "rag_v3_no_answer_high",
+      "metric": "rag_v3_no_answer_rate",
+      "operator": ">",
+      "threshold": 0.40,
+      "window_minutes": 30,
+      "severity": "high",
+      "summary": "No-answer responses exceed safe envelope."
+    },
+    {
+      "name": "rag_v3_repealed_source_hits",
+      "metric": "rag_v3_repealed_source_hit_rate",
+      "operator": ">",
+      "threshold": 0.05,
+      "window_minutes": 15,
+      "severity": "critical",
+      "summary": "Responses are citing repealed sources too often."
+    },
+    {
+      "name": "rag_v3_latency_p95_high",
+      "metric": "rag_v3_latency_p95_ms",
+      "operator": ">",
+      "threshold": 2500,
+      "window_minutes": 15,
+      "severity": "high",
+      "summary": "P95 query latency is above SLO."
+    },
+    {
+      "name": "rag_v3_provider_cost_spike",
+      "metric": "rag_v3_provider_cost_per_1k_requests",
+      "operator": ">",
+      "threshold": 45,
+      "window_minutes": 60,
+      "severity": "high",
+      "summary": "Provider cost spike detected."
+    },
+    {
+      "name": "rag_v3_ingestion_failure_high",
+      "metric": "rag_v3_ingestion_failure_rate",
+      "operator": ">",
+      "threshold": 0.10,
+      "window_minutes": 30,
+      "severity": "critical",
+      "summary": "Ingestion failures exceed threshold."
+    },
+    {
+      "name": "rag_v3_security_incident",
+      "metric": "rag_v3_security_alert_count",
+      "operator": ">",
+      "threshold": 0,
+      "window_minutes": 5,
+      "severity": "critical",
+      "summary": "Security alert observed in protected RAG path."
+    },
+    {
+      "name": "rag_v3_audit_pipeline_unhealthy",
+      "metric": "rag_v3_audit_pipeline_health",
+      "operator": "<",
+      "threshold": 1,
+      "window_minutes": 10,
+      "severity": "critical",
+      "summary": "Audit pipeline health signal is degraded."
+    }
+  ]
+}

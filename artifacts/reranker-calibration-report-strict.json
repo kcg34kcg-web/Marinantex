@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "generated_at": "2026-03-25T10:48:03.071389+00:00",
+  "case_count": 12,
+  "aggregate": {
+    "top1_accuracy": 1.0,
+    "mean_margin": 0.1642,
+    "mean_spread": 0.3408
+  },
+  "thresholds": {
+    "top1_accuracy": 0.95,
+    "mean_margin": 0.11,
+    "mean_spread": 0.08
+  },
+  "failures": [],
+  "dataset_path": "/Users/kerimcanguzel/Desktop/Marinantex/evals/rag_v3_reranker_calibration_v1.jsonl",
+  "strict_mode": true,
+  "exit_code": 0
+}

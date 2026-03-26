@@ -1,0 +1,41 @@
+{
+  "checks": [
+    {
+      "name": "docker_compose_config_valid",
+      "passed": true,
+      "returncode": 0,
+      "details": "name: marinantex\nservices:\n  backend-rag:\n    build:\n      context: /Users/kerimcanguzel/Desktop/Marinantex/backend\n      dockerfile: Dockerfile\n    container_name: marinantex-backend-rag\n    depends_on:\n      redis:\n        condition: service_healthy\n        required: true\n      tei-embed:\n        condition: service_healthy\n        required: true\n      vllm:\n        condition: service_healthy\n        required: true\n    environment:\n      AI_TIER_DUSUNCELI_FALLBACK_MODEL: qwen2.5-7b-instruct\n   "
+    },
+    {
+      "name": "gpu_cuda_available",
+      "passed": false,
+      "returncode": 127,
+      "details": "[Errno 2] No such file or directory: 'nvidia-smi'"
+    },
+    {
+      "name": "live_endpoint_health_strict",
+      "passed": false,
+      "returncode": 7,
+      "details": "curl: (7) Failed to connect to 127.0.0.1 port 8008 after 0 ms: Couldn't connect to server"
+    },
+    {
+      "name": "retrieval_quality_gate_strict",
+      "passed": true,
+      "returncode": 0,
+      "details": ""
+    },
+    {
+      "name": "reranker_calibration_gate_strict",
+      "passed": true,
+      "returncode": 0,
+      "details": ""
+    },
+    {
+      "name": "acceptance_strict",
+      "passed": false,
+      "returncode": 1,
+      "details": "{\n  \"evaluation\": {\n    \"name\": \"evaluation\",\n    \"returncode\": 0,\n    \"passed\": true,\n    \"output_file\": \"/Users/kerimcanguzel/Desktop/Marinantex/artifacts/prod-readiness/legal-rag-eval-report.json\",\n    \"stderr\": \"\"\n  },\n  \"smoke\": {\n    \"name\": \"smoke\",\n    \"returncode\": 1,\n    \"passed\": false,\n    \"output_file\": \"/Users/kerimcanguzel/Desktop/Marinantex/artifacts/prod-readiness/legal-rag-smoke-report.json\",\n    \"stderr\": \"\"\n  },\n  \"benchmark\": {\n    \"name\": \"benchmark\",\n    \"returncode\": 0,\n "
+    }
+  ],
+  "pass_all": false
+}

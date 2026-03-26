@@ -152,7 +152,7 @@ export default function LoungePage() {
       
       {/* 1. OYUN ALANI (Mevcut Tasarım) */}
       <div className="relative z-0">
-         <LoungeContainer />
+         <LoungeContainer isReady={status === 'completed'} onComplete={goToResult} />
       </div>
 
       {/* 2. DURUM WIDGET'I (Mevcut Tasarımın Aynısı) */}

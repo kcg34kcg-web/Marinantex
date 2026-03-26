@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { CalendarWorkspace } from '@/components/dashboard/calendar-workspace';
 import { formatDateTR } from '@/lib/date';
 import { fetchDashboardCases } from '@/lib/queries';
 
@@ -590,6 +591,16 @@ export default function DashboardTasksPage() {
           )}
         </CardContent>
       </Card>
+
+      <div className="space-y-2">
+        <h2 className="text-lg font-semibold text-slate-900">Takvim Operasyonlari</h2>
+        <p className="text-sm text-slate-500">
+          Gorevler sayfasindan ozel gun, durusma ve gorev senkron kayitlarini yonetebilirsiniz. Burada eklenen kayitlar Takvim ekraninda
+          gercek takvim gorunumune yansir.
+        </p>
+      </div>
+
+      <CalendarWorkspace mode="full" />
 
       {modalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

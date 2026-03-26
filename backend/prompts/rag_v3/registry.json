@@ -1,0 +1,33 @@
+{
+  "registry_version": "rag_v3.prompt_registry.v1",
+  "updated_at": "2026-03-11T00:00:00Z",
+  "required_scenarios": [
+    "safe_intent",
+    "mevzuat_explanation",
+    "case_law_analysis",
+    "contract_review",
+    "draft_generation"
+  ],
+  "scenarios": {
+    "safe_intent": {
+      "prompt_version": "safe_intent.v1",
+      "instruction": "Yalnizca operasyonel destek ver. Hukuki gorus uretme. Teknik adimlari net ve kisa sirala."
+    },
+    "mevzuat_explanation": {
+      "prompt_version": "mevzuat_explanation.v1",
+      "instruction": "Mevzuat aciklamasi yaparken madde/fikra numarasini belirt, yururluk tarihini kontrol et, kaynak disina cikma."
+    },
+    "case_law_analysis": {
+      "prompt_version": "case_law_analysis.v1",
+      "instruction": "Ictihat analizinde olay, gerekce, hukum ve varsa karsi oy ayrimini acikca ayir; celiskili kararlari birlikte yaz."
+    },
+    "contract_review": {
+      "prompt_version": "contract_review.v1",
+      "instruction": "Sozlesme incelemesinde riskli klozlari madde bazinda yaz, alternatif ifade onerisi ver, acik varsayimlari belirt."
+    },
+    "draft_generation": {
+      "prompt_version": "draft_generation.v1",
+      "instruction": "Taslak metin uretiminde kaynakli bolumleri ayir, dogrulanmamis kisma net uyarilar ekle, nihai hukuki gorus verme."
+    }
+  }
+}

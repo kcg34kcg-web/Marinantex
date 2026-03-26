@@ -243,21 +243,6 @@ export function LiveDashboard() {
 
   return (
     <div className="space-y-7">
-      <section
-        className={cn(
-          'rounded-[24px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] px-6 py-8 shadow-[0_10px_30px_-28px_rgba(15,23,42,0.55)] transition-all duration-500',
-          revealClass,
-        )}
-      >
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Hukuk Çalışma Paneli</p>
-        <h1 className="mt-2 max-w-3xl font-serif text-[clamp(1.75rem,2.4vw,2.3rem)] leading-tight tracking-[-0.015em] text-[#10233a]">
-          Bugünün hukuki öncelikleri tek bakışta netleşsin.
-        </h1>
-        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-600">
-          Süreler, belge incelemeleri ve dikkat gerektiren aksiyonlar sade bir iş akışında düzenlendi.
-        </p>
-      </section>
-
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {QUICK_ACTIONS.map((action, index) => (
           <Link

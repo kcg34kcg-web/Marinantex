@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 interface OfficeTeamPanelProps {
   activeRole: 'lawyer' | 'assistant';
+  initialThreadId?: string;
 }
 
 type TeamMember = {
@@ -31,10 +32,108 @@ type TeamMessage = {
   id: string;
   sender_id: string;
   body: string;
+  metadata?: Record<string, unknown> | null;
   created_at: string;
 };
 
-export function OfficeTeamPanel({ activeRole }: OfficeTeamPanelProps) {
+type ParsedNewsBridgeMessage = {
+  title: string;
+  source: string;
+  categoryPriority: string;
+  publishedAt: string;
+  workspaces: string;
+  tags: string;
+  summaryPoints: string[];
+  actionPoints: string[];
+  impactPoints: string[];
+  sourceUrl: string;
+  newsId: string;
+};
+
+function normalizeWhitespace(text: string) {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function parseLineValue(line: string, prefix: string) {
+  if (!line.startsWith(prefix)) {
+    return '';
+  }
+  return normalizeWhitespace(line.slice(prefix.length));
+}
+
+function parseNewsBridgeMessage(message: TeamMessage): ParsedNewsBridgeMessage | null {
+  const isFromMetadata = message.metadata?.origin === 'dashboard_news_share';
+  const lines = message.body
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  if (lines.length === 0) {
+    return null;
+  }
+
+  const hasBridgeMarker = lines[0] === '[Haber Koprusu]' || lines[0] === '[Haber Paylasimi]';
+  if (!hasBridgeMarker && !isFromMetadata) {
+    return null;
+  }
+
+  const parsed: ParsedNewsBridgeMessage = {
+    title: '',
+    source: '',
+    categoryPriority: '',
+    publishedAt: '',
+    workspaces: '',
+    tags: '',
+    summaryPoints: [],
+    actionPoints: [],
+    impactPoints: [],
+    sourceUrl: '',
+    newsId: '',
+  };
+
+  let section: 'summary' | 'actions' | 'impact' | null = null;
+
+  for (const line of lines) {
+    if (line === 'Ozet:') {
+      section = 'summary';
+      continue;
+    }
+    if (line === 'Onerilen Aksiyonlar:') {
+      section = 'actions';
+      continue;
+    }
+    if (line === 'Etkilenebilecek Dosyalar:') {
+      section = 'impact';
+      continue;
+    }
+    if (line.startsWith('- ')) {
+      const item = normalizeWhitespace(line.slice(2));
+      if (!item) continue;
+      if (section === 'summary') parsed.summaryPoints.push(item);
+      else if (section === 'actions') parsed.actionPoints.push(item);
+      else if (section === 'impact') parsed.impactPoints.push(item);
+      continue;
+    }
+
+    section = null;
+    parsed.title = parseLineValue(line, 'Baslik: ') || parsed.title;
+    parsed.categoryPriority = parseLineValue(line, 'Kategori / Oncelik: ') || parsed.categoryPriority;
+    parsed.source = parseLineValue(line, 'Kaynak: ') || parsed.source;
+    parsed.publishedAt = parseLineValue(line, 'Yayin: ') || parsed.publishedAt;
+    parsed.workspaces = parseLineValue(line, 'Calisma Alanlari: ') || parsed.workspaces;
+    parsed.tags = parseLineValue(line, 'Etiketler: ') || parsed.tags;
+    parsed.sourceUrl = parseLineValue(line, 'Kaynak baglantisi: ') || parsed.sourceUrl;
+    parsed.newsId = parseLineValue(line, 'News kaydi: ') || parsed.newsId;
+  }
+
+  if (!parsed.title && !parsed.sourceUrl && parsed.summaryPoints.length === 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
+export function OfficeTeamPanel({ activeRole, initialThreadId }: OfficeTeamPanelProps) {
   const canBroadcast = activeRole === 'lawyer';
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [threads, setThreads] = useState<TeamThread[]>([]);
@@ -49,6 +148,7 @@ export function OfficeTeamPanel({ activeRole }: OfficeTeamPanelProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const initialThreadAppliedRef = useRef(false);
 
   const selectedThread = useMemo(
     () => threads.find((item) => item.id === selectedThreadId) ?? null,
@@ -123,6 +223,16 @@ export function OfficeTeamPanel({ activeRole }: OfficeTeamPanelProps) {
     if (nextThreads.length === 0) {
       setSelectedThreadId(null);
       setMessages([]);
+      return;
+    }
+
+    if (
+      !initialThreadAppliedRef.current &&
+      initialThreadId &&
+      nextThreads.some((item) => item.id === initialThreadId)
+    ) {
+      setSelectedThreadId(initialThreadId);
+      initialThreadAppliedRef.current = true;
       return;
     }
 
@@ -487,6 +597,7 @@ export function OfficeTeamPanel({ activeRole }: OfficeTeamPanelProps) {
                     {messages.map((message) => {
                       const senderName = memberNameById.get(message.sender_id) ?? 'Kullanıcı';
                       const isOwnMessage = currentMember?.id === message.sender_id;
+                      const newsBridge = parseNewsBridgeMessage(message);
 
                       return (
                         <div key={message.id} className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
@@ -505,7 +616,95 @@ export function OfficeTeamPanel({ activeRole }: OfficeTeamPanelProps) {
                                 <p className="text-xs font-medium text-slate-800">{senderName}</p>
                               </div>
 
-                              <p className="whitespace-pre-wrap break-words text-sm text-slate-700">{message.body}</p>
+                              {newsBridge ? (
+                                <div className="space-y-2">
+                                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-2.5">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-emerald-700">Haber Koprusu</p>
+                                      {newsBridge.categoryPriority ? (
+                                        <span className="rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-[10px] text-emerald-700">
+                                          {newsBridge.categoryPriority}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <p className="mt-1 text-sm font-semibold leading-5 text-slate-900">{newsBridge.title || 'Haber Paylasimi'}</p>
+                                    <p className="mt-1 text-xs text-slate-600">
+                                      {newsBridge.source || 'Kaynak belirtilmedi'}
+                                      {newsBridge.publishedAt ? ` | ${newsBridge.publishedAt}` : ''}
+                                    </p>
+                                  </div>
+
+                                  {newsBridge.summaryPoints.length > 0 ? (
+                                    <div>
+                                      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Ozet</p>
+                                      <ul className="mt-1 space-y-1 text-sm text-slate-700">
+                                        {newsBridge.summaryPoints.slice(0, 3).map((point, index) => (
+                                          <li key={`${message.id}-summary-${index}`} className="rounded-lg bg-slate-50 px-2 py-1">
+                                            {point}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  ) : null}
+
+                                  {newsBridge.actionPoints.length > 0 ? (
+                                    <div>
+                                      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Onerilen Aksiyonlar</p>
+                                      <ul className="mt-1 space-y-1 text-xs text-slate-700">
+                                        {newsBridge.actionPoints.slice(0, 3).map((point, index) => (
+                                          <li key={`${message.id}-action-${index}`} className="rounded-md border border-slate-200 bg-white px-2 py-1">
+                                            {point}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  ) : null}
+
+                                  {newsBridge.impactPoints.length > 0 ? (
+                                    <div>
+                                      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Etkilenebilecek Dosyalar</p>
+                                      <ul className="mt-1 space-y-1 text-xs text-slate-700">
+                                        {newsBridge.impactPoints.slice(0, 3).map((point, index) => (
+                                          <li key={`${message.id}-impact-${index}`} className="rounded-md border border-slate-200 bg-white px-2 py-1">
+                                            {point}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  ) : null}
+
+                                  <div className="flex flex-wrap gap-2 text-xs">
+                                    {newsBridge.workspaces ? (
+                                      <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-slate-600">
+                                        Alanlar: {newsBridge.workspaces}
+                                      </span>
+                                    ) : null}
+                                    {newsBridge.tags ? (
+                                      <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-slate-600">
+                                        Etiketler: {newsBridge.tags}
+                                      </span>
+                                    ) : null}
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    {newsBridge.sourceUrl ? (
+                                      <a
+                                        href={newsBridge.sourceUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                                      >
+                                        Kaynaga Git
+                                      </a>
+                                    ) : null}
+                                    {newsBridge.newsId ? (
+                                      <span className="text-[11px] text-slate-500">ID: {newsBridge.newsId}</span>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="whitespace-pre-wrap break-words text-sm text-slate-700">{message.body}</p>
+                              )}
 
                               <div className="mt-1 text-right">
                                 <span className="text-[11px] text-slate-400">

@@ -1,0 +1,24 @@
+{
+  "evaluation": {
+    "name": "evaluation",
+    "returncode": 0,
+    "passed": true,
+    "output_file": "artifacts/legal-rag-eval-report.json",
+    "stderr": ""
+  },
+  "smoke": {
+    "name": "smoke",
+    "returncode": 0,
+    "passed": true,
+    "output_file": "artifacts/legal-rag-smoke-report.json",
+    "stderr": ""
+  },
+  "benchmark": {
+    "name": "benchmark",
+    "returncode": 0,
+    "passed": true,
+    "output_file": "artifacts/legal-rag-benchmark-report.json",
+    "stderr": ""
+  },
+  "pass_all": true
+}

@@ -145,7 +145,16 @@ class _FakeRpcClient:
         raise AssertionError(f"Unsupported fake rpc mode: {self.mode}")
 
 
-def _chunk(chunk_hash: str, text: str) -> RagV3ChunkUpsert:
+def _chunk(
+    chunk_hash: str,
+    text: str,
+    *,
+    chunk_order: int = 1,
+    chunk_type: str = "normative_provision",
+    token_count: int = 4,
+    embedding_version: str = "text-embedding-3-large|dim=1536",
+    index_version: str = "rag_v3_baseline_dense:top_k=8-12|embed=text-embedding-3-large|dim=1536",
+) -> RagV3ChunkUpsert:
     return RagV3ChunkUpsert(
         article_no="1",
         clause_no="1",
@@ -157,6 +166,11 @@ def _chunk(chunk_hash: str, text: str) -> RagV3ChunkUpsert:
         page_range="1",
         effective_from=date(2024, 1, 1),
         effective_to=None,
+        chunk_order=chunk_order,
+        chunk_type=chunk_type,
+        token_count=token_count,
+        embedding_version=embedding_version,
+        index_version=index_version,
         source_id="kanun-4857",
     )
 
@@ -209,6 +223,11 @@ async def test_upsert_keeps_existing_chunk_id_and_deletes_only_stale_hashes() ->
         document_id=doc_id,
         chunk_hash="new-hash",
     )
+    assert by_hash["keep-hash"]["chunk_order"] == 1
+    assert by_hash["keep-hash"]["chunk_type"] == "normative_provision"
+    assert by_hash["keep-hash"]["token_count"] == 4
+    assert by_hash["keep-hash"]["embedding_version"] == "text-embedding-3-large|dim=1536"
+    assert by_hash["keep-hash"]["index_version"].startswith("rag_v3_baseline_dense:")
     assert fake.deleted_hash_batches == [["old-hash"]]
 
 
@@ -259,6 +278,106 @@ async def test_reingest_same_chunks_keeps_chunk_ids_stable() -> None:
         }
 
     assert first_ids == second_ids
+
+
+@pytest.mark.asyncio
+async def test_upsert_document_falls_back_when_rag_documents_columns_missing() -> None:
+    repo = SupabaseRagV3Repository()
+
+    class _LegacyColumnsClient(_FakeSupabase):
+        def __init__(self) -> None:
+            super().__init__()
+            self.doc_payloads: list[dict[str, Any]] = []
+
+        def table(self, name: str) -> "_LegacyColumnsTable":
+            return _LegacyColumnsTable(self, name)
+
+    class _LegacyColumnsTable(_FakeTable):
+        _missing_doc_columns = ("article_no", "law_no", "topic_tags")
+
+        def execute(self) -> SimpleNamespace:
+            if self._name == "rag_documents" and self._op == "upsert":
+                payload = dict(self._payload)
+                self._client.doc_payloads.append(payload)
+                for column in self._missing_doc_columns:
+                    if column in payload:
+                        raise RuntimeError(
+                            f"Could not find the '{column}' column of 'rag_documents' in the schema cache"
+                        )
+            return super().execute()
+
+    fake = _LegacyColumnsClient()
+    with patch("infrastructure.rag_v3.repository.get_supabase_client", return_value=fake):
+        await repo.upsert_document_and_replace_chunks(
+            title="Is Kanunu",
+            source_type="legislation",
+            source_id="kanun-4857",
+            jurisdiction="TR",
+            classification="PUBLIC",
+            effective_from=date(2024, 1, 1),
+            effective_to=None,
+            doc_hash="doc-hash-legacy-doc-columns",
+            acl_tags=["public"],
+            bureau_id=None,
+            metadata={"law_no": "4857", "topic_tags": ["is_hukuku"]},
+            chunks=[_chunk("legacy-doc-col-h1", "Paragraf 1")],
+        )
+
+    assert len(fake.doc_payloads) >= 2
+    assert "article_no" in fake.doc_payloads[0]
+    assert "article_no" not in fake.doc_payloads[-1]
+    assert "law_no" not in fake.doc_payloads[-1]
+    assert "topic_tags" not in fake.doc_payloads[-1]
+
+
+@pytest.mark.asyncio
+async def test_upsert_chunks_falls_back_when_rag_chunks_columns_missing() -> None:
+    repo = SupabaseRagV3Repository()
+
+    class _LegacyChunkColumnsClient(_FakeSupabase):
+        def __init__(self) -> None:
+            super().__init__()
+            self.chunk_attempts: list[list[dict[str, Any]]] = []
+
+        def table(self, name: str) -> "_LegacyChunkColumnsTable":
+            return _LegacyChunkColumnsTable(self, name)
+
+    class _LegacyChunkColumnsTable(_FakeTable):
+        _missing_chunk_columns = ("source_char_start", "chunk_order")
+
+        def execute(self) -> SimpleNamespace:
+            if self._name == "rag_chunks" and self._op == "upsert":
+                payload = [dict(item) for item in list(self._payload)]
+                self._client.chunk_attempts.append(payload)
+                first = payload[0] if payload else {}
+                for column in self._missing_chunk_columns:
+                    if column in first:
+                        raise RuntimeError(
+                            f'column "{column}" of relation "rag_chunks" does not exist'
+                        )
+            return super().execute()
+
+    fake = _LegacyChunkColumnsClient()
+    with patch("infrastructure.rag_v3.repository.get_supabase_client", return_value=fake):
+        await repo.upsert_document_and_replace_chunks(
+            title="Is Kanunu",
+            source_type="legislation",
+            source_id="kanun-4857",
+            jurisdiction="TR",
+            classification="PUBLIC",
+            effective_from=date(2024, 1, 1),
+            effective_to=None,
+            doc_hash="doc-hash-legacy-chunk-columns",
+            acl_tags=["public"],
+            bureau_id=None,
+            metadata={},
+            chunks=[_chunk("legacy-chunk-col-h1", "Paragraf 1")],
+        )
+
+    assert len(fake.chunk_attempts) >= 2
+    assert "source_char_start" in fake.chunk_attempts[0][0]
+    assert "source_char_start" not in fake.chunk_attempts[-1][0]
+    assert "chunk_order" not in fake.chunk_attempts[-1][0]
 
 
 @pytest.mark.asyncio
@@ -416,8 +535,97 @@ async def test_append_query_trace_retries_on_ssl_bad_record_mac() -> None:
             contract_version="v1",
             schema_version="v1",
             latency_ms=100,
-            metadata={},
+            metadata={
+                "legal_disclaimer_ack": True,
+                "human_responsibility_ack": True,
+                "tier_policy_route_reason": "default_legal_rag",
+                "query_expansion": {"expanded_query": "kidem tazminati synonyms:isten ayrilma tazminati"},
+                "prompt_scenario": "mevzuat_explanation",
+                "prompt_registry_version": "rag_v3.prompt_registry.v1",
+                "source_documents": [{"source_id": "kanun-4857"}],
+                "review_required": True,
+                "review_reason_codes": ["low_confidence"],
+                "low_confidence": True,
+                "low_confidence_reason": "confidence_below_threshold",
+            },
         )
 
     assert fake_client.execute_calls == 3
     assert sleep_mock.await_count == 2
+    assert fake_client.payloads, "Expected append_query_trace to persist payload."
+    persisted = fake_client.payloads[-1]
+    assert persisted["legal_disclaimer_ack"] is True
+    assert persisted["human_responsibility_ack"] is True
+    assert persisted["tier_policy_route_reason"] == "default_legal_rag"
+    assert persisted["query_expansion"]["expanded_query"].startswith("kidem tazminati")
+    assert persisted["prompt_scenario"] == "mevzuat_explanation"
+    assert persisted["prompt_registry_version"] == "rag_v3.prompt_registry.v1"
+    assert persisted["source_documents"] == [{"source_id": "kanun-4857"}]
+    assert persisted["review_required"] is True
+    assert persisted["review_reason_codes"] == ["low_confidence"]
+    assert persisted["low_confidence"] is True
+    assert persisted["low_confidence_reason"] == "confidence_below_threshold"
+
+
+@pytest.mark.asyncio
+async def test_append_query_trace_falls_back_when_extended_columns_missing() -> None:
+    repo = SupabaseRagV3Repository()
+
+    class _TraceTable:
+        def __init__(self, parent: "_TraceClient") -> None:
+            self._parent = parent
+            self._payload: dict[str, Any] = {}
+
+        def upsert(self, payload: dict[str, Any], on_conflict: str | None = None) -> "_TraceTable":
+            self._payload = dict(payload)
+            self._parent.payloads.append(dict(payload))
+            return self
+
+        def execute(self) -> SimpleNamespace:
+            self._parent.execute_calls += 1
+            if self._parent.execute_calls == 1:
+                raise RuntimeError('column "legal_disclaimer_ack" of relation "rag_v3_query_traces" does not exist')
+            return SimpleNamespace(data=[{"request_id": "req-legacy"}])
+
+    class _TraceClient:
+        def __init__(self) -> None:
+            self.execute_calls = 0
+            self.payloads: list[dict[str, Any]] = []
+
+        def table(self, name: str) -> _TraceTable:
+            assert name == "rag_v3_query_traces"
+            return _TraceTable(self)
+
+    fake_client = _TraceClient()
+    with patch("infrastructure.rag_v3.repository.get_supabase_client", return_value=fake_client):
+        await repo.append_query_trace(
+            request_id="req-legacy",
+            bureau_id=None,
+            query="Kidem tazminati nedir?",
+            response_status="ok",
+            gate_decision="answered",
+            requested_tier=2,
+            effective_tier=2,
+            top_k=8,
+            jurisdiction="TR",
+            as_of_date=None,
+            admission_reason="accepted",
+            retrieved_count=1,
+            retrieved_chunk_ids=["chunk-1"],
+            retrieval_trace=[],
+            citations=[],
+            fingerprint={},
+            warnings=[],
+            contract_version="v1",
+            schema_version="v1",
+            latency_ms=100,
+            metadata={
+                "legal_disclaimer_ack": True,
+                "review_required": True,
+            },
+        )
+
+    assert fake_client.execute_calls == 2
+    assert len(fake_client.payloads) == 2
+    assert "legal_disclaimer_ack" in fake_client.payloads[0]
+    assert "legal_disclaimer_ack" not in fake_client.payloads[1]

@@ -28,6 +28,8 @@ from api.routes import rag_v3 as rag_v3_route  # RAG v3 documents/chunks
 # from api.routes import chat, search, admin  (future steps)
 from api.middleware.privacy_gateway import PrivacyMiddleware
 from api.middleware.tenant_middleware import TenantMiddleware
+from api.middleware.auth_middleware import AuthMiddleware
+from infrastructure.security.runtime_contract import enforce_runtime_security_contract
 
 # ============================================================================
 # Logging Configuration
@@ -55,6 +57,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     - Supabase client (source of truth)
     """
     logger.info("🚀 Babylexit v3.0 - 'Sovereign' Legal Engine Starting...")
+    try:
+        security_report = enforce_runtime_security_contract()
+        app.state.security_runtime_report = {
+            "checks": list(security_report.checks),
+            "warnings": list(security_report.warnings),
+            "errors": list(security_report.errors),
+            "passed": bool(security_report.passed),
+        }
+        if security_report.warnings:
+            logger.warning("⚠️ Security runtime warnings: %s", ", ".join(security_report.warnings))
+        if security_report.errors:
+            logger.error("❌ Security runtime errors: %s", ", ".join(security_report.errors))
+        else:
+            logger.info("✅ Runtime security contract checks passed")
+    except Exception as exc:  # noqa: BLE001
+        logger.critical("❌ Runtime security contract failed hard: %s", exc)
+        raise
     
     # ========================================================================
     # STARTUP: Initialize infrastructure
@@ -167,6 +186,7 @@ app.add_middleware(
 
 # TenantMiddleware: resolves bureau_id from X-Bureau-ID header (Step 6)
 app.add_middleware(TenantMiddleware)
+app.add_middleware(AuthMiddleware)
 
 app.add_middleware(PrivacyMiddleware)
 

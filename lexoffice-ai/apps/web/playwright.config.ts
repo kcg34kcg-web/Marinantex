@@ -1,5 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
+process.env.DATABASE_URL ??= "postgresql://postgres:postgres@localhost:5432/lexoffice_ai";
+process.env.REDIS_URL ??= "redis://localhost:6379";
+process.env.AUTH_COOKIE_SECURE ??= "false";
+
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 45_000,
@@ -26,9 +30,9 @@ export default defineConfig({
     cwd: __dirname,
     env: {
       ...process.env,
-      DATABASE_URL: process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/lexoffice_ai",
-      REDIS_URL: process.env.REDIS_URL ?? "redis://localhost:6379",
-      AUTH_COOKIE_SECURE: process.env.AUTH_COOKIE_SECURE ?? "false"
+      DATABASE_URL: process.env.DATABASE_URL,
+      REDIS_URL: process.env.REDIS_URL,
+      AUTH_COOKIE_SECURE: process.env.AUTH_COOKIE_SECURE
     }
   }
 });

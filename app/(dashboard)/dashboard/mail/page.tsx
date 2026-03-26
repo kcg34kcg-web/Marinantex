@@ -1,50 +1,44 @@
-import Link from 'next/link';
-import { Mail, Inbox, SendHorizontal, Settings2 } from 'lucide-react';
+import { redirect } from 'next/navigation';
+import { Mail } from 'lucide-react';
+import { createClient } from '@/utils/supabase/server';
+import { MailWorkspaceFrame } from '@/components/dashboard/mail-workspace-frame';
 
-export default function DashboardMailProjectPage() {
+export default async function DashboardMailPage() {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect('/login?next=%2Fdashboard%2Fmail');
+  }
+
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+  const activeRole = profile?.role === 'assistant' ? 'assistant' : profile?.role === 'lawyer' ? 'lawyer' : null;
+
+  if (!activeRole) {
+    redirect('/dashboard');
+  }
+
+  const tenantSlug =
+    process.env.MAIL_WORKSPACE_TENANT_SLUG?.trim() ||
+    process.env.NEXT_PUBLIC_MAIL_WORKSPACE_TENANT_SLUG?.trim() ||
+    'demo-hukuk';
+  const workspaceUrl = `/mail-workspace/${encodeURIComponent(tenantSlug)}/mail`;
+
   return (
-    <section className="space-y-5">
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-start gap-3">
-          <div className="rounded-xl bg-sky-50 p-2 text-sky-700">
-            <Mail className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-slate-900">Mail Projesi</h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Bu sayfa ofis mail akışları için proje merkezidir.
-            </p>
-          </div>
+    <section className="space-y-3">
+      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div className="flex items-center gap-2">
+          <Mail className="h-4 w-4 text-sky-700" />
+          <h2 className="text-sm font-semibold text-slate-900">Mail Workspace</h2>
         </div>
+        <p className="mt-1 text-xs text-slate-600">Mail proje ekrani dogrudan bu dashboard sayfasina baglidir.</p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Link
-          href="/dashboard/mail"
-          className="rounded-2xl border border-slate-200 bg-white p-4 text-slate-800 shadow-sm transition hover:border-slate-300 hover:shadow"
-        >
-          <Inbox className="mb-2 h-5 w-5 text-sky-700" />
-          <p className="text-sm font-medium">Gelen Kutusu</p>
-          <p className="mt-1 text-xs text-slate-500">Mail ekranı başlangıç noktası.</p>
-        </Link>
-
-        <Link
-          href="/dashboard/settings"
-          className="rounded-2xl border border-slate-200 bg-white p-4 text-slate-800 shadow-sm transition hover:border-slate-300 hover:shadow"
-        >
-          <Settings2 className="mb-2 h-5 w-5 text-sky-700" />
-          <p className="text-sm font-medium">Mail Ayarları</p>
-          <p className="mt-1 text-xs text-slate-500">Domain ve bağlantı ayarlarına geçiş.</p>
-        </Link>
-
-        <Link
-          href="/dashboard/news"
-          className="rounded-2xl border border-slate-200 bg-white p-4 text-slate-800 shadow-sm transition hover:border-slate-300 hover:shadow"
-        >
-          <SendHorizontal className="mb-2 h-5 w-5 text-sky-700" />
-          <p className="text-sm font-medium">Mail Akış Notları</p>
-          <p className="mt-1 text-xs text-slate-500">Proje ilerleme notlarını görüntüle.</p>
-        </Link>
+      <div className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+        <MailWorkspaceFrame workspaceUrl={workspaceUrl} />
       </div>
     </section>
   );

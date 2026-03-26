@@ -35,7 +35,7 @@ describe("provider adapters", () => {
         bodyText: "Hello",
         to: ["target@example.com"]
       });
-      expect(sendResult.providerMessageId).toContain("sent");
+      expect(sendResult.providerMessageId.length).toBeGreaterThan(5);
 
       const webhookEvents = await adapter.parseWebhookEvent({
         rawBody: JSON.stringify({

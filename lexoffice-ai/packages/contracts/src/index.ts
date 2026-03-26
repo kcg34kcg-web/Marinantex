@@ -3,6 +3,8 @@ export * from "./schemas/tenant";
 export * from "./schemas/domain";
 export * from "./schemas/mailbox";
 export * from "./schemas/mail";
+export * from "./schemas/attachment";
 export * from "./schemas/ai";
 export * from "./schemas/jobs";
+export * from "./schemas/crm";
 export * from "./types/api";

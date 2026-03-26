@@ -4,6 +4,7 @@ import { resolveBureauContext } from '@/app/api/rag/_lib/bureau-context';
 import { ragProxyErrorResponse } from '@/app/api/rag/_lib/error-contract';
 import { fetchRagBackend, getRagBackendForLogs } from '@/app/api/rag/_lib/rag-backend';
 import { enforceRagRouteRateLimit } from '@/app/api/rag/_lib/rate-limit';
+import { isTimeoutError } from '@/app/api/rag/_lib/timeout';
 import { createClient } from '@/utils/supabase/server';
 
 const deleteSchema = z
@@ -88,7 +89,7 @@ export async function POST(request: Request) {
         message: 'Buro baglami bulunamadi. Lutfen tekrar giris yapin.',
       });
     }
-    const rateLimit = enforceRagRouteRateLimit({
+    const rateLimit = await enforceRagRouteRateLimit({
       request,
       routeKey: 'v3_delete',
       userId,
@@ -134,14 +135,14 @@ export async function POST(request: Request) {
 
     return NextResponse.json(body, { status: 200 });
   } catch (err) {
-    const message =
-      err instanceof Error && err.name === 'AbortError'
-        ? 'RAG v3 delete istegi zaman asimina ugradi.'
-        : 'RAG v3 delete servisine baglanilamadi.';
+    const timedOut = isTimeoutError(err);
+    const message = timedOut
+      ? 'RAG v3 delete istegi zaman asimina ugradi.'
+      : 'RAG v3 delete servisine baglanilamadi.';
     console.error('[RAG v3 delete proxy]', err, { backendCandidates: getRagBackendForLogs() });
     return ragProxyErrorResponse({
       status: 502,
-      errorCode: err instanceof Error && err.name === 'AbortError' ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
+      errorCode: timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
       message,
       retryable: true,
     });

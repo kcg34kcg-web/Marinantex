@@ -165,6 +165,249 @@ jobs:
           path: backend/retrieval-quality-report.json
           retention-days: 30
 
+  migration-manifest-gate:
+    name: "Migration Manifest Gate"
+    runs-on: ubuntu-latest
+    needs: pytest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate rag-v3 migration manifest
+        run: |
+          python scripts/check_rag_v3_migration_manifest.py
+
+  prompt-registry-gate:
+    name: "Prompt Registry Gate"
+    runs-on: ubuntu-latest
+    needs: pytest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate prompt registry contract
+        run: |
+          python scripts/validate_prompt_registry.py --path prompts/rag_v3/registry.json --output prompt-registry-report.json
+
+      - name: Upload prompt registry report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompt-registry-report
+          path: backend/prompt-registry-report.json
+          retention-days: 30
+
+  tier-strategy-contract-gate:
+    name: "Tier Strategy Contract Gate"
+    runs-on: ubuntu-latest
+    needs: pytest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate tier strategy contract
+        run: |
+          python scripts/validate_tier_strategy_contract.py --output tier-strategy-contract-report.json
+
+      - name: Upload tier strategy contract report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tier-strategy-contract-report
+          path: backend/tier-strategy-contract-report.json
+          retention-days: 30
+
+  official-source-freshness-smoke:
+    name: "Official Source Freshness Smoke"
+    runs-on: ubuntu-latest
+    needs: pytest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run freshness scheduler smoke (dry-run)
+        env:
+          ENVIRONMENT: "test"
+        run: |
+          python scripts/official_source_freshness_scheduler.py \
+            --registry tests/fixtures/official_source_registry_smoke.json \
+            --dry-run \
+            --fail-on-error \
+            --fail-on-stale \
+            --output official-source-freshness-report.json
+
+      - name: Upload official source freshness report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-source-freshness-report
+          path: backend/official-source-freshness-report.json
+          retention-days: 30
+
+  alert-contract-gate:
+    name: "Alert Contract Gate"
+    runs-on: ubuntu-latest
+    needs: pytest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate alert contract
+        run: |
+          python scripts/validate_rag_v3_alert_rules.py --output rag-v3-alert-rules-report.json
+
+      - name: Upload alert contract report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-v3-alert-rules-report
+          path: backend/rag-v3-alert-rules-report.json
+          retention-days: 30
+
+  runtime-security-contract-gate:
+    name: "Runtime Security Contract Gate"
+    runs-on: ubuntu-latest
+    needs: pytest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run runtime security contract tests
+        env:
+          ENVIRONMENT: "test"
+        run: |
+          python -m pytest tests/test_security_runtime_contract.py --tb=short -q --no-header
+
+  auth-access-control-gate:
+    name: "AuthN / Access Control Regression Gate"
+    runs-on: ubuntu-latest
+    needs: pytest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run auth/access regression tests
+        env:
+          ENVIRONMENT: "test"
+          JWT_SECRET_KEY: "ci-test-hmac-secret-key-32-chars!"
+          AUTH_ENFORCE_BEARER: "true"
+          AUTH_REQUIRED_PATH_PREFIXES: "/api/v1/rag-v3,/api/v1/rag"
+          AUTH_VERIFY_JWT_SIGNATURE: "true"
+        run: |
+          python -m pytest \
+            tests/test_auth_middleware.py \
+            tests/test_rag_v3_route_guards.py \
+            --tb=short \
+            -q \
+            --no-header \
+            --junit-xml=auth-access-results.xml
+
+      - name: Upload auth/access report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-access-results
+          path: backend/auth-access-results.xml
+          retention-days: 30
+
   security-regression-gate:
     name: "Prompt Injection Regression Gate"
     runs-on: ubuntu-latest
@@ -201,13 +444,142 @@ jobs:
           path: backend/prompt-injection-regression-report.json
           retention-days: 30
 
+  pii-redaction-gate:
+    name: "PII Redaction Regression Gate"
+    runs-on: ubuntu-latest
+    needs: pytest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run PII redaction regression tests
+        env:
+          ENVIRONMENT: "test"
+        run: |
+          python -m pytest tests/test_privacy_ner_gate.py tests/test_tenant_security.py \
+            --tb=short \
+            -q \
+            --no-header \
+            --junit-xml=pii-redaction-results.xml
+
+      - name: Upload PII redaction report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pii-redaction-results
+          path: backend/pii-redaction-results.xml
+          retention-days: 30
+
+  reranker-calibration-gate:
+    name: "Reranker Calibration Gate"
+    runs-on: ubuntu-latest
+    needs: pytest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run reranker calibration gate
+        env:
+          ENVIRONMENT: "test"
+        run: |
+          python scripts/reranker_calibration_gate.py \
+            --dataset ../evals/rag_v3_reranker_calibration_v1.jsonl \
+            --output reranker-calibration-report.json
+
+      - name: Upload reranker calibration report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reranker-calibration-report
+          path: backend/reranker-calibration-report.json
+          retention-days: 30
+
+  single-pipeline-rollout-gate:
+    name: "Single Pipeline Rollout Gate (${{ matrix.stage }})"
+    runs-on: ubuntu-latest
+    needs: pytest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - stage: dev
+            enforced: "false"
+            reranker_gate: "false"
+          - stage: staging
+            enforced: "true"
+            reranker_gate: "true"
+          - stage: prod
+            enforced: "true"
+            reranker_gate: "true"
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate rollout stage policy
+        run: |
+          python scripts/rag_v3_single_pipeline_rollout_gate.py \
+            --stage "${{ matrix.stage }}" \
+            --enforced "${{ matrix.enforced }}" \
+            --reranker-release-gate "${{ matrix.reranker_gate }}" \
+            --output "single-pipeline-rollout-${{ matrix.stage }}.json"
+
+      - name: Upload rollout stage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: single-pipeline-rollout-${{ matrix.stage }}
+          path: backend/single-pipeline-rollout-${{ matrix.stage }}.json
+          retention-days: 30
+
   # ──────────────────────────────────────────────────────────────────────────
   # JOB 3 — Pre-release strict gate (only on pushes to main)
   # ──────────────────────────────────────────────────────────────────────────
   quality-gate-strict:
     name: "RAGAS Quality Gate (Strict — pre-release)"
     runs-on: ubuntu-latest
-    needs: [quality-gate, retrieval-quality-gate, security-regression-gate]
+    needs: [quality-gate, retrieval-quality-gate, migration-manifest-gate, prompt-registry-gate, tier-strategy-contract-gate, official-source-freshness-smoke, alert-contract-gate, runtime-security-contract-gate, auth-access-control-gate, security-regression-gate, pii-redaction-gate, reranker-calibration-gate, single-pipeline-rollout-gate]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     defaults:
       run:
@@ -234,12 +606,29 @@ jobs:
         run: |
           python scripts/quality_gate.py --strict --output quality-report-strict.json
 
+      - name: Run reranker calibration gate (strict thresholds)
+        env:
+          ENVIRONMENT: "test"
+        run: |
+          python scripts/reranker_calibration_gate.py \
+            --strict \
+            --dataset ../evals/rag_v3_reranker_calibration_v1.jsonl \
+            --output reranker-calibration-report-strict.json
+
       - name: Upload strict quality report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ragas-quality-report-strict
           path: backend/quality-report-strict.json
+          retention-days: 30
+
+      - name: Upload strict reranker calibration report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reranker-calibration-report-strict
+          path: backend/reranker-calibration-report-strict.json
           retention-days: 30
 
   # ──────────────────────────────────────────────────────────────────────────

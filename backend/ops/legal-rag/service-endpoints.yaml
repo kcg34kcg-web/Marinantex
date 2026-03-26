@@ -1,0 +1,64 @@
+version: "2026-03-12"
+api:
+  backend_base: "http://localhost:8000"
+  endpoints:
+    - method: GET
+      path: /health
+      purpose: backend service health
+    - method: POST
+      path: /api/v1/rag-v3/ingest
+      purpose: ingestion (parse -> metadata -> dedup/delta -> chunk/embed/index)
+    - method: POST
+      path: /api/v1/rag-v3/query
+      purpose: hybrid retrieval + rerank + claim verification + citation assembly
+    - method: GET
+      path: /api/v1/rag-v3/review-queue
+      purpose: human review queue list
+    - method: POST
+      path: /api/v1/rag-v3/review-queue/{ticket_id}/assign
+      purpose: assign review ticket
+    - method: POST
+      path: /api/v1/rag-v3/review-queue/{ticket_id}/close
+      purpose: close review ticket
+    - method: POST
+      path: /api/v1/rag-v3/delete
+      purpose: logical/physical corpus cleanup
+    - method: POST
+      path: /api/v1/rag-v3/revoke
+      purpose: legal lifecycle control (revoke/tombstone/legal_hold/restore)
+    - method: GET
+      path: /api/v1/rag-v3/integrity
+      purpose: corpus integrity and snapshot state
+    - method: GET
+      path: /api/v1/rag-v3/observability
+      purpose: retrieval/answerability observability metrics
+    - method: GET
+      path: /api/v1/rag-v3/audit/{request_id}
+      purpose: request-level trace and governance audit payload
+
+serving:
+  llm_primary:
+    engine: vLLM
+    base_url: "http://localhost:8008/v1"
+    health:
+      - "GET /v1/models"
+      - "GET /metrics"
+  llm_secondary:
+    engine: SGLang
+    base_url: "http://localhost:30000/v1"
+    health:
+      - "GET /health"
+      - "GET /metrics"
+  embedding:
+    engine: TEI
+    base_url: "http://localhost:8081/v1"
+    health:
+      - "GET /health"
+      - "POST /v1/embeddings"
+  reranker:
+    engine: TEI/Jina-compatible rerank endpoint
+    base_url: "http://localhost:8091/v1"
+    health:
+      - "GET /health"
+      - "POST /v1/rerank"
+

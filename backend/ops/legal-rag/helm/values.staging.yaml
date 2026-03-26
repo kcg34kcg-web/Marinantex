@@ -1,0 +1,42 @@
+profile: staging
+
+backend:
+  image:
+    repository: marinantex/backend-rag
+    tag: staging
+  replicaCount: 2
+  env:
+    ENVIRONMENT: staging
+    QWEN_SERVING_BACKEND: vllm
+    OPENAI_BASE_URL: http://vllm:8000/v1
+    EMBEDDING_BASE_URL: http://tei-embed:8080/v1
+    RAG_V3_RERANKER_BASE_URL: http://reranker:8080/v1
+
+redis:
+  enabled: true
+
+teiEmbed:
+  enabled: true
+  modelId: Qwen/Qwen3-Embedding-4B
+
+reranker:
+  enabled: true
+  modelId: Qwen/Qwen3-Reranker-4B
+
+vllm:
+  enabled: true
+  model: Qwen/Qwen3.5-27B
+  maxModelLen: 16384
+  gpuMemoryUtilization: 0.92
+
+sglang:
+  enabled: true
+  model: Qwen/Qwen3.5-27B
+  maxModelLen: 16384
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+

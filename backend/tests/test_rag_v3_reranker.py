@@ -6,7 +6,12 @@ import asyncio
 
 import pytest
 
-from infrastructure.rag_v3.reranker import RagV3RerankItem, RagV3Reranker
+from infrastructure.rag_v3.reranker import (
+    RagV3RerankItem,
+    RagV3Reranker,
+    _parse_http_rerank_scores,
+    _rerank_endpoints,
+)
 
 
 @pytest.mark.asyncio
@@ -70,3 +75,20 @@ async def test_rerank_falls_back_to_lexical_when_model_unavailable(
     )
 
     assert 0.0 <= scores["chunk-1"] <= 1.0
+
+
+def test_rerank_endpoints_support_v1_and_root_paths() -> None:
+    endpoints = _rerank_endpoints("http://localhost:8091")
+    assert "http://localhost:8091/rerank" in endpoints
+    assert "http://localhost:8091/v1/rerank" in endpoints
+
+
+def test_parse_http_rerank_scores_accepts_results_index_payload() -> None:
+    candidates = [
+        RagV3RerankItem(chunk_id="c1", text="a"),
+        RagV3RerankItem(chunk_id="c2", text="b"),
+    ]
+    body = {"results": [{"index": 1, "relevance_score": 0.83}, {"index": 0, "relevance_score": 0.12}]}
+    parsed = _parse_http_rerank_scores(body=body, candidates=candidates)
+    assert parsed["c2"] == 0.83
+    assert parsed["c1"] == 0.12

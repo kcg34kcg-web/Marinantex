@@ -1,0 +1,15 @@
+{
+  "generated_at": "2026-03-10T19:32:04.159147+00:00",
+  "passed": true,
+  "stage": "staging",
+  "result": {
+    "stage": "staging",
+    "enforced": true,
+    "reranker_release_gate_enabled": true,
+    "expected_enforced": true,
+    "expected_reranker_gate": true,
+    "passed": true,
+    "failures": []
+  },
+  "exit_code": 0
+}

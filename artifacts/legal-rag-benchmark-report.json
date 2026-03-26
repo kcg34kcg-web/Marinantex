@@ -1,0 +1,28 @@
+{
+  "eval_quality": {
+    "query_count": 20,
+    "dense": {
+      "top1_accuracy": 0.7,
+      "mrr_at_3": 0.8417
+    },
+    "hybrid": {
+      "top1_accuracy": 1.0,
+      "mrr_at_3": 1.0
+    },
+    "hybrid_rerank": {
+      "top1_accuracy": 1.0,
+      "mrr_at_3": 1.0
+    },
+    "exact_article_search_passed": true,
+    "hybrid_retrieval_operational": true,
+    "dense_vs_hybrid_rerank_improved": true,
+    "pass_all": true
+  },
+  "latency": {
+    "iterations": 30,
+    "p50_ms": 2.321,
+    "p95_ms": 2.392,
+    "avg_ms": 2.332
+  },
+  "pass_all": true
+}

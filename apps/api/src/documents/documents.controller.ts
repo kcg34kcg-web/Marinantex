@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -15,6 +16,7 @@ import { JwtAuthGuard } from "../security/guards/jwt-auth.guard";
 import { RolesGuard } from "../security/guards/roles.guard";
 import { DocumentAccess } from "../security/decorators/document-access.decorator";
 import { DocumentAccessGuard } from "../security/guards/document-access.guard";
+import { AuditService } from "../audit/audit.service";
 import type { AuthenticatedRequest } from "../security/types/authenticated-request.type";
 import { CreateDocumentDto } from "./dto/create-document.dto";
 import { ListDocumentsQueryDto } from "./dto/list-documents-query.dto";
@@ -25,6 +27,10 @@ import { CreateSnapshotDto } from "./dto/create-snapshot.dto";
 import { LockLeaseDto } from "./dto/lock-lease.dto";
 import { DocumentLockService } from "./document-lock.service";
 import { AutosaveDocumentDto } from "./dto/autosave-document.dto";
+import {
+  assertMatterScope,
+  requestedMatterFromHeaders,
+} from "../security/policy/matter-scope.policy";
 
 @Controller("documents")
 @UseGuards(JwtAuthGuard, RolesGuard, DocumentAccessGuard)
@@ -32,6 +38,7 @@ export class DocumentsController {
   constructor(
     private readonly documentsService: DocumentsService,
     private readonly lockService: DocumentLockService,
+    private readonly auditService: AuditService,
   ) {}
 
   @Get()
@@ -40,6 +47,22 @@ export class DocumentsController {
     @Req() req: AuthenticatedRequest,
     @Query() query: ListDocumentsQueryDto,
   ) {
+    const requestedMatterId = requestedMatterFromHeaders(req.headers as Record<string, unknown>);
+    try {
+      assertMatterScope({
+        route: "/documents",
+        requestedMatterId,
+        payloadMatterId: query.matterId,
+      });
+    } catch {
+      await this.writeMatterScopeDeniedAudit(req, undefined, "header_payload_mismatch");
+      throw new ForbiddenException("Matter scope mismatch");
+    }
+
+    if (!query.matterId && requestedMatterId) {
+      query.matterId = requestedMatterId;
+    }
+
     return this.documentsService.list(req.tenantId!, query);
   }
 
@@ -49,6 +72,19 @@ export class DocumentsController {
     @Req() req: AuthenticatedRequest,
     @Body() body: CreateDocumentDto,
   ) {
+    const requestedMatterId = requestedMatterFromHeaders(req.headers as Record<string, unknown>);
+    const payloadMatterId = this.extractMatterIdFromCreateBody(body);
+    try {
+      assertMatterScope({
+        route: "/documents",
+        requestedMatterId,
+        payloadMatterId,
+      });
+    } catch {
+      await this.writeMatterScopeDeniedAudit(req, undefined, "header_payload_mismatch");
+      throw new ForbiddenException("Matter scope mismatch");
+    }
+
     return this.documentsService.create(req.tenantId!, req.user!.sub, body, {
       requestId: this.header(req, "x-request-id"),
       ipAddress: req.ip,
@@ -247,5 +283,62 @@ export class DocumentsController {
   private header(req: AuthenticatedRequest, key: string): string | undefined {
     const value = req.headers[key];
     return typeof value === "string" ? value : undefined;
+  }
+
+  private extractMatterIdFromCreateBody(body: CreateDocumentDto): string | undefined {
+    const payload = body.canonicalJson;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return undefined;
+    }
+
+    const root = payload as unknown as Record<string, unknown>;
+    const directMatter = root.matterId ?? root.matter_id ?? root.caseId ?? root.case_id;
+    if (typeof directMatter === "string" && directMatter.trim().length > 0) {
+      return directMatter.trim();
+    }
+
+    const content = root.content;
+    if (!content || typeof content !== "object" || Array.isArray(content)) {
+      return undefined;
+    }
+
+    const contentRecord = content as Record<string, unknown>;
+    const nestedMatter =
+      contentRecord.matterId ??
+      contentRecord.matter_id ??
+      contentRecord.caseId ??
+      contentRecord.case_id;
+    if (typeof nestedMatter !== "string") {
+      return undefined;
+    }
+
+    const normalized = nestedMatter.trim();
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  private async writeMatterScopeDeniedAudit(
+    req: AuthenticatedRequest,
+    objectId: string | undefined,
+    reason: string,
+  ): Promise<void> {
+    if (!req.tenantId) {
+      return;
+    }
+
+    await this.auditService.write({
+      tenantId: req.tenantId,
+      actorUserId: req.user?.sub,
+      action: "AUTH_LOGIN_FAILED",
+      objectType: "AUTH",
+      objectId,
+      requestId: this.header(req, "x-request-id"),
+      ipAddress: req.ip,
+      userAgent: this.header(req, "user-agent"),
+      metadata: {
+        event: "document_access_denied",
+        reason,
+      },
+      dataClassification: "security",
+    });
   }
 }

@@ -170,6 +170,8 @@ model Tenant {
   drafts            Draft[]
   signatures        Signature[]
   contacts          Contact[]
+  contactGroups     ContactGroup[]
+  contactGroupMembers ContactGroupMember[]
   clients           Client[]
   matters           Matter[]
   tasks             Task[]
@@ -769,9 +771,43 @@ model Contact {
 
   tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   matterContacts  MatterContact[]
+  groupMembers    ContactGroupMember[]
 
   @@unique([tenantId, email])
   @@index([fullName])
+}
+
+model ContactGroup {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  description String?
+  color       String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  tenant  Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members ContactGroupMember[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, deletedAt])
+}
+
+model ContactGroupMember {
+  id         String   @id @default(cuid())
+  tenantId   String
+  groupId    String
+  contactId  String
+  createdAt  DateTime @default(now())
+
+  group   ContactGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  contact Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tenant  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, contactId])
+  @@index([tenantId, contactId])
 }
 
 model Client {

@@ -11,9 +11,12 @@ Bu repo artık Aşama 1-10’un çalışan omurgasını içerir:
 - Mailbox connect + unified inbox + thread detail + compose/draft autosave + gönderim
 - Unified inbox keyboard navigation + infinite thread loading + optimistic read/unread
 - Queue tabanlı mail sync trigger + worker işleme
-- AI mail action panel + suggestion feedback + thread-to-matter linking
+- AI mail action panel + stream öneri + suggestion feedback + AI stats + thread-to-matter linking
+- Provider token encryption-at-rest + runtime token refresh
+- Managed mailbox provisioning adapter mimarisi + provisioning endpointi
+- CRM API çekirdeği (clients/matters/tasks) + temel UI create/list akışları
 - Tenant settings güncelleme API + UI
-- Unit test altyapısı + Playwright smoke + CI workflow
+- Unit test altyapısı + Playwright smoke/kritik akış + CI workflow
 - Docker compose (dev/prod) + web/worker Dockerfile
 
 ## Mimaride Seçimler
@@ -25,7 +28,7 @@ Bu repo artık Aşama 1-10’un çalışan omurgasını içerir:
 - **Mail entegrasyonu:** Provider adapter registry (Gmail/Microsoft/Yandex/IMAP)
 - **AI:** provider-agnostic service (ilk sürüm mock engine + audit + usage)
 
-Detay: `docs/architecture.md`, `docs/frontend-ia.md`, `docs/api-contracts.md`
+Detay: `docs/architecture.md`, `docs/frontend-ia.md`, `docs/api-contracts.md`, `docs/testing-strategy.md`
 
 ## Monorepo
 
@@ -85,6 +88,7 @@ MinIO Console: `http://localhost:9001`
 - `POST /api/v1/domains`
 - `POST /api/v1/domains/{domainId}/verify`
 - `POST /api/v1/mailboxes`
+- `POST /api/v1/mailboxes/provision`
 - `GET /api/v1/integrations/mail/oauth/start`
 - `GET /api/v1/integrations/mail/oauth/callback`
 - `GET /api/v1/mail/threads`
@@ -92,10 +96,17 @@ MinIO Console: `http://localhost:9001`
 - `POST /api/v1/drafts`
 - `POST /api/v1/mail/send`
 - `POST /api/v1/ai/mail-actions`
+- `POST /api/v1/ai/mail-actions/stream`
 - `POST /api/v1/ai/feedback`
+- `GET /api/v1/ai/stats`
 - `POST /api/v1/webhooks/mail/{provider}`
+- `GET/POST /api/v1/clients`
+- `GET/POST /api/v1/matters`
+- `GET/POST /api/v1/tasks`
+- `POST /api/v1/tasks/{taskId}/status`
 
 Detaylar: `docs/openapi.yaml`
+Eksik envanteri: `docs/gap-analysis-2026-03-10.md`
 
 ## Test ve Kalite
 
@@ -106,6 +117,14 @@ corepack pnpm e2e:smoke
 ```
 
 `e2e:smoke` komutu izole bir PostgreSQL konteyneri (`lexoffice-postgres-e2e`, port `55432`) başlatır, Prisma şemasını uygular, seed verisini yükler ve ardından Playwright smoke senaryolarını çalıştırır.
+
+Kritik Playwright senaryoları:
+
+- Unified inbox + thread detay
+- Compose autosave + mail send
+- Thread to matter linking
+- AI summary + feedback + audit log görünürlüğü
+- RBAC negatif test (AI yetkisi olmayan rol)
 
 ## Deploy
 
@@ -122,13 +141,15 @@ corepack pnpm e2e:smoke
 - Audit event logging + immutable hash chain
 - Login success/failure security events
 - Request-id propagation + security headers middleware
+- Provider token encryption-at-rest + refresh on-demand
 - OAuth start/callback + provider webhook ingest akışı
+- Attachment S3 hardening notları: `docs/attachment-storage-hardening.md`
 - Threat model ve checklists: `docs/security-threat-model.md`, `docs/checklists/*`
 
 ## TODO (Bilinçli Placeholder)
 
-- Gerçek OAuth callback + token encryption (KMS envelope)
+- Token encryption için multi-key rotation ve KMS envelope
 - Gmail/Graph/Yandex gerçek API mapping + webhook signature doğrulama
-- Attachment scanning ve signed URL gateway
-- AI gerçek provider çağrısı + model fallback + streaming
+- Attachment security chain production policy hardening (bucket policy + quarantine lifecycle)
+- AI gerçek provider çağrısı + model fallback (SSE altyapısı hazır)
 - Reply/reply-all/forward pipeline ve schedule send tamamlama

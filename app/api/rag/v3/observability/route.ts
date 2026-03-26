@@ -4,6 +4,7 @@ import { resolveBureauContext } from '@/app/api/rag/_lib/bureau-context';
 import { ragProxyErrorResponse } from '@/app/api/rag/_lib/error-contract';
 import { fetchRagBackend, getRagBackendForLogs } from '@/app/api/rag/_lib/rag-backend';
 import { enforceRagRouteRateLimit } from '@/app/api/rag/_lib/rate-limit';
+import { isTimeoutError } from '@/app/api/rag/_lib/timeout';
 import { createClient } from '@/utils/supabase/server';
 
 const querySchema = z.object({
@@ -77,7 +78,7 @@ export async function GET(request: Request) {
         message: 'Buro baglami bulunamadi. Lutfen tekrar giris yapin.',
       });
     }
-    const rateLimit = enforceRagRouteRateLimit({
+    const rateLimit = await enforceRagRouteRateLimit({
       request,
       routeKey: 'v3_observability',
       userId,
@@ -119,14 +120,14 @@ export async function GET(request: Request) {
 
     return NextResponse.json(body, { status: 200 });
   } catch (err) {
-    const message =
-      err instanceof Error && err.name === 'AbortError'
-        ? 'RAG v3 observability istegi zaman asimina ugradi.'
-        : 'RAG v3 observability servisine baglanilamadi.';
+    const timedOut = isTimeoutError(err);
+    const message = timedOut
+      ? 'RAG v3 observability istegi zaman asimina ugradi.'
+      : 'RAG v3 observability servisine baglanilamadi.';
     console.error('[RAG v3 observability proxy]', err, { backendCandidates: getRagBackendForLogs() });
     return ragProxyErrorResponse({
       status: 502,
-      errorCode: err instanceof Error && err.name === 'AbortError' ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
+      errorCode: timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
       message,
       retryable: true,
     });

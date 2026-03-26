@@ -1,0 +1,76 @@
+{
+  "report_version": "evidence_gap.v1",
+  "generated_at": "2026-03-25T13:19:26.859834+00:00",
+  "checks": [
+    {
+      "check_id": "official_mevzuat_coverage",
+      "status": "SUFFICIENT",
+      "observed": {
+        "total_docs": 4,
+        "official_docs": 3
+      },
+      "missing_evidence": [],
+      "notes": []
+    },
+    {
+      "check_id": "ictihat_coverage",
+      "status": "SUFFICIENT",
+      "observed": {
+        "total_docs": 4,
+        "ictihat_docs": 1
+      },
+      "missing_evidence": [],
+      "notes": []
+    },
+    {
+      "check_id": "publish_or_decision_date_completeness",
+      "status": "SUFFICIENT",
+      "observed": {
+        "total_docs": 4,
+        "dated_docs": 4,
+        "coverage_ratio": 1.0
+      },
+      "missing_evidence": [],
+      "notes": []
+    },
+    {
+      "check_id": "topic_taxonomy_coverage",
+      "status": "SUFFICIENT",
+      "observed": {
+        "total_docs": 4,
+        "topic_tagged_docs": 4,
+        "coverage_ratio": 1.0
+      },
+      "missing_evidence": [],
+      "notes": []
+    },
+    {
+      "check_id": "runtime_model_mapping_evidence",
+      "status": "SUFFICIENT",
+      "observed": {
+        "trace_count": 1716,
+        "mapping_evidence_rows": 1716,
+        "mapping_coverage_ratio": 1.0,
+        "mapping_verified_rows": 4,
+        "mapping_verified_ratio": 0.0023,
+        "lane_counts": {
+          "instruct": 1715,
+          "thinking": 1
+        },
+        "observed_runtime_models": [
+          "fallback/extractive",
+          "none/none"
+        ],
+        "observed_expected_models": [
+          "Qwen/Qwen3-Next-80B-A3B-Instruct",
+          "Qwen/Qwen3-Next-80B-A3B-Thinking"
+        ],
+        "qwen_instruct_seen": true,
+        "qwen_thinking_seen": true
+      },
+      "missing_evidence": [],
+      "notes": []
+    }
+  ],
+  "global_errors": []
+}

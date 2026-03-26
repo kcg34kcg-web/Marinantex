@@ -2,6 +2,10 @@
 
 Bu dokuman SaaS production benzeri self-host kurulum icin tek compose akisini tanimlar.
 
+Apple Silicon (Mac) icin ayri rehber:
+
+- `docs/setup/step-11-self-host-rag-serving-mac.md`
+
 ## 1) Ortam degiskenlerini hazirla
 
 Asgari gerekli degiskenler:

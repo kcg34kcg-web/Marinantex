@@ -1,6 +1,8 @@
 import { prisma } from "@lexoffice/db";
+import { PERMISSIONS } from "@lexoffice/core";
 import { Topbar } from "@/components/app/topbar";
 import { AuditTable } from "@/components/admin/audit-table";
+import { services } from "@/lib/services";
 import { getTenantContext } from "@/lib/tenant-context";
 
 export default async function AuditPage({
@@ -9,7 +11,8 @@ export default async function AuditPage({
   params: Promise<{ tenantSlug: string }>;
 }) {
   const { tenantSlug } = await params;
-  const { tenant } = await getTenantContext(tenantSlug);
+  const { tenant, session } = await getTenantContext(tenantSlug);
+  await services.rbacService.requirePermission(session.userId, tenant.id, PERMISSIONS.AUDIT_VIEW);
 
   const logs = await prisma.auditLog.findMany({
     where: {

@@ -4,6 +4,7 @@ import { resolveBureauContext } from '@/app/api/rag/_lib/bureau-context';
 import { ragProxyErrorResponse } from '@/app/api/rag/_lib/error-contract';
 import { fetchRagBackend, getRagBackendForLogs } from '@/app/api/rag/_lib/rag-backend';
 import { enforceRagRouteRateLimit } from '@/app/api/rag/_lib/rate-limit';
+import { isTimeoutError } from '@/app/api/rag/_lib/timeout';
 import { createClient } from '@/utils/supabase/server';
 
 const ingestSchema = z.object({
@@ -11,7 +12,7 @@ const ingestSchema = z.object({
   source_type: z.string().min(1).max(120),
   source_id: z.string().min(1).max(120),
   raw_text: z.string().min(1).max(2_000_000),
-  source_format: z.enum(['text', 'pdf', 'html', 'docx']).optional(),
+  source_format: z.enum(['text', 'pdf', 'html', 'docx', 'xml', 'json']).optional(),
   classification: z.enum(['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'SENSITIVE']).optional(),
   jurisdiction: z.string().min(2).max(10).optional(),
   effective_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -91,7 +92,7 @@ export async function POST(request: Request) {
         message: 'Buro baglami bulunamadi. Lutfen tekrar giris yapin.',
       });
     }
-    const rateLimit = enforceRagRouteRateLimit({
+    const rateLimit = await enforceRagRouteRateLimit({
       request,
       routeKey: 'v3_ingest',
       userId,
@@ -146,14 +147,14 @@ export async function POST(request: Request) {
 
     return NextResponse.json(body, { status: 200 });
   } catch (err) {
-    const message =
-      err instanceof Error && err.name === 'AbortError'
-        ? 'RAG v3 ingest istegi zaman asimina ugradi.'
-        : 'RAG v3 ingest servisine baglanilamadi.';
+    const timedOut = isTimeoutError(err);
+    const message = timedOut
+      ? 'RAG v3 ingest istegi zaman asimina ugradi.'
+      : 'RAG v3 ingest servisine baglanilamadi.';
     console.error('[RAG v3 ingest proxy]', err, { backendCandidates: getRagBackendForLogs() });
     return ragProxyErrorResponse({
       status: 502,
-      errorCode: err instanceof Error && err.name === 'AbortError' ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
+      errorCode: timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
       message,
       retryable: true,
     });

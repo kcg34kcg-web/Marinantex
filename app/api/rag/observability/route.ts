@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { resolveBureauContext } from '@/app/api/rag/_lib/bureau-context';
 import { fetchRagBackend, getRagBackendForLogs } from '@/app/api/rag/_lib/rag-backend';
+import { isTimeoutError } from '@/app/api/rag/_lib/timeout';
 import { createClient } from '@/utils/supabase/server';
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -74,10 +75,9 @@ export async function GET(request: Request) {
 
     return NextResponse.json(body, { status: 200 });
   } catch (err) {
-    const message =
-      err instanceof Error && err.name === 'AbortError'
-        ? 'Observability istegi zaman asimina ugradi.'
-        : 'Observability servisine baglanilamadi.';
+    const message = isTimeoutError(err)
+      ? 'Observability istegi zaman asimina ugradi.'
+      : 'Observability servisine baglanilamadi.';
     console.error('[RAG observability proxy]', err, { backendCandidates: getRagBackendForLogs() });
     return NextResponse.json({ error: message }, { status: 502 });
   }

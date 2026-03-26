@@ -141,9 +141,140 @@ class Settings(BaseSettings):
     # Privacy & Security
     # ========================================================================
     pii_encryption_key: str = ""
-    jwt_secret_key: str = "dev-secret-key-change-in-production"
+    jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 30
+    auth_enforce_bearer: bool = False
+    """When True, protected API paths require Authorization: Bearer <JWT>."""
+
+    auth_required_path_prefixes: str = "/api/v1/rag,/api/v1/rag-v3,/api/v1/ingest"
+    """CSV list of path prefixes protected by Auth middleware."""
+
+    auth_jwt_issuer: Optional[str] = None
+    """Optional JWT iss claim check. Empty disables issuer check."""
+
+    auth_jwt_audience: Optional[str] = None
+    """Optional JWT aud claim check. Empty disables audience check."""
+
+    auth_verify_jwt_signature: bool = True
+    """When True, HS256 signature is verified against JWT_SECRET_KEY."""
+
+    auth_jwt_use_jwks: bool = False
+    """When True, JWT signature verification uses keys from AUTH_JWKS_URL."""
+
+    auth_jwks_url: Optional[str] = None
+    """OIDC/JWKS URL used to fetch signing keys (expects HTTPS in production)."""
+
+    auth_jwks_cache_ttl_seconds: int = 300
+    """TTL for cached JWKS response to avoid key fetch on every request."""
+
+    auth_jwks_fetch_timeout_seconds: float = 3.0
+    """HTTP timeout for JWKS fetch operations."""
+
+    auth_jwks_allowed_algorithms: str = "RS256"
+    """CSV list of accepted JWT header algorithms when JWKS mode is enabled."""
+
+    auth_require_jwks_in_production: bool = True
+    """Fail runtime contract in production if bearer auth is not JWKS-backed."""
+
+    security_runtime_fail_closed: bool = True
+    """When True, startup blocks in production if runtime security contract fails."""
+
+    security_require_tls: bool = True
+    """When True, startup enforces TLS evidence for DB and outbound providers."""
+
+    security_require_kms: bool = True
+    """When True, startup enforces KMS key-id configuration in production."""
+
+    security_require_secret_rotation_evidence: bool = True
+    """When True, startup expects a secret-rotation evidence artifact path."""
+
+    security_rotation_evidence_file: str = "docs/compliance/evidence/key-rotation-evidence.json"
+    """Path to rotation evidence JSON used by runtime contract checks."""
+
+    tls_cert_path: str = ""
+    """Optional path to TLS client cert bundle for connector/mTLS evidence checks."""
+
+    kms_key_id: str = ""
+    """KMS key identifier used for at-rest encryption evidence checks."""
+
+    secret_manager_backend: str = "env"
+    """Secret source selector: env | file | vault."""
+
+    secret_manager_required_in_production: bool = True
+    """When True, production must not run with plain env-only secrets."""
+
+    block_default_dev_secrets_in_production: bool = True
+    """When True, startup fails in production if insecure default secrets are detected."""
+
+    saml_enabled: bool = False
+    """Whether enterprise SAML SSO is enabled in this deployment."""
+
+    saml_metadata_url: Optional[str] = None
+    """IdP metadata URL for SAML federation."""
+
+    saml_entity_id: Optional[str] = None
+    """Service provider entity id for SAML federation."""
+
+    saml_verified: bool = False
+    """Operational verification flag for SAML capability evidence."""
+
+    sso_require_verified_in_production: bool = True
+    """When True, production fails runtime contract if enabled SSO capability is not verified."""
+
+    rag_v3_corpus_verified: bool = False
+    """Global corpus verification state; false means retrieval confidence must be degraded."""
+
+    rag_v3_require_verified_corpus_for_high_confidence: bool = True
+    """When True, unverified corpus cannot emit high-confidence answers."""
+
+    alerting_enabled: bool = True
+    """Master switch for alert rule dispatch."""
+
+    alerting_webhook_url: Optional[str] = None
+    """Primary incident webhook sink URL."""
+
+    alerting_slack_webhook_url: Optional[str] = None
+    """Optional Slack incoming-webhook URL for alert fanout."""
+
+    alerting_siem_webhook_url: Optional[str] = None
+    """Optional SIEM ingestion webhook URL for security incident forwarding."""
+
+    alerting_pagerduty_events_url: Optional[str] = None
+    """Optional PagerDuty Events v2 endpoint URL."""
+
+    alerting_pagerduty_routing_key: Optional[str] = None
+    """Optional PagerDuty routing key used with events endpoint."""
+
+    alerting_retry_max_attempts: int = 3
+    """Max retry attempts per alert dispatch."""
+
+    alerting_retry_backoff_s: float = 0.75
+    """Exponential retry base delay (seconds) for alert dispatch."""
+
+    alerting_audit_log_path: str = "artifacts/alert-delivery-audit.jsonl"
+    """File path for append-only alert delivery audit trail."""
+
+    alerting_require_sink_in_production: bool = True
+    """When True, production runtime contract fails if alerting is enabled but no sink is configured."""
+
+    alerting_require_siem_in_production: bool = True
+    """When True, production runtime contract fails if SIEM webhook sink is not configured."""
+
+    compliance_retention_policy_contract_path: str = "docs/compliance/data-retention-policy.contract.json"
+    """Path to machine-readable retention policy contract artifact."""
+
+    compliance_dpia_evidence_path: str = "docs/compliance/evidence/dpia-technical-evidence.json"
+    """Path to DPIA technical evidence artifact generated from system controls."""
+
+    compliance_ropa_evidence_path: str = "docs/compliance/evidence/ropa-technical-evidence.json"
+    """Path to ROPA technical evidence artifact generated from system controls."""
+
+    compliance_artifact_output_path: str = "artifacts/compliance-evidence-report.json"
+    """Output artifact path for generated compliance evidence snapshot reports."""
+
+    compliance_require_artifacts_in_production: bool = True
+    """When True, production runtime contract requires retention/DPIA/ROPA artifacts to exist."""
     
     # ========================================================================
     # Application
@@ -220,6 +351,23 @@ class Settings(BaseSettings):
     """Highest requested tier allowed to use embedding fail-open mode.
     1=hazir_cevap, 2=dusunceli, 3=uzman, 4=muazzam."""
 
+    embedding_fail_open_mode: str = "tiered"
+    """Fail-open mode for embeddings.
+    - disabled: never fall back to local hash embedding
+    - ingest_only: only ingest path may fail-open
+    - query_only: only query path may fail-open
+    - tiered: allow fail-open up to embedding_fail_open_max_tier"""
+
+    embedding_fail_open_allowed_purposes: str = "ingest,query"
+    """CSV allowlist for fallback purposes: ingest, query."""
+
+    embedding_fail_open_require_acl_public: bool = True
+    """When True, fallback embedding is only allowed for PUBLIC-classified ingest/query flows."""
+
+    embedding_force_local_fallback: bool = False
+    """When True, embedding requests bypass remote providers and always use deterministic local fallback.
+    Useful for development environments with exhausted provider quota."""
+
     embedding_model_lock_enforced: bool = True
     """When True, runtime rejects EMBEDDING_MODEL values that do not match the Turkish benchmark lock file."""
 
@@ -233,6 +381,24 @@ class Settings(BaseSettings):
     # ========================================================================
     rag_v3_hybrid_enabled: bool = True
     """When True, query path uses dense+sparse lanes and fuses with RRF."""
+
+    rag_v3_planner_enabled: bool = True
+    """When True, query planner produces explicit retrieval plan before router/model selection."""
+
+    rag_v3_query_expansion_enabled: bool = True
+    """When True, deterministic query expansion (synonym/typo/filter extraction) runs pre-retrieval."""
+
+    rag_v3_prompt_registry_enabled: bool = True
+    """When True, scenario-based prompt registry is applied before final model generation."""
+
+    rag_v3_legal_exact_lane_enabled: bool = True
+    """When True, deterministic legal exact lane (E/K, madde/fikra, phrase/proximity) is active."""
+
+    rag_v3_exact_top_k: int = 24
+    """Candidate size for legal exact retrieval lane."""
+
+    rag_v3_exact_lane_weight: float = 1.25
+    """Lane multiplier for exact-match retrieval in RRF fusion."""
 
     rag_v3_dense_top_k: int = 50
     """Candidate size for vector-only dense lane before fusion."""
@@ -258,17 +424,98 @@ class Settings(BaseSettings):
     rag_v3_chunk_overlap_tokens: int = 80
     """Token overlap prepended between adjacent chunks from the same article."""
 
+    rag_v3_parser_orchestration_enabled: bool = True
+    """When True, ingest uses parser orchestration (MinerU -> Docling -> PaddleOCR-VL -> builtin)."""
+
+    rag_v3_parser_engine_order: str = "mineru,docling,paddleocr_vl,builtin"
+    """CSV engine priority for parser orchestration."""
+
+    rag_v3_parser_mineru_enabled: bool = True
+    """Enable MinerU adapter attempt for PDF/image-heavy parsing."""
+
+    rag_v3_parser_docling_enabled: bool = True
+    """Enable Docling adapter attempt for born-digital/structured docs."""
+
+    rag_v3_parser_paddleocr_vl_enabled: bool = True
+    """Enable PaddleOCR-VL adapter attempt as OCR-heavy fallback."""
+
+    rag_v3_document_understanding_enabled: bool = True
+    """When True, parser/OCR/layout quality is scored before publish."""
+
+    rag_v3_ingest_min_quality_score: float = 0.62
+    """Fail-closed ingest threshold for combined document understanding quality score."""
+
+    rag_v3_ingest_min_parser_confidence: float = 0.55
+    """Fail-closed ingest threshold for parser confidence."""
+
+    rag_v3_ingest_min_ocr_confidence: float = 0.45
+    """Fail-closed ingest threshold for OCR confidence when OCR is used."""
+
+    rag_v3_ingest_fail_closed_on_quality: bool = True
+    """When True, low-quality parses do not get published."""
+
+    rag_v3_ingest_reprocess_queue_enabled: bool = True
+    """When True, failed ingest quality/metadata items are pushed to reprocess queue."""
+
+    rag_v3_metadata_validation_enabled: bool = True
+    """When True, authority/version/scope metadata validation runs at ingest."""
+
+    rag_v3_metadata_fail_closed: bool = True
+    """When True, metadata validation errors block publish."""
+
+    rag_v3_metadata_require_effective_dates_for_legal: bool = True
+    """When True, legal sources require effective_from metadata."""
+
+    rag_v3_metadata_required_fields: str = "source_type,authority_type,authority_rank,jurisdiction,canonical_citation"
+    """CSV list of mandatory metadata fields validated at ingest."""
+
+    rag_v3_case_law_metadata_contract_enabled: bool = True
+    """When True, case-law ingest requires extracted court/chamber/case identifiers contract."""
+
+    rag_v3_case_law_required_fields: str = "court,chamber,esas_no,karar_no,decision_date"
+    """CSV list of mandatory case-law metadata fields."""
+
+    rag_v3_metadata_require_temporal_field: bool = True
+    """When True, legal sources must provide at least one temporal field (publish/decision/effective dates)."""
+
+    rag_v3_metadata_require_topic_tags: bool = True
+    """When True, legal sources must include topic taxonomy tags."""
+
+    rag_v3_metadata_topic_min_count: int = 1
+    """Minimum number of topic tags required for legal-source ingest."""
+
+    rag_v3_topic_tag_auto_extract_enabled: bool = True
+    """When True, ingest infers topic tags from title/content when metadata is missing."""
+
     rag_v3_reranker_enabled: bool = True
     """When True, second-stage reranking is applied on fused candidates."""
 
     rag_v3_reranker_model: str = "BAAI/bge-reranker-v2-m3"
     """Primary reranker model id (CrossEncoder-compatible)."""
 
+    rag_v3_reranker_provider: str = "auto"
+    """Reranker backend selector: auto | local | http."""
+
+    rag_v3_reranker_base_url: Optional[str] = None
+    """Optional external reranker endpoint (OpenAI/Jina-style /rerank API)."""
+
+    rag_v3_reranker_api_key: Optional[str] = None
+    """API key forwarded to external reranker endpoint when configured."""
+
+    rag_v3_reranker_request_timeout_s: float = 3.0
+    """HTTP timeout for external reranker requests."""
+
     rag_v3_reranker_top_n: int = 12
     """How many fused candidates enter second-stage reranking."""
 
     rag_v3_reranker_timeout_s: float = 4.0
     """Hard timeout for reranker stage; on timeout, retrieval order is used."""
+
+    rag_v3_reranker_min_score_threshold: float = 0.05
+    """Minimum reranker score accepted as reliable. Lower scores are treated as weak evidence."""
+
+    rag_v3_reranker_release_gate_enabled: bool = False
+    """When True, reranker calibration thresholds are enforced as release gate."""
 
     rag_v3_retrieval_score_weight: float = 0.70
     """Weight of retrieval score when combining retrieval+rereanker scores."""
@@ -300,6 +547,18 @@ class Settings(BaseSettings):
     rag_v3_claim_min_supported_ratio: float = 0.70
     """Minimum supported claim ratio required to keep model answer."""
 
+    rag_v3_claim_semantic_enabled: bool = True
+    """When True, claim verification includes entailment/contradiction heuristics beyond lexical overlap."""
+
+    rag_v3_claim_min_entailment_score: float = 0.42
+    """Minimum entailment score for a claim to be considered semantically supported."""
+
+    rag_v3_claim_semantic_combine_mode: str = "and"
+    """Combine mode for lexical + semantic claim verification: and | or | semantic_only."""
+
+    rag_v3_claim_contradiction_blocks_answer: bool = True
+    """When True, detected contradiction in cited evidence forces fail-closed behavior."""
+
     rag_v3_no_answer_on_claim_verification_fail: bool = True
     """When True, unsupported claim ratio forces a no-answer fallback."""
 
@@ -318,6 +577,12 @@ class Settings(BaseSettings):
     rag_v3_iterative_top_k: int = 14
     """Candidate pool size for the second retrieval pass before reranking."""
 
+    rag_v3_near_duplicate_suppression_enabled: bool = True
+    """When True, retrieval candidates are deduplicated with token-level near-dup checks."""
+
+    rag_v3_near_duplicate_jaccard_threshold: float = 0.88
+    """Jaccard threshold for treating two retrieved chunks as near-duplicates."""
+
     rag_v3_dual_temporal_enabled: bool = True
     """When True, event_date+decision_date queries run dual retrieval passes."""
 
@@ -332,6 +597,27 @@ class Settings(BaseSettings):
 
     rag_v3_tenant_hard_fail_missing_bureau: bool = True
     """Hard fail RAG v3 query when tenant isolation requires bureau scope."""
+
+    rag_v3_doc_shortlist_enabled: bool = True
+    """When True, retrieval applies document-level shortlist prior before final chunk selection."""
+
+    rag_v3_doc_shortlist_rpc_enabled: bool = True
+    """When True, retrieval uses DB doc-shortlist RPC before local doc-prior rescoring."""
+
+    rag_v3_doc_shortlist_k: int = 12
+    """Number of documents retained in doc-level shortlist."""
+
+    rag_v3_review_default_sla_minutes: int = 240
+    """Default SLA for human-review queue items (minutes)."""
+
+    rag_v3_review_require_feedback_on_close: bool = True
+    """When True, review closure requires reviewer feedback text."""
+
+    rag_v3_single_pipeline_enforced: bool = False
+    """When True, legacy /api/v1/rag pipeline is blocked in favor of rag-v3."""
+
+    rag_v3_single_pipeline_rollout_stage: str = "dev"
+    """Operational rollout stage for single-pipeline migration: dev | staging | prod."""
 
     rag_v3_max_inflight_requests: int = 96
     """Admission control: maximum concurrent RAG v3 requests."""
@@ -356,6 +642,47 @@ class Settings(BaseSettings):
 
     rag_v3_query_schema_version: str = "rag.v3.query.response.schema.v1"
     """Schema version paired with query contract for deterministic rollout."""
+
+    rag_v3_require_legal_disclaimer_ack: bool = True
+    """When True, query route requires explicit legal disclaimer + human responsibility acknowledgement."""
+
+    rag_v3_human_responsibility_notice: str = (
+        "Bu asistan bilgi ve taslak amaclidir; nihai hukuki sorumluluk yetkili insan uzmandadir."
+    )
+    rag_v3_require_auth_subject_for_mutations: bool = True
+    """When True and bearer auth is enabled, mutating RAG v3 routes require
+    a verified auth_subject (no header-only actor spoofing)."""
+    """Human responsibility notice returned in every query response for legal enforceability."""
+
+    rag_v3_citation_require_core_fields: bool = True
+    """When True, citations missing source_id/source_type/title are dropped and traced as contract violations."""
+
+    rag_v3_reasoning_redaction_enabled: bool = True
+    """When True, model internal reasoning blocks are redacted from user-visible answer text."""
+
+    rag_v3_sentence_grounding_required: bool = True
+    """When True, each answer sentence must be grounded by citation evidence; otherwise response is downgraded to no_answer."""
+
+    rag_v3_sentence_grounding_min_ratio: float = 0.85
+    """Minimum grounded-sentence ratio required to keep status=ok."""
+
+    rag_v3_route_strict_grounding_enforced: bool = True
+    """When True, query route rejects answered responses that violate strict citation grounding contract."""
+
+    rag_v3_safe_intent_no_rag_enabled: bool = True
+    """When True, Tier-1 safe operational intents run no-RAG lane."""
+
+    rag_v3_tier3_trigger_enabled: bool = True
+    """When True, Tier-3 (thinking) is opened only for trigger-defined scenarios."""
+
+    rag_v3_prompt_registry_path: str = "prompts/rag_v3/registry.json"
+    """Path (relative to backend root/repo root or absolute) to RAG v3 prompt registry JSON."""
+
+    rag_v3_official_source_freshness_threshold_hours: int = 24
+    """Freshness SLA threshold used by scheduled official-source monitoring jobs."""
+
+    rag_v3_official_source_registry_json: str = "docs/compliance/official-source-registry.json"
+    """Path to official source registry used by freshness scheduler."""
 
     rag_v3_query_cache_enabled: bool = True
     """Enable lightweight in-process query result cache for repeated requests."""
@@ -415,21 +742,21 @@ class Settings(BaseSettings):
     # ========================================================================
     # Step 4: Tiered LLM Router
     # ========================================================================
-    llm_tier1_model: str = "llama-3.3-70b-versatile"
-    """Tier 1 — Groq inference.  Target: $0.001 / 1-2 s.
-    Used for simple factual queries with short context."""
+    llm_tier1_model: str = "Qwen/Qwen3-Next-80B-A3B-Instruct"
+    """Tier 1 — Qwen Instruct (80B).
+    Low-risk and short-context legal tasks."""
 
-    llm_tier2_model: str = "gpt-4o-mini"
-    """Tier 2 — OpenAI.  Target: ~$0.01 / 4-6 s.
-    Standard queries, moderate context length."""
+    llm_tier2_model: str = "Qwen/Qwen3-Next-80B-A3B-Instruct"
+    """Tier 2 — OpenAI-compatible Qwen Instruct (80B).
+    Standard legal queries, moderate context length."""
 
-    llm_tier3_model: str = "gpt-4o"
-    """Tier 3 — OpenAI.  Target: ~$0.05-0.10 / 10-15 s.
-    Multi-article analysis, case-law reasoning."""
+    llm_tier3_model: str = "Qwen/Qwen3-Next-80B-A3B-Thinking"
+    """Tier 3 — OpenAI-compatible Qwen Thinking (80B).
+    Multi-article analysis, conflict-heavy case-law reasoning."""
 
-    llm_tier4_model: str = "claude-3-5-sonnet-20241022"
-    """Tier 4 — Anthropic.  Target: ~$0.50+ / 30-90 s.
-    AYM decisions, detailed legal memos, largest context windows."""
+    llm_tier4_model: str = "Qwen/Qwen3-Next-80B-A3B-Thinking"
+    """Tier 4 — Qwen Thinking (80B).
+    Deep multi-step legal analysis and verifier/critic workloads."""
 
     llm_tier4_use_reasoning: bool = False
     """When True, Tier 4 uses OpenAI reasoning models (o1 / o3-mini) instead
@@ -491,28 +818,41 @@ class Settings(BaseSettings):
     """When True, skip final LLM generation and always return extractive
     evidence-based answers from retrieved chunks."""
 
+    qwen_serving_backend: str = "auto"
+    """Qwen serving backend selector: auto | vllm | sglang | openai."""
+
+    sglang_base_url: Optional[str] = None
+    """OpenAI-compatible SGLang endpoint (e.g. http://sglang:30000/v1)."""
+
+    qwen_served_model: Optional[str] = None
+    """Optional served model label used by deployment/health metadata."""
+
     # ========================================================================
     # Step 21: User-facing AI tier -> final model mapping
     # ========================================================================
-    ai_tier_hazir_provider: str = "google"
-    ai_tier_hazir_model: str = "gemini-2.0-flash"
-    ai_tier_hazir_fallback_provider: str = "google"
-    ai_tier_hazir_fallback_model: str = "gemini-2.0-flash"
+    ai_tier_hazir_provider: str = "openai"
+    ai_tier_hazir_model: str = "Qwen/Qwen3-Next-80B-A3B-Instruct"
+    ai_tier_hazir_fallback_provider: str = "openai"
+    ai_tier_hazir_fallback_model: str = "Qwen/Qwen3-Next-80B-A3B-Instruct"
 
-    ai_tier_dusunceli_provider: str = "google"
-    ai_tier_dusunceli_model: str = "gemini-2.0-flash"
-    ai_tier_dusunceli_fallback_provider: str = "google"
-    ai_tier_dusunceli_fallback_model: str = "gemini-2.0-flash"
+    ai_tier_dusunceli_provider: str = "openai"
+    ai_tier_dusunceli_model: str = "Qwen/Qwen3-Next-80B-A3B-Instruct"
+    ai_tier_dusunceli_fallback_provider: str = "openai"
+    ai_tier_dusunceli_fallback_model: str = "Qwen/Qwen3-Next-80B-A3B-Instruct"
 
     ai_tier_uzman_provider: str = "openai"
-    ai_tier_uzman_model: str = "gpt-4o"
+    ai_tier_uzman_model: str = "Qwen/Qwen3-Next-80B-A3B-Thinking"
     ai_tier_uzman_fallback_provider: str = "openai"
-    ai_tier_uzman_fallback_model: str = "gpt-4o-mini"
+    ai_tier_uzman_fallback_model: str = "Qwen/Qwen3-Next-80B-A3B-Instruct"
 
     ai_tier_muazzam_provider: str = "openai"
-    ai_tier_muazzam_model: str = "gpt-4.1"
+    ai_tier_muazzam_model: str = "Qwen/Qwen3-Next-80B-A3B-Thinking"
     ai_tier_muazzam_fallback_provider: str = "openai"
-    ai_tier_muazzam_fallback_model: str = "gpt-4o"
+    ai_tier_muazzam_fallback_model: str = "Qwen/Qwen3-Next-80B-A3B-Thinking"
+
+    rag_v3_enforce_tier_strategy_contract: bool = True
+    """Enforce V1/V1.5 production tier-model strategy contract:
+    T1/T2=Qwen Instruct, T3/T4=Qwen Thinking (OpenAI-compatible serving)."""
 
     # ========================================================================
     # Step 23: Central tier policy config (budget/depth/freemium)
@@ -669,6 +1009,48 @@ class Settings(BaseSettings):
     kvkk_redact_logs: bool = True
     """When True, KVKKRedactor.redact_for_log() is applied to any user-supplied
     text before it is written to structured logs."""
+
+    kvkk_model_ner_enabled: bool = True
+    """Enable contextual model-assisted NER heuristics in KVKK redaction layer."""
+
+    kvkk_presidio_enabled: bool = False
+    """Enable Presidio-backed analyzer when available. Falls back to local NER if disabled/unavailable."""
+
+    kvkk_model_ner_fallback_enabled: bool = True
+    """When True, local contextual PII NER heuristics run when Presidio is unavailable."""
+
+    kvkk_model_ner_score_threshold: float = 0.55
+    """Minimum score threshold used by model-assisted NER detectors."""
+
+    kvkk_gliner_enabled: bool = False
+    """Enable GLiNER-based entity extraction as an additional NER lane."""
+
+    kvkk_gliner_model: str = "urchade/gliner_multi-v2.1"
+    """GLiNER model identifier used when kvkk_gliner_enabled=true."""
+
+    kvkk_gliner_labels: str = "person,location,organization,address,email,phone,iban,tckn,vkn"
+    """CSV labels sent to GLiNER predict_entities call."""
+
+    kvkk_gliner_device: str = "cpu"
+    """GLiNER inference device hint: cpu | cuda | mps."""
+
+    kvkk_gliner_fail_closed: bool = False
+    """When True, GLiNER runtime failures block processing in fail-closed mode."""
+
+    kvkk_fail_closed_on_ner_error: bool = True
+    """When True, PII detection errors in mandatory redaction paths block external model transfer."""
+
+    kvkk_redaction_mode: str = "reversible"
+    """Prompt redaction mode: reversible | irreversible."""
+
+    kvkk_redaction_map_backend: str = "memory"
+    """Redaction map backend: memory | redis."""
+
+    kvkk_redaction_map_ttl_seconds: int = 900
+    """TTL for reversible redaction maps in backend store (seconds)."""
+
+    kvkk_redaction_policy_path: str = "backend/ops/policies/redaction-policy.yaml"
+    """Policy file path for legal PII categories and handling modes."""
 
     # ========================================================================
     # Step 10: Time-Travel Search ve “Lehe Kanun” Motoru
@@ -956,6 +1338,24 @@ class Settings(BaseSettings):
     """Step 16: When True, document text is sanitized for instruction-like
     payloads before prompt assembly. Suspicious docs are flagged in audit."""
 
+    rag_v3_prompt_guard_fail_closed: bool = True
+    """When True, prompt guard runtime errors block requests (fail-closed)."""
+
+    rag_v3_context_injection_fail_closed: bool = True
+    """When True, detected context/document injection blocks LLM generation."""
+
+    rag_v3_data_exfiltration_fail_closed: bool = True
+    """When True, external_transfer=forbidden policy mismatches block generation."""
+
+    rag_v3_trace_require_model_mapping: bool = True
+    """When True, query trace metadata must include model lane/mapping evidence fields."""
+
+    rag_v3_trace_model_mapping_fail_closed: bool = True
+    """When True, production fails closed if runtime model diverges from expected lane model."""
+
+    rag_v3_trace_model_expected_family: str = "qwen3-next-80b-a3b"
+    """Expected model family token used by trace model-lane audit checks."""
+
     relaxed_grounding_min_ratio: float = 0.0
     """Grounding threshold when strict_grounding=False (social/simple content).
     0.0 = effectively disabled — social responses are not citation-checked."""
@@ -1040,6 +1440,7 @@ class Settings(BaseSettings):
             "save_targets_v2": bool(self.save_targets_v2),
             "client_translator_draft": bool(self.client_translator_draft),
             "memory_dashboard_v1": bool(self.memory_dashboard_v1),
+            "rag_v3_single_pipeline_enforced": bool(self.rag_v3_single_pipeline_enforced),
         }
 
     @property

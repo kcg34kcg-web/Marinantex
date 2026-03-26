@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "generated_at": "2026-03-25T10:48:03.036170+00:00",
+  "case_count": 3,
+  "aggregate": {
+    "recall_at_k": 1.0,
+    "mrr_at_k": 1.0,
+    "ndcg_at_k": 1.0,
+    "citation_precision": 1.0
+  },
+  "thresholds": {
+    "recall_at_k": 0.88,
+    "mrr_at_k": 0.72,
+    "ndcg_at_k": 0.78,
+    "citation_precision": 0.78
+  },
+  "failures": [],
+  "exit_code": 0
+}

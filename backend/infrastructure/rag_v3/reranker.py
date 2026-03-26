@@ -10,6 +10,8 @@ import threading
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
+import httpx
+
 from infrastructure.config import settings
 
 logger = logging.getLogger("babylexit.rag_v3.reranker")
@@ -59,6 +61,11 @@ class RagV3Reranker:
     def __init__(self) -> None:
         self._model_name = settings.rag_v3_reranker_model
         self._enabled = bool(settings.rag_v3_reranker_enabled)
+        self._provider = str(getattr(settings, "rag_v3_reranker_provider", "auto") or "auto").strip().lower()
+        self._base_url = str(getattr(settings, "rag_v3_reranker_base_url", "") or "").strip().rstrip("/")
+        self._api_key = str(getattr(settings, "rag_v3_reranker_api_key", "") or "").strip()
+        self._request_timeout_s = float(getattr(settings, "rag_v3_reranker_request_timeout_s", 3.0) or 3.0)
+        self._use_http = self._provider == "http" or (self._provider == "auto" and bool(self._base_url))
         self._init_done = False
         self._init_inflight = False
         self._init_lock = threading.Lock()
@@ -74,6 +81,18 @@ class RagV3Reranker:
 
         if not self._enabled:
             return {item.chunk_id: _lexical_score(query, item.text) for item in candidates}
+
+        if self._cross_encoder is not None and not self._init_done:
+            # Keeps backward-compatible behavior for warmup bookkeeping.
+            await asyncio.to_thread(self._ensure_model)
+
+        if self._use_http:
+            try:
+                http_scores = await self._rerank_via_http(query=query, candidates=list(candidates))
+                if http_scores:
+                    return http_scores
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("RAG_V3_RERANKER_HTTP_FALLBACK | reason=%s", exc)
 
         if self._cross_encoder is None:
             # First load can be slow (model download). Start warmup in background
@@ -140,6 +159,53 @@ class RagV3Reranker:
             result[item.chunk_id] = _sigmoid(numeric)
         return result
 
+    async def _rerank_via_http(
+        self,
+        *,
+        query: str,
+        candidates: list[RagV3RerankItem],
+    ) -> dict[str, float]:
+        if not self._base_url or not candidates:
+            return {}
+        endpoints = _rerank_endpoints(self._base_url)
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        docs = [item.text[:4000] for item in candidates]
+        payloads = [
+            {
+                "model": self._model_name,
+                "query": query,
+                "documents": docs,
+                "top_n": len(docs),
+            },
+            {
+                "model": self._model_name,
+                "query": query,
+                "texts": docs,
+                "top_n": len(docs),
+            },
+        ]
+
+        async with httpx.AsyncClient(timeout=max(0.5, self._request_timeout_s)) as client:
+            last_error: Optional[Exception] = None
+            for endpoint in endpoints:
+                for payload in payloads:
+                    try:
+                        resp = await client.post(endpoint, headers=headers, json=payload)
+                        if resp.status_code >= 400:
+                            continue
+                        body = resp.json()
+                        parsed = _parse_http_rerank_scores(body=body, candidates=candidates)
+                        if parsed:
+                            return parsed
+                    except Exception as exc:  # noqa: BLE001
+                        last_error = exc
+                        continue
+            if last_error is not None:
+                raise last_error
+        return {}
+
 
 def _sigmoid(x: float) -> float:
     if x >= 0.0:
@@ -168,6 +234,79 @@ def _lexical_score(query: str, text: str) -> float:
 def _normalize_tokens(text: str) -> set[str]:
     tokens = _TOKEN_RE.findall((text or "").lower())
     return {token for token in tokens if len(token) >= 3 and token not in _STOPWORDS}
+
+
+def _rerank_endpoints(base_url: str) -> list[str]:
+    token = str(base_url or "").strip().rstrip("/")
+    if not token:
+        return []
+    if token.endswith("/rerank"):
+        return [token]
+    endpoints = [f"{token}/rerank"]
+    if not token.endswith("/v1"):
+        endpoints.append(f"{token}/v1/rerank")
+    return list(dict.fromkeys(endpoints))
+
+
+def _parse_http_rerank_scores(
+    *,
+    body: object,
+    candidates: list[RagV3RerankItem],
+) -> dict[str, float]:
+    if isinstance(body, dict):
+        if isinstance(body.get("results"), list):
+            parsed = _parse_results_array(body["results"], candidates)
+            if parsed:
+                return parsed
+        if isinstance(body.get("data"), list):
+            parsed = _parse_results_array(body["data"], candidates)
+            if parsed:
+                return parsed
+        if isinstance(body.get("scores"), list):
+            parsed = _parse_score_array(body["scores"], candidates)
+            if parsed:
+                return parsed
+    if isinstance(body, list):
+        parsed = _parse_score_array(body, candidates)
+        if parsed:
+            return parsed
+    return {}
+
+
+def _parse_results_array(results: list[object], candidates: list[RagV3RerankItem]) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        idx_raw = item.get("index")
+        try:
+            idx = int(idx_raw)
+        except Exception:
+            continue
+        if idx < 0 or idx >= len(candidates):
+            continue
+        score = _coerce_http_score(item.get("relevance_score", item.get("score", 0.0)))
+        out[candidates[idx].chunk_id] = score
+    return out
+
+
+def _parse_score_array(scores: list[object], candidates: list[RagV3RerankItem]) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for idx, raw in enumerate(scores):
+        if idx >= len(candidates):
+            break
+        out[candidates[idx].chunk_id] = _coerce_http_score(raw)
+    return out
+
+
+def _coerce_http_score(value: object) -> float:
+    try:
+        numeric = float(value)
+    except Exception:
+        return 0.0
+    if 0.0 <= numeric <= 1.0:
+        return numeric
+    return _sigmoid(numeric)
 
 
 rag_v3_reranker = RagV3Reranker()

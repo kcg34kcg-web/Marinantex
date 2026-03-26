@@ -91,6 +91,17 @@ function buildSourceId(sourceType: SourceType, sourceUrl: string, sourceTitle: s
   return `${sourceType}-${Date.now()}-${fallback}`.slice(0, 120);
 }
 
+function inferSourceFormatFromHint(value: string | null | undefined): 'text' | 'pdf' | 'html' | 'docx' | 'xml' | 'json' {
+  const token = String(value ?? '').trim().toLowerCase();
+  if (!token) return 'text';
+  if (token.endsWith('.pdf')) return 'pdf';
+  if (token.endsWith('.docx')) return 'docx';
+  if (token.endsWith('.html') || token.endsWith('.htm')) return 'html';
+  if (token.endsWith('.xml')) return 'xml';
+  if (token.endsWith('.json')) return 'json';
+  return 'text';
+}
+
 async function requireLawyerContext(): Promise<LawyerContext | NextResponse> {
   const supabase = await createClient();
   const {
@@ -124,7 +135,14 @@ async function requireLawyerContext(): Promise<LawyerContext | NextResponse> {
   };
 }
 
-async function extractTextFromFile(file: File): Promise<{ text: string; meta: Record<string, unknown> }> {
+type CorpusExtractedFile = {
+  text: string;
+  sourceFormat: 'text' | 'pdf' | 'html' | 'docx' | 'xml' | 'json';
+  binaryBase64?: string;
+  meta: Record<string, unknown>;
+};
+
+async function extractTextFromFile(file: File): Promise<CorpusExtractedFile> {
   const fileName = file.name.toLowerCase();
   const isPdf = file.type === 'application/pdf' || fileName.endsWith('.pdf');
   if (isPdf) {
@@ -135,8 +153,11 @@ async function extractTextFromFile(file: File): Promise<{ text: string; meta: Re
         .default
         ?? (module as unknown as (data: Buffer) => Promise<{ text?: string; numpages?: number }>));
     const parsed = await pdfParseFn(buffer);
+    const extracted = String(parsed?.text ?? '').trim();
     return {
-      text: String(parsed?.text ?? '').trim(),
+      text: extracted,
+      sourceFormat: 'pdf',
+      binaryBase64: extracted.length < 120 ? buffer.toString('base64') : undefined,
       meta: {
         parser: 'pdf-parse',
         pages: parsed?.numpages ?? null,
@@ -144,10 +165,31 @@ async function extractTextFromFile(file: File): Promise<{ text: string; meta: Re
     };
   }
 
+  const isDocx =
+    file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    || fileName.endsWith('.docx');
+  if (isDocx) {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    return {
+      text: `DOCX_BINARY_UPLOAD:${file.name}`,
+      sourceFormat: 'docx',
+      binaryBase64: buffer.toString('base64'),
+      meta: {
+        parser: 'docx_binary',
+        pages: null,
+      },
+    };
+  }
+
+  const isHtml = file.type === 'text/html' || fileName.endsWith('.html') || fileName.endsWith('.htm');
+  const isXml = file.type === 'application/xml' || file.type === 'text/xml' || fileName.endsWith('.xml');
+  const isJson = file.type === 'application/json' || fileName.endsWith('.json');
+  const sourceFormat = isHtml ? 'html' : isXml ? 'xml' : isJson ? 'json' : 'text';
   return {
     text: (await file.text()).trim(),
+    sourceFormat,
     meta: {
-      parser: 'plain_text',
+      parser: sourceFormat === 'text' ? 'plain_text' : `${sourceFormat}_text`,
       pages: null,
     },
   };
@@ -332,6 +374,8 @@ export async function POST(request: Request) {
   }
 
   let extractedText = rawTextInput || contentInput;
+  let inferredSourceFormat: 'text' | 'pdf' | 'html' | 'docx' | 'xml' | 'json' = 'text';
+  let binaryBase64: string | undefined;
   let parseMeta: Record<string, unknown> = {
     parser: 'manual_text',
     file_name: null,
@@ -341,6 +385,8 @@ export async function POST(request: Request) {
   if (!extractedText && file) {
     const parsed = await extractTextFromFile(file);
     extractedText = parsed.text;
+    inferredSourceFormat = parsed.sourceFormat;
+    binaryBase64 = parsed.binaryBase64;
     parseMeta = {
       ...parsed.meta,
       file_name: file.name,
@@ -366,6 +412,9 @@ export async function POST(request: Request) {
     sourceUrlInput
     || fileUrlInput
     || `admin://corpus/${sourceType}/${Date.now()}-${sourceSlug}`;
+  if (inferredSourceFormat === 'text' && !file) {
+    inferredSourceFormat = inferSourceFormatFromHint(sourceUrlInput || fileUrlInput);
+  }
   const sourceId = sourceIdInput || buildSourceId(sourceType, sourceUrl, sourceTitle);
   const jurisdiction = jurisdictionInput || 'TR';
   const effectiveFrom = parseIsoDate(effectiveFromInput);
@@ -393,7 +442,7 @@ export async function POST(request: Request) {
         source_type: sourceType,
         source_id: sourceId,
         raw_text: extractedText,
-        source_format: 'text',
+        source_format: inferredSourceFormat,
         classification,
         jurisdiction,
         effective_from: effectiveFrom,
@@ -407,6 +456,7 @@ export async function POST(request: Request) {
           court_level: courtLevel || null,
           case_id: caseId ?? null,
           parse_meta: parseMeta,
+          binary_base64: binaryBase64 ?? null,
           ingest_channel: 'admin_corpus',
         },
       }),

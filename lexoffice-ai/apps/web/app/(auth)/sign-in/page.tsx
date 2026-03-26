@@ -1,13 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { withBasePath } from "@/lib/base-path";
 
 export default function SignInPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("owner@demo.lexoffice.ai");
   const [password, setPassword] = useState("ChangeMe123!");
-  const [tenantSlug, setTenantSlug] = useState("demo-hukuk");
+  const [tenantSlug, setTenantSlug] = useState(searchParams.get("tenantSlug") ?? "demo-hukuk");
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
 
@@ -17,22 +21,33 @@ export default function SignInPage() {
     setIsPending(true);
 
     try {
-      const response = await fetch("/api/v1/auth/login", {
+      const response = await fetch(withBasePath("/api/v1/auth/login"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ email, password, tenantSlug })
+        body: JSON.stringify({
+          email,
+          password,
+          tenantSlug,
+          ...(mfaCode.trim().length > 0 ? { mfaCode: mfaCode.trim() } : {})
+        })
       });
 
       const result = (await response.json()) as {
         ok: boolean;
         data?: { tenant: { slug: string } };
-        error?: { message: string };
+        error?: { message: string; code?: string };
       };
 
       if (!response.ok || !result.ok || !result.data) {
-        setError(result.error?.message ?? "Giriş başarısız");
+        if (result.error?.code === "MFA_REQUIRED") {
+          setMfaRequired(true);
+          setError("Devam etmek için doğrulama uygulamasındaki 6 haneli MFA kodunu girin.");
+        } else {
+          setError(result.error?.message ?? "Giriş başarısız");
+        }
+
         setIsPending(false);
         return;
       }
@@ -83,6 +98,21 @@ export default function SignInPage() {
               type="text"
             />
           </label>
+
+          {mfaRequired ? (
+            <label className="block text-sm font-medium text-slate-700">
+              MFA Kodu
+              <input
+                value={mfaCode}
+                onChange={(event) => setMfaCode(event.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 tracking-[0.25em] outline-none ring-brand-500 focus:ring"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                required
+              />
+            </label>
+          ) : null}
 
           {error ? <p className="rounded-md bg-rose-50 p-2 text-sm text-rose-700">{error}</p> : null}
 
