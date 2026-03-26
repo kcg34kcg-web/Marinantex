@@ -1,5 +1,6 @@
 ﻿import { requireInternalOfficeUser } from '@/lib/office/team-access';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { canAccessClient } from '@/lib/dashboard/client-access';
 
 export async function GET(
   _request: Request,
@@ -12,6 +13,14 @@ export async function GET(
 
   const { id: clientId } = await context.params;
   const admin = createAdminClient();
+  const allowed = await canAccessClient(admin, {
+    clientId,
+    userId: access.userId,
+  });
+
+  if (!allowed) {
+    return Response.json({ error: 'Bu müvekkil dosyalarini görüntüleme yetkiniz yok.' }, { status: 403 });
+  }
 
   const linksResult = await admin
     .from('case_clients')

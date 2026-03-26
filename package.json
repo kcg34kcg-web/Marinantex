@@ -22,7 +22,9 @@
     "typecheck:api": "npm run lint -w @marinantex/api",
     "typecheck:lexoffice": "npm run typecheck --prefix lexoffice-ai",
     "typecheck:all": "npm run typecheck && npm run typecheck:lexoffice",
-    "test": "npm run test -w @marinantex/api",
+    "test": "npm run test:web && npm run test:api",
+    "test:web": "vitest run",
+    "test:api": "npm run test -w @marinantex/api",
     "test:udf:compat": "node scripts/run-udf-compat-check.mjs",
     "smoke:test": "node scripts/smoke-tests.mjs",
     "smoke:search:live": "node scripts/live-search-smoke.mjs",
@@ -42,7 +44,8 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
-    "eslint-config-prettier": "^10.1.8"
+    "eslint-config-prettier": "^10.1.8",
+    "vitest": "^4.1.2"
   },
   "dependencies": {
     "@ai-sdk/cohere": "^3.0.22",

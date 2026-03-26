@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { useQuery } from '@tanstack/react-query';
@@ -12,6 +12,8 @@ import { Badge } from '@/components/ui/badge';
 import { formatDateTR } from '@/lib/date';
 
 const USERNAME_PATTERN = /^[a-z0-9._]+$/;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const CLIENTS_PER_PAGE = 25;
 
 type ClientItem = {
   id: string;
@@ -19,7 +21,7 @@ type ClientItem = {
   email: string | null;
   fileNo: string | null;
   publicRefCode: string | null;
-  status: 'registered' | 'invited';
+  status: 'active' | 'invited' | 'inactive';
   createdAt: string;
   updatedAt: string;
   caseCount: number;
@@ -84,6 +86,7 @@ export default function ClientsPage() {
     Array<{ id: string; title: string; status: string; fileNo: string | null; updatedAt: string; publicRefCode: string }>
   >([]);
   const [isLoadingLinkedCases, setIsLoadingLinkedCases] = useState(false);
+  const [linkedCasesError, setLinkedCasesError] = useState<string | null>(null);
   const [messageModalClient, setMessageModalClient] = useState<{ clientId: string; fullName: string } | null>(null);
   const [messageBody, setMessageBody] = useState('');
   const [messageCaseId, setMessageCaseId] = useState('');
@@ -93,11 +96,14 @@ export default function ClientsPage() {
   const [draftStatusFilter, setDraftStatusFilter] = useState<ClientDraftStatus | 'all'>('all');
   const [draftActionMessage, setDraftActionMessage] = useState<string | null>(null);
   const [isUpdatingDraftId, setIsUpdatingDraftId] = useState<string | null>(null);
+  const [clientsPage, setClientsPage] = useState(1);
 
   const normalizedInviteUsername = inviteUsername.trim().toLowerCase();
+  const normalizedInviteEmail = inviteEmail.trim().toLowerCase();
   const isInviteUsernameProvided = normalizedInviteUsername.length > 0;
   const isInviteUsernameLengthValid = normalizedInviteUsername.length >= 3;
   const isInviteUsernameFormatValid = USERNAME_PATTERN.test(normalizedInviteUsername);
+  const isInviteEmailValid = EMAIL_PATTERN.test(normalizedInviteEmail);
   const isInviteUsernameValid =
     !isInviteUsernameProvided || (isInviteUsernameLengthValid && isInviteUsernameFormatValid);
 
@@ -118,7 +124,7 @@ export default function ClientsPage() {
       };
 
       if (!response.ok) {
-        throw new Error(payload.error ?? 'MÃ¼vekkil verileri alÄ±namadÄ±.');
+        throw new Error(payload.error ?? 'Muvekkil verileri alinamadi.');
       }
 
       return {
@@ -200,6 +206,26 @@ export default function ClientsPage() {
     });
   }, [clients, query]);
 
+  const totalClientPages = Math.max(1, Math.ceil(filteredClients.length / CLIENTS_PER_PAGE));
+
+  useEffect(() => {
+    setClientsPage(1);
+  }, [query]);
+
+  useEffect(() => {
+    setClientsPage((current) => {
+      if (current > totalClientPages) {
+        return totalClientPages;
+      }
+      return current;
+    });
+  }, [totalClientPages]);
+
+  const paginatedClients = useMemo(() => {
+    const start = (clientsPage - 1) * CLIENTS_PER_PAGE;
+    return filteredClients.slice(start, start + CLIENTS_PER_PAGE);
+  }, [clientsPage, filteredClients]);
+
   async function updateDraftStatus(draftId: string, status: ClientDraftStatus) {
     setIsUpdatingDraftId(draftId);
     setDraftActionMessage(null);
@@ -237,7 +263,7 @@ export default function ClientsPage() {
     setLinkedCasesModal({ clientId, fullName });
     setLinkedCases([]);
     setIsLoadingLinkedCases(true);
-    setActionMessage(null);
+    setLinkedCasesError(null);
 
     try {
       const response = await fetch(`/api/dashboard/clients/${clientId}/cases`, { cache: 'no-store' });
@@ -247,13 +273,13 @@ export default function ClientsPage() {
       };
 
       if (!response.ok) {
-        setActionMessage(payload.error ?? 'MÃ¼vekkil dosyalarÄ± alÄ±namadÄ±.');
+        setLinkedCasesError(payload.error ?? 'Muvekkil dosyalari alinamadi.');
         return;
       }
 
       setLinkedCases(payload.items ?? []);
     } catch {
-      setActionMessage('MÃ¼vekkil dosyalarÄ± yÃ¼klenirken aÄŸ hatasÄ± oluÅŸtu.');
+      setLinkedCasesError('Muvekkil dosyalari yuklenirken ag hatasi olustu.');
     } finally {
       setIsLoadingLinkedCases(false);
     }
@@ -261,7 +287,7 @@ export default function ClientsPage() {
 
   async function submitClientMessage() {
     if (!messageModalClient || !messageBody.trim()) {
-      setMessageAction('Mesaj metni boÅŸ olamaz.');
+      setMessageAction('Mesaj metni bos olamaz.');
       return;
     }
 
@@ -285,22 +311,22 @@ export default function ClientsPage() {
       };
 
       if (!response.ok) {
-        setMessageAction(payload.error ?? 'Mesaj gÃ¶nderilemedi.');
+        setMessageAction(payload.error ?? 'Mesaj gonderilemedi.');
         return;
       }
 
       const status = payload.message?.status ?? 'pending';
       setMessageAction(
         status === 'failed'
-          ? `Mesaj kaydedildi ancak teslimde sorun var: ${payload.message?.emailError ?? 'Teslim baÅŸarÄ±sÄ±z.'}`
+          ? `Mesaj kaydedildi ancak teslimde sorun var: ${payload.message?.emailError ?? 'Teslim basarisiz.'}`
           : status === 'sent'
-            ? 'Mesaj gÃ¶nderildi.'
-            : 'Mesaj beklemeye alÄ±ndÄ±.',
+            ? 'Mesaj gonderildi.'
+            : 'Mesaj beklemeye alindi.',
       );
       setMessageBody('');
       setMessageCaseId('');
     } catch {
-      setMessageAction('Mesaj gÃ¶nderimi sÄ±rasÄ±nda aÄŸ hatasÄ± oluÅŸtu.');
+      setMessageAction('Mesaj gonderimi sirasinda ag hatasi olustu.');
     } finally {
       setIsSendingMessage(false);
     }
@@ -308,17 +334,17 @@ export default function ClientsPage() {
 
   async function submitClientInvite() {
     if (inviteFullName.trim().length < 3) {
-      setActionMessage('LÃ¼tfen mÃ¼vekkil ad soyad bilgisini girin.');
+      setActionMessage('Lutfen muvekkil ad soyad bilgisini girin.');
       return;
     }
 
-    if (!inviteEmail.trim()) {
-      setActionMessage('LÃ¼tfen geÃ§erli bir e-posta girin.');
+    if (!isInviteEmailValid) {
+      setActionMessage('Lutfen gecerli bir e-posta girin.');
       return;
     }
 
     if (!isInviteUsernameValid) {
-      setActionMessage('KullanÄ±cÄ± adÄ± sadece a-z, 0-9, . ve _ iÃ§erebilir; girildiyse en az 3 karakter olmalÄ±.');
+      setActionMessage('Kullanici adi sadece a-z, 0-9, . ve _ icerebilir; girildiyse en az 3 karakter olmali.');
       return;
     }
 
@@ -338,18 +364,18 @@ export default function ClientsPage() {
           phone: invitePhone.trim() || undefined,
           partyType: invitePartyType || undefined,
           fileNo: inviteFileNo.trim() || undefined,
-          email: inviteEmail.trim(),
+          email: normalizedInviteEmail,
           expiresInDays: inviteDays,
         }),
       });
 
       const payload = (await response.json()) as { error?: string; inviteUrl?: string };
       if (!response.ok) {
-        setActionMessage(payload.error ?? 'MÃ¼vekkil daveti gÃ¶nderilemedi.');
+        setActionMessage(payload.error ?? 'Muvekkil daveti gonderilemedi.');
         return;
       }
 
-      setActionMessage('MÃ¼vekkil daveti oluÅŸturuldu.');
+      setActionMessage('Muvekkil daveti olusturuldu.');
       setInviteUrl(payload.inviteUrl ?? null);
       setInviteFullName('');
       setInviteUsername('');
@@ -362,7 +388,7 @@ export default function ClientsPage() {
       setInviteDays(7);
       await refetch();
     } catch {
-      setActionMessage('MÃ¼vekkil daveti gÃ¶nderilirken hata oluÅŸtu.');
+      setActionMessage('Muvekkil daveti gonderilirken hata olustu.');
     } finally {
       setIsSubmittingInvite(false);
     }
@@ -374,8 +400,8 @@ export default function ClientsPage() {
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <CardTitle>MÃ¼vekkil YÃ¶netimi</CardTitle>
-              <p className="text-sm text-slate-500">MÃ¼vekkil listenizi takip edin, yeni mÃ¼vekkil daveti oluÅŸturun.</p>
+              <CardTitle>Muvekkil Yonetimi</CardTitle>
+              <p className="text-sm text-slate-500">Muvekkil listenizi takip edin, yeni muvekkil daveti olusturun.</p>
             </div>
             <Button
               type="button"
@@ -386,14 +412,14 @@ export default function ClientsPage() {
               }}
               className="h-11 rounded-xl bg-gradient-to-r from-blue-600 to-slate-900 px-4 text-sm font-semibold text-white shadow-sm hover:from-blue-700 hover:to-slate-950"
             >
-              + MÃ¼vekkil Ekle (Davet)
+              + Muvekkil Ekle (Davet)
             </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-4">
             <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-              <p className="text-xs text-slate-500">Toplam MÃ¼vekkil</p>
+              <p className="text-xs text-slate-500">Toplam Muvekkil</p>
               <p className="text-xl font-semibold text-slate-900">{isLoading ? '...' : stats.totalClients}</p>
             </div>
             <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
@@ -411,7 +437,7 @@ export default function ClientsPage() {
           </div>
 
           <Input
-            placeholder="MÃ¼vekkil adÄ±na gÃ¶re ara"
+            placeholder="Muvekkil adina gore ara"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -424,7 +450,7 @@ export default function ClientsPage() {
             </div>
           ) : isError ? (
             <p className="text-sm text-orange-600">
-              {error instanceof Error ? error.message : 'MÃ¼vekkiller alÄ±namadÄ±.'}
+              {error instanceof Error ? error.message : 'Muvekkiller alinamadi.'}
             </p>
           ) : (
             <>
@@ -447,7 +473,7 @@ export default function ClientsPage() {
                         </td>
                       </tr>
                     ) : (
-                      filteredClients.map((item) => (
+                      paginatedClients.map((item) => (
                         <tr key={item.id} className="border-t border-border hover:bg-slate-50/60">
                           <td className="px-4 py-3">
                             <Link href={`/dashboard/clients/${item.id}` as Route} className="font-medium text-blue-700 hover:underline">
@@ -494,9 +520,12 @@ export default function ClientsPage() {
                             </div>
                           </td>
                           <td className="px-4 py-3">
-                            <Badge variant={item.openCaseCount > 0 ? 'orange' : 'muted'}>
-                              {item.openCaseCount > 0 ? 'Aktif Surecte' : 'Pasif'}
-                            </Badge>
+                            <div className="flex flex-col gap-1">
+                              <Badge variant={item.status === 'invited' ? 'orange' : item.status === 'inactive' ? 'muted' : 'blue'}>
+                                {item.status === 'invited' ? 'Davet Gonderildi' : item.status === 'inactive' ? 'Pasif' : 'Aktif'}
+                              </Badge>
+                              <span className="text-xs text-slate-500">Acik dosya: {item.openCaseCount}</span>
+                            </div>
                           </td>
                           <td className="px-4 py-3 text-slate-600" suppressHydrationWarning>
                             {formatDateTR(item.updatedAt)}
@@ -507,15 +536,45 @@ export default function ClientsPage() {
                   </tbody>
                 </table>
               </div>
+              {filteredClients.length > 0 ? (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+                  <span>
+                    Gosterilen: {paginatedClients.length} / {filteredClients.length}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={clientsPage <= 1}
+                      onClick={() => setClientsPage((current) => Math.max(1, current - 1))}
+                    >
+                      Onceki
+                    </Button>
+                    <span>
+                      Sayfa {clientsPage} / {totalClientPages}
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={clientsPage >= totalClientPages}
+                      onClick={() => setClientsPage((current) => Math.min(totalClientPages, current + 1))}
+                    >
+                      Sonraki
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
               <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Son MÃ¼vekkil Davetleri</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Son Muvekkil Davetleri</p>
                   <Button type="button" variant="outline" size="sm" disabled={isFetching} onClick={() => refetch()}>
                     Yenile
                   </Button>
                 </div>
                 {invites.length === 0 ? (
-                  <p className="text-xs text-slate-500">HenÃ¼z mÃ¼vekkil daveti oluÅŸturulmadÄ±.</p>
+                  <p className="text-xs text-slate-500">Henuz muvekkil daveti olusturulmadi.</p>
                 ) : (
                   <ul className="space-y-2 text-xs">
                     {invites.slice(0, 8).map((invite) => (
@@ -526,29 +585,29 @@ export default function ClientsPage() {
                         <div>
                           <p className="font-medium text-slate-700">{invite.fullName ?? invite.email}</p>
                           <p className="text-slate-600">
-                            {invite.username ? `@${invite.username} Â· ${invite.email}` : invite.email}
+                            {invite.username ? `@${invite.username} - ${invite.email}` : invite.email}
                           </p>
                           {invite.tcIdentity || invite.contactName || invite.phone || invite.partyType ? (
                             <p className="text-slate-500">
                               {invite.tcIdentity ? `TC/VKN: ${invite.tcIdentity}` : null}
                               {invite.tcIdentity && (invite.contactName || invite.phone || invite.partyType)
-                                ? ' Â· '
+                                ? ' - '
                                 : null}
-                              {invite.contactName ? `Ä°letiÅŸim: ${invite.contactName}` : null}
-                              {invite.contactName && (invite.phone || invite.partyType) ? ' Â· ' : null}
+                              {invite.contactName ? `Iletisim: ${invite.contactName}` : null}
+                              {invite.contactName && (invite.phone || invite.partyType) ? ' - ' : null}
                               {invite.phone ? `Tel: ${invite.phone}` : null}
-                              {invite.phone && invite.partyType ? ' Â· ' : null}
+                              {invite.phone && invite.partyType ? ' - ' : null}
                               {invite.partyType
                                 ? invite.partyType === 'plaintiff'
-                                  ? 'DavacÄ±'
+                                  ? 'Davaci'
                                   : invite.partyType === 'defendant'
-                                    ? 'DavalÄ±'
-                                    : 'DanÄ±ÅŸan'
+                                    ? 'Davali'
+                                    : 'Danisan'
                                 : null}
                             </p>
                           ) : null}
                           <p className="text-slate-500" suppressHydrationWarning>
-                            OluÅŸturma: {formatDateTR(invite.createdAt)} Â· Son: {formatDateTR(invite.expiresAt)}
+                            Olusturma: {formatDateTR(invite.createdAt)} - Son: {formatDateTR(invite.expiresAt)}
                           </p>
                         </div>
                         <Badge variant={invite.acceptedAt ? 'blue' : 'orange'}>
@@ -622,7 +681,7 @@ export default function ClientsPage() {
                             <p className="font-medium text-slate-900">{draft.title ?? 'Muvekkil Taslagi'}</p>
                             <p className="text-slate-600">
                               {draft.clientName ?? 'Muvekkil baglanmamis'}{' '}
-                              {draft.caseTitle ? `Â· ${draft.caseTitle}` : ''}
+                              {draft.caseTitle ? ` - ${draft.caseTitle}` : ''}
                             </p>
                           </div>
                           <div className="flex flex-wrap items-center gap-1">
@@ -645,12 +704,12 @@ export default function ClientsPage() {
 
                         <p className="mt-1 whitespace-pre-wrap text-slate-700">{draft.contentPreview}</p>
                         <div className="mt-1 text-[11px] text-slate-500" suppressHydrationWarning>
-                          Olusturma: {formatDateTR(draft.createdAt)} Â· Guncelleme: {formatDateTR(draft.updatedAt)}
+                          Olusturma: {formatDateTR(draft.createdAt)} - Guncelleme: {formatDateTR(draft.updatedAt)}
                         </div>
                         <div className="mt-1 text-[11px] text-slate-500">
-                          trace: msg={draft.sourceMessageId ? draft.sourceMessageId.slice(0, 8) : '-'} Â· out=
+                          trace: msg={draft.sourceMessageId ? draft.sourceMessageId.slice(0, 8) : '-'} - out=
                           {draft.sourceSavedOutputId ? draft.sourceSavedOutputId.slice(0, 8) : '-'}
-                          {draft.ownerName ? ` Â· olusturan: ${draft.ownerName}` : ''}
+                          {draft.ownerName ? ` - olusturan: ${draft.ownerName}` : ''}
                         </div>
 
                         <div className="mt-2 flex flex-wrap gap-2">
@@ -701,8 +760,8 @@ export default function ClientsPage() {
       {inviteModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
-            <h3 className="text-base font-semibold text-slate-900">MÃ¼vekkil Daveti OluÅŸtur</h3>
-            <p className="mt-1 text-sm text-slate-600">Yeni mÃ¼vekkili davet ederek kayÄ±t akÄ±ÅŸÄ±na yÃ¶nlendirin.</p>
+            <h3 className="text-base font-semibold text-slate-900">Muvekkil Daveti Olustur</h3>
+            <p className="mt-1 text-sm text-slate-600">Yeni muvekkili davet ederek kayit akisina yonlendirin.</p>
 
             <div className="mt-3 space-y-3">
               <div>
@@ -712,12 +771,12 @@ export default function ClientsPage() {
                 <Input
                   value={inviteFullName}
                   onChange={(event) => setInviteFullName(event.target.value)}
-                  placeholder="Ã–rn. AyÅŸe YÄ±lmaz"
+                  placeholder="Orn. Ayse Yilmaz"
                 />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-                  KullanÄ±cÄ± AdÄ± (Opsiyonel)
+                  Kullanici Adi (Opsiyonel)
                 </label>
                 <Input
                   value={inviteUsername}
@@ -725,7 +784,7 @@ export default function ClientsPage() {
                   placeholder="ayseyilmaz"
                 />
                 {isInviteUsernameProvided && !isInviteUsernameValid ? (
-                  <p className="mt-1 text-xs text-orange-600">Sadece a-z, 0-9, . ve _ kullanÄ±n; minimum 3 karakter.</p>
+                  <p className="mt-1 text-xs text-orange-600">Sadece a-z, 0-9, . ve _ kullanin; minimum 3 karakter.</p>
                 ) : null}
               </div>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -741,12 +800,12 @@ export default function ClientsPage() {
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-                    Ä°letiÅŸim KiÅŸisi (Opsiyonel)
+                    Iletisim Kisisi (Opsiyonel)
                   </label>
                   <Input
                     value={inviteContactName}
                     onChange={(event) => setInviteContactName(event.target.value)}
-                    placeholder="Ã–rn. Mehmet Kaya"
+                    placeholder="Orn. Mehmet Kaya"
                   />
                 </div>
                 <div>
@@ -781,33 +840,38 @@ export default function ClientsPage() {
                     className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
                   >
                     <option value="">Belirtilmedi</option>
-                    <option value="plaintiff">DavacÄ±</option>
-                    <option value="defendant">DavalÄ±</option>
-                    <option value="consultant">DanÄ±ÅŸan</option>
+                    <option value="plaintiff">Davaci</option>
+                    <option value="defendant">Davali</option>
+                    <option value="consultant">Danisan</option>
                   </select>
                 </div>
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">E-Posta</label>
                 <Input
+                  type="email"
+                  autoComplete="email"
                   value={inviteEmail}
                   onChange={(event) => setInviteEmail(event.target.value)}
                   placeholder="ornek@domain.com"
                 />
+                {inviteEmail.trim().length > 0 && !isInviteEmailValid ? (
+                  <p className="mt-1 text-xs text-orange-600">Gecerli bir e-posta formati girin.</p>
+                ) : null}
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-                  GeÃ§erlilik (GÃ¼n)
+                  Gecerlilik (Gun)
                 </label>
                 <select
                   value={inviteDays}
                   onChange={(event) => setInviteDays(Number(event.target.value))}
                   className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
                 >
-                  <option value={3}>3 gÃ¼n</option>
-                  <option value={7}>7 gÃ¼n</option>
-                  <option value={14}>14 gÃ¼n</option>
-                  <option value={30}>30 gÃ¼n</option>
+                  <option value={3}>3 gun</option>
+                  <option value={7}>7 gun</option>
+                  <option value={14}>14 gun</option>
+                  <option value={30}>30 gun</option>
                 </select>
               </div>
             </div>
@@ -815,7 +879,7 @@ export default function ClientsPage() {
             {actionMessage ? <p className="mt-3 text-xs text-slate-600">{actionMessage}</p> : null}
             {inviteUrl ? (
               <div className="mt-2 rounded-md border border-blue-200 bg-blue-50 p-2 text-xs text-blue-700">
-                Davet baÄŸlantÄ±sÄ±:{' '}
+                Davet baglantisi:{' '}
                 <a href={inviteUrl} className="font-medium underline">
                   {inviteUrl}
                 </a>
@@ -848,12 +912,12 @@ export default function ClientsPage() {
                 disabled={
                   isSubmittingInvite ||
                   inviteFullName.trim().length < 3 ||
-                  inviteEmail.trim().length < 5 ||
+                  !isInviteEmailValid ||
                   !isInviteUsernameValid
                 }
                 onClick={submitClientInvite}
               >
-                Davet OluÅŸtur
+                Davet Olustur
               </Button>
             </div>
           </div>
@@ -872,6 +936,7 @@ export default function ClientsPage() {
                 onClick={() => {
                   setLinkedCasesModal(null);
                   setLinkedCases([]);
+                  setLinkedCasesError(null);
                 }}
               >
                 Kapat
@@ -883,6 +948,10 @@ export default function ClientsPage() {
                 <Skeleton className="h-12 w-full" />
                 <Skeleton className="h-12 w-full" />
               </div>
+            ) : linkedCasesError ? (
+              <p className="rounded-md border border-orange-200 bg-orange-50 p-4 text-sm text-orange-700">
+                {linkedCasesError}
+              </p>
             ) : linkedCases.length === 0 ? (
               <p className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
                 Bu muvekkile bagli dosya bulunamadi.
@@ -895,7 +964,7 @@ export default function ClientsPage() {
                       <div>
                         <p className="text-sm font-medium text-slate-900">{item.title}</p>
                         <p className="text-xs text-slate-600">
-                          Ref: {item.publicRefCode} Â· Dosya No: {item.fileNo ?? '-'}
+                          Ref: {item.publicRefCode} - Dosya No: {item.fileNo ?? '-'}
                         </p>
                         <p className="text-xs text-slate-500" suppressHydrationWarning>
                           Son guncelleme: {formatDateTR(item.updatedAt)}

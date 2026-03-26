@@ -2,6 +2,8 @@
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { logDashboardAudit } from '@/lib/dashboard/audit';
+import { canAccessCase } from '@/lib/dashboard/access';
+import { canAccessClient } from '@/lib/dashboard/client-access';
 
 const createMessageSchema = z.object({
   body: z.string().min(1).max(5000),
@@ -92,6 +94,14 @@ export async function GET(
 
   const { id: clientId } = await context.params;
   const admin = createAdminClient();
+  const allowed = await canAccessClient(admin, {
+    clientId,
+    userId: access.userId,
+  });
+
+  if (!allowed) {
+    return Response.json({ error: 'Bu müvekkilin mesajlarini görüntüleme yetkiniz yok.' }, { status: 403 });
+  }
 
   const clientCheck = await admin
     .from('clients')
@@ -192,6 +202,72 @@ export async function POST(
   const payload = parsed.data;
   const { id: clientId } = await context.params;
   const admin = createAdminClient();
+  const allowed = await canAccessClient(admin, {
+    clientId,
+    userId: access.userId,
+  });
+
+  if (!allowed) {
+    return Response.json({ error: 'Bu müvekkile mesaj gönderme yetkiniz yok.' }, { status: 403 });
+  }
+
+  if (payload.caseId) {
+    const allowedCase = await canAccessCase(admin, {
+      caseId: payload.caseId,
+      userId: access.userId,
+      role: access.role,
+    });
+
+    if (!allowedCase) {
+      return Response.json({ error: 'Bu dosyaya mesaj ekleme yetkiniz yok.' }, { status: 403 });
+    }
+
+    const clientCaseLinkResult = await admin
+      .from('case_clients')
+      .select('id')
+      .eq('case_id', payload.caseId)
+      .eq('client_id', clientId)
+      .is('deleted_at', null)
+      .limit(1);
+
+    let caseLinkedToClient = (clientCaseLinkResult.data ?? []).length > 0;
+
+    if (clientCaseLinkResult.error && clientCaseLinkResult.error.code !== '42P01') {
+      return Response.json({ error: 'Dosya-müvekkil iliskisi dogrulanamadi.' }, { status: 500 });
+    }
+
+    if (!caseLinkedToClient && clientCaseLinkResult.error?.code === '42P01') {
+      const legacyClientResult = await admin
+        .from('clients')
+        .select('profile_id')
+        .eq('id', clientId)
+        .is('deleted_at', null)
+        .maybeSingle<{ profile_id: string | null }>();
+
+      if (legacyClientResult.error) {
+        return Response.json({ error: 'Dosya-müvekkil iliskisi dogrulanamadi.' }, { status: 500 });
+      }
+
+      if (legacyClientResult.data?.profile_id) {
+        const legacyCaseResult = await admin
+          .from('cases')
+          .select('id')
+          .eq('id', payload.caseId)
+          .eq('client_id', legacyClientResult.data.profile_id)
+          .limit(1);
+
+        if (legacyCaseResult.error) {
+          return Response.json({ error: 'Dosya-müvekkil iliskisi dogrulanamadi.' }, { status: 500 });
+        }
+
+        caseLinkedToClient = (legacyCaseResult.data ?? []).length > 0;
+      }
+    }
+
+    if (!caseLinkedToClient) {
+      return Response.json({ error: 'Secilen dosya bu müvekkil ile iliskili degil.' }, { status: 400 });
+    }
+  }
 
   const clientEmail = await resolveClientEmail(admin, clientId);
 
