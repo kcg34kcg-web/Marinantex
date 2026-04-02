@@ -1,6 +1,6 @@
 const MIN_SECRET_LENGTH = 24;
 const WEAK_SECRET_TOKENS = new Set(["dev-change-me", "changeme", "default", "test"]);
-const DEV_FALLBACK_JWT_SECRET = "local-dev-jwt-secret-change-before-prod-2026";
+const DEV_FALLBACK_JWT_SECRET = "benim_cok_gizli_ve_kirilmasi_imkansiz_jwt_sifrem_2026!";
 
 export type JwtExpiresIn = `${number}${"s" | "m" | "h" | "d"}` | number;
 
