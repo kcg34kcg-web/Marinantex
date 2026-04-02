@@ -19,40 +19,56 @@ function parseCorsOrigins(value: string | undefined): string[] {
   return parsed.length > 0 ? parsed : fallback;
 }
 
+// 1. ADIM: Vercel için uygulamanın hafızada tutulacağı değişken
+let cachedServer: any;
+
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  const corsOrigins = parseCorsOrigins(process.env.CORS_ORIGINS);
-  const expressApp = app.getHttpAdapter().getInstance();
+  // Eğer uygulama zaten çalışıyorsa tekrar kurmasını engelliyoruz
+  if (!cachedServer) {
+    const app = await NestFactory.create(AppModule);
+    const corsOrigins = parseCorsOrigins(process.env.CORS_ORIGINS);
+    const expressApp = app.getHttpAdapter().getInstance();
 
-  expressApp.set("trust proxy", 1);
-  expressApp.disable("x-powered-by");
-  app.enableShutdownHooks();
-  app.use(
-    helmet({
-      contentSecurityPolicy: false,
-      crossOriginEmbedderPolicy: false,
-    }),
-  );
-  app.use(compression());
-  app.use(json({ limit: process.env.API_BODY_LIMIT ?? "2mb" }));
-  app.use(urlencoded({ extended: true, limit: process.env.API_BODY_LIMIT ?? "2mb" }));
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
+    expressApp.set("trust proxy", 1);
+    expressApp.disable("x-powered-by");
+    app.enableShutdownHooks();
+    app.use(
+      helmet({
+        contentSecurityPolicy: false,
+        crossOriginEmbedderPolicy: false,
+      }),
+    );
+    app.use(compression());
+    app.use(json({ limit: process.env.API_BODY_LIMIT ?? "2mb" }));
+    app.use(urlencoded({ extended: true, limit: process.env.API_BODY_LIMIT ?? "2mb" }));
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
+    );
 
-  app.enableCors({
-    origin: corsOrigins,
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-tenant-id", "x-request-id"],
-  });
+    app.enableCors({
+      origin: corsOrigins,
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "x-tenant-id", "x-request-id"],
+    });
 
-  const port = Number(process.env.PORT ?? 4000);
-  await app.listen(port);
+    // 2. ADIM: Vercel'de port dinlemeyiz, sadece uygulamayı başlatırız (init)
+    await app.init();
+    
+    // expressApp'i önbelleğe alıyoruz
+    cachedServer = expressApp;
+  }
+
+  return cachedServer;
 }
 
-void bootstrap();
+// 3. ADIM: Eski `void bootstrap();` satırını sildik ve yerine bunu ekledik.
+// Vercel'in uygulamamıza gelen web isteklerini (req, res) ilettiği ana fonksiyon budur.
+export default async function handler(req: any, res: any) {
+  const server = await bootstrap();
+  return server(req, res);
+}
