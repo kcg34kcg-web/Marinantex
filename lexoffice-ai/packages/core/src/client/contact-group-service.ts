@@ -76,25 +76,28 @@ export class ContactGroupService {
     await this.assertContactsExist(input.tenantId, contactIds);
 
     try {
-      const group = await this.prisma.contactGroup.create({
-        data: {
-          tenantId: input.tenantId,
-          name,
-          description: normalizeNullableString(input.description),
-          color: normalizeHexColor(input.color),
-          createdById: actorUserId,
-          members:
-            contactIds.length > 0
-              ? {
-                  createMany: {
-                    data: contactIds.map((contactId) => ({
-                      tenantId: input.tenantId,
-                      contactId
-                    }))
-                  }
+      const createData = {
+        tenantId: input.tenantId,
+        name,
+        description: normalizeNullableString(input.description),
+        color: normalizeHexColor(input.color),
+        createdById: actorUserId,
+        ...(contactIds.length > 0
+          ? {
+              members: {
+                createMany: {
+                  data: contactIds.map((contactId) => ({
+                    tenantId: input.tenantId,
+                    contactId
+                  }))
                 }
-              : undefined
-        },
+              }
+            }
+          : {})
+      };
+
+      const group = await this.prisma.contactGroup.create({
+        data: createData,
         include: {
           members: {
             orderBy: [{ createdAt: "asc" }],

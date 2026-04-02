@@ -265,19 +265,60 @@ class QueryEmbedder:
         self._force_local_fallback: bool = bool(
             getattr(settings, "embedding_force_local_fallback", False)
         )
+        self._auto_resize_to_target: bool = bool(
+            getattr(settings, "embedding_auto_resize_to_target", False)
+        )
 
         logger.info(
-            "QueryEmbedder initialised | model=%s | dims=%d | send_dims=%s | batch=%d | retries=%d | force_local=%s",
+            "QueryEmbedder initialised | model=%s | dims=%d | send_dims=%s | batch=%d | retries=%d | force_local=%s | auto_resize=%s",
             self._model,
             self._dimensions,
             self._send_dimensions,
             self._batch_size,
             self._max_retries,
             self._force_local_fallback,
+            self._auto_resize_to_target,
         )
 
     def _local_fallback_embeddings(self, texts: List[str]) -> List[List[float]]:
         return [_hash_embedding_fallback(text, self._dimensions) for text in texts]
+
+    def _resize_vector_to_target(self, vector: List[float]) -> List[float]:
+        current = len(vector)
+        target = int(self._dimensions)
+        if current == target:
+            return vector
+        if target <= 0:
+            raise EmbeddingError(f"Invalid target embedding dimension: {target}")
+        if current > target:
+            return vector[:target]
+        return vector + ([0.0] * (target - current))
+
+    def _normalize_vector_dimensions(
+        self,
+        vector: List[float],
+        *,
+        purpose: str,
+        index: int | None = None,
+    ) -> List[float]:
+        current = len(vector)
+        target = int(self._dimensions)
+        if current == target:
+            return vector
+        if not self._auto_resize_to_target:
+            raise EmbeddingError(
+                f"Embedding dimension mismatch: expected {target}, got {current}. "
+                f"Set EMBEDDING_AUTO_RESIZE_TO_TARGET=true for local compatibility."
+            )
+        resized = self._resize_vector_to_target(vector)
+        logger.warning(
+            "EMBED_DIM_AUTO_RESIZE | purpose=%s | idx=%s | from=%d | to=%d",
+            purpose,
+            index if index is not None else "-",
+            current,
+            target,
+        )
+        return resized
 
     async def embed_query(self, query: str) -> List[float]:
         """
@@ -308,7 +349,7 @@ class QueryEmbedder:
             )
 
         vectors = await self._embed_with_retry([query])
-        vector = vectors[0]
+        vector = self._normalize_vector_dimensions(vectors[0], purpose="query")
 
         assert_dimensions(vector, self._dimensions)
 
@@ -370,6 +411,11 @@ class QueryEmbedder:
             batch = texts[i : i + self._batch_size]
             batch_vectors = await self._embed_with_retry(batch)
             for j, vec in enumerate(batch_vectors):
+                vec = self._normalize_vector_dimensions(
+                    vec,
+                    purpose="ingest",
+                    index=i + j,
+                )
                 assert_dimensions(vec, self._dimensions)
                 if is_zero_vector(vec):
                     logger.warning(
@@ -377,6 +423,7 @@ class QueryEmbedder:
                         i + j,
                         batch[j][:60],
                     )
+                batch_vectors[j] = vec
             results.extend(batch_vectors)
 
         logger.info(

@@ -17,7 +17,7 @@ export async function requireInternalOfficeUser() {
 
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, bureau_id')
     .eq('id', user.id)
     .single();
 
@@ -29,10 +29,15 @@ export async function requireInternalOfficeUser() {
     return { ok: false as const, status: 403, message: 'Bu alan sadece ofis ekibine açıktır.' };
   }
 
+  if (!profile.bureau_id) {
+    return { ok: false as const, status: 403, message: 'Büro kapsamı doğrulanamadı.' };
+  }
+
   return {
     ok: true as const,
     userId: user.id,
     role: profile.role as InternalOfficeRole,
+    bureauId: profile.bureau_id,
     supabase,
   };
 }

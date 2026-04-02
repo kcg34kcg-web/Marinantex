@@ -264,6 +264,7 @@ export async function POST(request: Request) {
       detail: payload.title.length > 120 ? `${payload.title.slice(0, 117)}...` : payload.title,
       actionUrl: `/office?tab=team&threadId=${threadId}`,
       actionLabel: 'Ekibi Ac',
+      bureauId: access.bureauId,
     });
 
     await logDashboardAudit(admin, {

@@ -148,10 +148,10 @@ export default function ProfilePage() {
     const { error } = await supabase
       .from('profiles')
       .update({
-        full_name: formData.full_name,
-        phone: formData.phone,
-        address: formData.address,
-        university: formData.university,
+        full_name: formData.full_name ?? undefined,
+        phone: formData.phone ?? undefined,
+        address: formData.address ?? undefined,
+        university: formData.university ?? undefined,
         updated_at: new Date().toISOString(),
       })
       .eq('id', formData.id);

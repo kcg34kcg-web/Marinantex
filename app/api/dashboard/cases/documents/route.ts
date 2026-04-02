@@ -118,8 +118,10 @@ export async function POST(request: Request) {
 
   const extension = toFileExtension(fileEntry.name);
   const mimeType = (fileEntry.type || '').toLowerCase();
+  const hasAllowedMimeType = ALLOWED_MIME_TYPES.has(mimeType);
+  const hasAllowedExtension = ALLOWED_EXTENSIONS.has(extension);
 
-  if (!ALLOWED_MIME_TYPES.has(mimeType) && !ALLOWED_EXTENSIONS.has(extension)) {
+  if (!hasAllowedExtension || (mimeType.length > 0 && !hasAllowedMimeType)) {
     return Response.json({
       error: 'Desteklenmeyen dosya formati. Desteklenenler: PDF, DOCX, XLSX, JPG, PNG.',
     }, { status: 400 });

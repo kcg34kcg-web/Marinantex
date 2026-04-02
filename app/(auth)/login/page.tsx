@@ -1,6 +1,7 @@
 import { LoginForm } from '@/components/auth/login-form';
 import { MagicLinkForm } from '@/components/auth/magic-link-form';
 import { Tabs } from '@/components/ui/tabs';
+import { Logo } from '@/components/brand/Logo';
 import Link from 'next/link';
 
 interface LoginPageProps {
@@ -36,6 +37,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   return (
     <main className="mx-auto flex min-h-screen max-w-md items-center px-6">
       <div className="w-full space-y-4 rounded-[var(--radius-md)] border border-[var(--main-border,var(--border))] bg-[color-mix(in_srgb,var(--main-surface-3,var(--surface)),transparent_4%)] p-6 shadow-[var(--shadow-elev-2)] backdrop-blur-[var(--blur-heavy)]">
+        <div className="flex justify-center">
+          <Logo width={176} height={54} className="h-10 w-auto" priority />
+        </div>
         <h1 className="text-2xl font-semibold tracking-[-0.01em] text-[var(--main-text,var(--text))]">{roleTitle}</h1>
         <p className="text-sm text-[var(--main-muted,var(--secondary))]">Lütfen giriş türünüzü seçin.</p>
 

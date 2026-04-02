@@ -104,7 +104,7 @@ export async function POST(req: Request) {
       temperature: tier === 'summary' ? 0.3 : 0.2,
     });
 
-    const response = textResult.toDataStreamResponse();
+    const response = textResult.toTextStreamResponse();
     response.headers.set('x-pii-map', piiMapHeader);
     return response;
   } catch {

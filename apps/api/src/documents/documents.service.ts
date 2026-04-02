@@ -482,6 +482,75 @@ export class DocumentsService {
     });
   }
 
+  async getVersionById(id: string, versionId: string, tenantId: string) {
+    await this.ensureDocumentExists(id, tenantId);
+    const version = await this.prisma.documentVersion.findFirst({
+      where: {
+        id: versionId,
+        tenantId,
+        documentId: id,
+      },
+      select: {
+        id: true,
+        versionNumber: true,
+        schemaVersion: true,
+        canonicalJson: true,
+        snapshotHash: true,
+        isFinalSnapshot: true,
+        createdById: true,
+        createdAt: true,
+      },
+    });
+    if (!version) {
+      throw new NotFoundException("Document version not found");
+    }
+    return version;
+  }
+
+  async restoreVersion(
+    id: string,
+    versionId: string,
+    tenantId: string,
+    actorUserId: string,
+    meta?: Omit<MutationContext, "actorUserId">,
+  ) {
+    const version = await this.getVersionById(id, versionId, tenantId);
+    const canonicalTree = ensureCanonicalTree(
+      version.canonicalJson as unknown as Parameters<typeof ensureCanonicalTree>[0],
+      version.schemaVersion,
+    );
+
+    const restored = await this.updateContent(
+      id,
+      tenantId,
+      actorUserId,
+      {
+        schemaVersion: canonicalTree.schemaVersion,
+        canonicalJson: canonicalTree as unknown as UpdateDocumentContentDto["canonicalJson"],
+      },
+    );
+
+    await this.auditService.write({
+      tenantId,
+      actorUserId,
+      action: "DOCUMENT_UPDATED",
+      objectType: "DOCUMENT",
+      objectId: id,
+      requestId: meta?.requestId,
+      ipAddress: meta?.ipAddress,
+      userAgent: meta?.userAgent,
+      metadata: {
+        field: "content_restore",
+        sourceVersionId: version.id,
+        sourceVersionNumber: version.versionNumber,
+        restoredLatestVersion: restored.latestVersion,
+      },
+      dataClassification: "sensitive_case",
+    });
+
+    return restored;
+  }
+
   async finalize(
     id: string,
     tenantId: string,

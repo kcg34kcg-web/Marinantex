@@ -449,7 +449,7 @@ export default function ClientsPage() {
                 </Link>
               </div>
             </div>
-            <div className="min-w-[260px]">
+            <div className="min-w-[260px] space-y-1">
               <Button
                 type="button"
                 onClick={() => {
@@ -457,12 +457,13 @@ export default function ClientsPage() {
                   setActionMessage(null);
                   setInviteUrl(null);
                 }}
-                className="h-auto w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-left text-slate-900 shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_12px_24px_rgba(15,23,42,0.06)] transition hover:border-slate-400 hover:bg-slate-50"
+                className="group h-12 w-full justify-between rounded-xl border border-blue-700 bg-gradient-to-r from-blue-600 to-blue-700 px-4 text-sm font-semibold text-white shadow-sm transition hover:from-blue-700 hover:to-blue-800"
               >
-                <span className="flex flex-col leading-tight">
-                  <span className="text-sm font-semibold">+ Yeni Müvekkil Ekle</span>
-                  <span className="mt-1 text-[11px] font-medium text-slate-500">Davet ve profil detayları ile</span>
+                <span className="inline-flex items-center gap-2">
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/20 text-sm font-bold">+</span>
+                  Yeni Müvekkil Ekle
                 </span>
+                <span className="text-white/70 transition group-hover:translate-x-0.5">→</span>
               </Button>
             </div>
           </div>

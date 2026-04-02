@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { canAccessCase } from '@/lib/dashboard/access';
 import { logDashboardAudit } from '@/lib/dashboard/audit';
 
 const updateCaseStatusSchema = z.object({
@@ -21,6 +22,23 @@ export async function POST(request: Request) {
 
   const admin = createAdminClient();
   const payload = parsed.data;
+  const uniqueCaseIds = [...new Set(payload.caseIds)];
+
+  const accessChecks = await Promise.all(
+    uniqueCaseIds.map(async (caseId) => ({
+      caseId,
+      allowed: await canAccessCase(admin, {
+        caseId,
+        userId: access.userId,
+        role: access.role,
+      }),
+    }))
+  );
+
+  const unauthorizedCaseExists = accessChecks.some((item) => !item.allowed);
+  if (unauthorizedCaseExists) {
+    return Response.json({ error: 'Seçilen dosyalardan en az birine erişim yetkiniz yok.' }, { status: 403 });
+  }
 
   const { data, error } = await admin
     .from('cases')
@@ -28,7 +46,7 @@ export async function POST(request: Request) {
       status: payload.status,
       updated_at: new Date().toISOString(),
     })
-    .in('id', payload.caseIds)
+    .in('id', uniqueCaseIds)
     .select('id');
 
   if (error) {

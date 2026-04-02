@@ -94,6 +94,12 @@ enum MessageState {
   SPAM
 }
 
+enum MailSenderListKind {
+  WHITELIST
+  BLACKLIST
+  BLOCKED
+}
+
 enum RecipientType {
   TO
   CC
@@ -164,9 +170,12 @@ model Tenant {
   mailboxPermissions MailboxPermission[]
   mailboxSyncStates MailboxSyncState[]
   mailThreads       MailThread[]
+  threadProductivities MailThreadProductivity[]
   mailMessages      MailMessage[]
   labels            MailLabel[]
   folders           MailFolder[]
+  filterRules       MailFilterRule[]
+  senderListEntries MailSenderListEntry[]
   drafts            Draft[]
   signatures        Signature[]
   contacts          Contact[]
@@ -205,6 +214,15 @@ model TenantSettings {
   aiEnabled                  Boolean  @default(true)
   aiHumanApprovalRequired    Boolean  @default(true)
   legalPrivilegeLabelEnabled Boolean  @default(true)
+  mailConversationViewEnabled Boolean @default(true)
+  composeDefaultFont         String   @default("system")
+  defaultSenderMailboxId     String?
+  mailForwardingEnabled      Boolean  @default(false)
+  mailForwardingRecipients   String[]
+  mailForwardingMailboxId    String?
+  autoResponderEnabled       Boolean  @default(false)
+  autoResponderSubject       String?
+  autoResponderBodyText      String?
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
 
@@ -461,6 +479,7 @@ model Mailbox {
   messages        MailMessage[]
   folders         MailFolder[]
   labels          MailLabel[]
+  filterRules     MailFilterRule[]
   drafts          Draft[]
 
   @@unique([tenantId, email])
@@ -577,10 +596,32 @@ model MailThread {
   client   Client?  @relation(fields: [linkedClientId], references: [id], onDelete: SetNull)
   messages MailMessage[]
   links    MatterMessage[]
+  productivity MailThreadProductivity?
 
   @@unique([tenantId, mailboxId, providerThreadId])
   @@index([tenantId, lastMessageAt])
   @@index([linkedMatterId])
+}
+
+model MailThreadProductivity {
+  id          String   @id @default(cuid())
+  tenantId    String
+  threadId    String   @unique
+  isPinned    Boolean  @default(false)
+  pinnedAt    DateTime?
+  readLaterAt DateTime?
+  reminderAt  DateTime?
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  thread MailThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, isPinned, pinnedAt])
+  @@index([tenantId, readLaterAt])
+  @@index([tenantId, reminderAt])
 }
 
 model MailMessage {
@@ -710,6 +751,53 @@ model MailFolder {
 
   @@unique([tenantId, mailboxId, name])
   @@index([providerFolderId])
+}
+
+model MailFilterRule {
+  id                String       @id @default(cuid())
+  tenantId          String
+  mailboxId         String?
+  name              String
+  enabled           Boolean      @default(true)
+  priority          Int          @default(100)
+  fromPattern       String?
+  subjectPattern    String?
+  bodyPattern       String?
+  hasAttachments    Boolean?
+  actionState       MessageState?
+  actionMarkRead    Boolean      @default(false)
+  actionStar        Boolean      @default(false)
+  actionImportant   Boolean      @default(false)
+  actionLabelName   String?
+  actionForwardTo   String?
+  stopProcessing    Boolean      @default(false)
+  createdById       String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  deletedAt         DateTime?
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mailbox Mailbox? @relation(fields: [mailboxId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, mailboxId, enabled, priority])
+  @@index([tenantId, deletedAt])
+}
+
+model MailSenderListEntry {
+  id             String             @id @default(cuid())
+  tenantId       String
+  kind           MailSenderListKind
+  emailOrDomain  String
+  note           String?
+  createdById    String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  deletedAt      DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, kind, emailOrDomain])
+  @@index([tenantId, kind, deletedAt])
 }
 
 model Draft {

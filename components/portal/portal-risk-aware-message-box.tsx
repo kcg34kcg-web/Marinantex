@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { fetchPortalWithSessionRefresh } from '@/lib/portal/client-fetch';
 
 export function PortalRiskAwareMessageBox({ caseId }: { caseId: string }) {
   const [message, setMessage] = useState('');
@@ -10,7 +11,7 @@ export function PortalRiskAwareMessageBox({ caseId }: { caseId: string }) {
 
   async function submitMessage() {
     setStatus(null);
-    const response = await fetch('/api/portal/messages', {
+    const response = await fetchPortalWithSessionRefresh('/api/portal/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, caseId }),

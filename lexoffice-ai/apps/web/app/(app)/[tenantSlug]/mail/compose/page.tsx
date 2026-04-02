@@ -23,6 +23,14 @@ type ComposeSignature = {
   isDefault: boolean;
 };
 
+type ComposeMailboxOption = {
+  id: string;
+  email: string;
+  displayName: string | null;
+};
+
+type ComposeFont = "system" | "sans" | "serif" | "mono";
+
 export default async function ComposePage({
   params,
   searchParams
@@ -84,26 +92,31 @@ export default async function ComposePage({
         })
       : null;
 
-  const mailbox = await prisma.mailbox.findFirst({
+  const mailboxOptions: ComposeMailboxOption[] = await prisma.mailbox.findMany({
     where: {
       tenantId: tenant.id,
-      deletedAt: null,
-      ...(draft?.mailboxId
-        ? {
-            id: draft.mailboxId
-            }
-          : query.mailboxId
-            ? {
-                id: query.mailboxId
-              }
-            : sourceMessage?.mailboxId
-              ? {
-                  id: sourceMessage.mailboxId
-                }
-              : {})
+      deletedAt: null
     },
-    orderBy: { createdAt: "asc" }
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      email: true,
+      displayName: true
+    }
   });
+
+  if (mailboxOptions.length === 0) {
+    notFound();
+  }
+
+  const resolvedMailboxId = resolveInitialMailboxId({
+    mailboxOptions,
+    draftMailboxId: draft?.mailboxId,
+    queryMailboxId: query.mailboxId,
+    sourceMailboxId: sourceMessage?.mailboxId,
+    defaultMailboxId: tenant.settings?.defaultSenderMailboxId ?? null
+  });
+  const mailbox = mailboxOptions.find((entry) => entry.id === resolvedMailboxId);
 
   if (!mailbox) {
     notFound();
@@ -179,7 +192,9 @@ export default async function ComposePage({
         <ComposeEditor
           tenantSlug={tenantSlug}
           tenantId={tenant.id}
-          mailboxId={mailbox.id}
+          mailboxOptions={mailboxOptions}
+          initialMailboxId={mailbox.id}
+          composeDefaultFont={normalizeComposeFont(tenant.settings?.composeDefaultFont)}
           signatures={signatures}
           {...(initialDraft ? { initialDraft } : {})}
           {...(sendContext ? { sendContext } : {})}
@@ -187,6 +202,40 @@ export default async function ComposePage({
       </div>
     </div>
   );
+}
+
+function resolveInitialMailboxId({
+  mailboxOptions,
+  draftMailboxId,
+  queryMailboxId,
+  sourceMailboxId,
+  defaultMailboxId
+}: {
+  mailboxOptions: ComposeMailboxOption[];
+  draftMailboxId: string | undefined;
+  queryMailboxId: string | undefined;
+  sourceMailboxId: string | undefined;
+  defaultMailboxId: string | null | undefined;
+}): string {
+  const candidates = [draftMailboxId, queryMailboxId, sourceMailboxId, defaultMailboxId].filter(
+    (item): item is string => Boolean(item && item.trim().length > 0)
+  );
+
+  for (const candidate of candidates) {
+    if (mailboxOptions.some((mailbox) => mailbox.id === candidate)) {
+      return candidate;
+    }
+  }
+
+  return mailboxOptions[0]?.id ?? "";
+}
+
+function normalizeComposeFont(value: string | null | undefined): ComposeFont {
+  if (value === "sans" || value === "serif" || value === "mono") {
+    return value;
+  }
+
+  return "system";
 }
 
 function parseRecipients(raw: unknown): string[] {

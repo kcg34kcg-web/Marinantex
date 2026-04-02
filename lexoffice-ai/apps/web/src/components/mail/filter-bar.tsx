@@ -90,7 +90,7 @@ export function FilterBar({
           onClick={() => setAdvancedOpen((current) => !current)}
           className={`rounded-full border px-3 py-1 text-xs font-medium ${
             advancedOpen
-              ? "border-brand-600 bg-brand-50 text-brand-700"
+              ? "border-blue-300 bg-blue-50 text-blue-700"
               : "border-slate-300 bg-white text-slate-700"
           }`}
         >
@@ -102,7 +102,7 @@ export function FilterBar({
           onClick={onSensitiveToggle}
           className={`rounded-full border px-3 py-1 text-xs font-medium ${
             sensitiveOnly
-              ? "border-brand-600 bg-brand-50 text-brand-700"
+              ? "border-orange-300 bg-orange-50 text-orange-700"
               : "border-slate-300 bg-white text-slate-700"
           }`}
         >

@@ -518,39 +518,6 @@ export function OfficeFeedPanel({ activeRole }: OfficeFeedPanelProps) {
               </div>
             </div>
           </div>
-
-          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-            <p className="text-sm font-semibold text-slate-900">Paylaşım Tipleri</p>
-            <ul className="mt-2 space-y-2 text-xs text-slate-700">
-              <li className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2">
-                <span className="font-medium">Kısa Not:</span> Hızlı ekip bilgilendirmesi
-              </li>
-              <li className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2">
-                <span className="font-medium">Görev Hatırlatma:</span> İş akışı takibi
-              </li>
-              <li className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2">
-                <span className="font-medium">Dosya Linki:</span> Dosya / case bağlantısı
-              </li>
-              <li className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2">
-                <span className="font-medium">Duyuru:</span> Tüm ofisi ilgilendiren iletişim
-              </li>
-            </ul>
-          </div>
-
-          <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
-            Direkt mesajlaşma için{' '}
-            <Link href={'/office?tab=team' as Route} className="font-semibold underline">
-              Ekibim
-            </Link>{' '}
-            sekmesini kullanabilirsiniz.
-          </div>
-
-          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-            <p className="text-sm font-semibold text-slate-900">Not</p>
-            <p className="mt-1 text-xs text-slate-600">
-              “Beğen” butonu şu anda görsel etkileşim içindir (lokal). Kalıcı beğeni için backend like endpoint’i eklenebilir.
-            </p>
-          </div>
         </aside>
       </div>
     </div>

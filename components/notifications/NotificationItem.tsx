@@ -15,6 +15,7 @@ interface NotificationItemProps {
 export const NotificationItem = ({ notification, onRead }: NotificationItemProps) => {
   const router = useRouter();
   const { actor, type, created_at, is_read, resource_id, resource_type } = notification;
+  const navigate = (href: string) => router.push(href as never);
 
   // 1. Tipine Göre İkon ve Renk Seçimi
   const getIcon = () => {
@@ -54,13 +55,13 @@ export const NotificationItem = ({ notification, onRead }: NotificationItemProps
 
     // Yönlendirme Mantığı
     if (type === 'follow' && actor?.username) {
-        router.push(`/profile/${actor.username}`);
+        navigate(`/profile/${actor.username}`);
     } else if ((type === 'like' || type === 'comment' || type === 'reply') && resource_id) {
-        router.push(`/post/${resource_id}`);
+        navigate(`/post/${resource_id}`);
     } else if (resource_type === 'poll' && resource_id) {
-        router.push(`/poll/${resource_id}`);
+        navigate(`/poll/${resource_id}`);
     } else if (resource_type === 'question' && resource_id) {
-        router.push(`/questions/${resource_id}`);
+        navigate(`/questions/${resource_id}`);
     }
   };
 

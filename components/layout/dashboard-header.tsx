@@ -7,14 +7,16 @@ import { Gavel, ChevronRight, Home } from 'lucide-react';
 import { logoutAndRedirectAction } from '@/app/(auth)/actions';
 import { Button } from '@/components/ui/button';
 import { CommandPaletteTrigger } from '@/components/ui/command-palette';
+import { Logo } from '@/components/brand/Logo';
 import { cn } from '@/lib/utils';
 
 const ROUTE_MAP: Record<string, string> = {
   '/dashboard': 'Panel',
-  '/dashboard/calendar': 'Takvim',
   '/dashboard/cases': 'Dosyalar',
   '/dashboard/mail': 'Mail Projesi',
+  '/mail': 'Mail Projesi',
   '/dashboard/clients': 'Muvekkiller',
+  '/dashboard/portal-demo': 'Muvekkil Demo',
   '/dashboard/time-billing': 'Zaman ve Tahsilat',
   '/dashboard/profile': 'Profil',
   '/dashboard/settings': 'Ayarlar',
@@ -58,6 +60,9 @@ export function DashboardHeader() {
     >
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0 flex-1">
+          <Link href="/dashboard" className="mb-1.5 inline-flex items-center" aria-label="Panel ana sayfa">
+            <Logo width={132} height={40} className="h-8 w-auto" />
+          </Link>
           {breadcrumbs.length > 1 ? (
             <nav aria-label="Breadcrumb" className="mb-0.5 flex items-center gap-1">
               <Link

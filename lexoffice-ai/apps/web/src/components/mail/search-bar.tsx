@@ -75,7 +75,7 @@ export function SearchBar({
           onChange={(event) => setValue(event.target.value)}
         />
         <button
-          className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-medium text-white"
+          className="rounded-xl bg-gradient-to-r from-blue-600 to-orange-500 px-4 py-2 text-sm font-medium text-white shadow-[0_12px_24px_-16px_rgba(37,99,235,0.75)]"
           type="submit"
         >
           Ara

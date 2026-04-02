@@ -65,7 +65,7 @@ Durum etiketleri:
 - `[VAR]` Okunmadi olarak isaretle
 - `[VAR]` Yildiz ekle/kaldir
 - `[VAR]` Onemli olarak isaretle
-- `[PLAN]` Klasore tasi
+- `[VAR]` Klasore tasi
 - `[VAR]` Etiket ekle
 - `[VAR]` Toplu secim yap
 - `[VAR]` Toplu silme
@@ -105,7 +105,7 @@ Durum etiketleri:
 - `[VAR]` Otomatik onerilen kisiler
 - `[VAR]` Son kullanilan alicilar
 - `[VAR]` Mail yazarken otomatik tamamlama
-- `[PLAN]` Kisi gruplari olusturma
+- `[VAR]` Kisi gruplari olusturma
 
 ## 10) Guvenlik
 - `[VAR]` Sifreleri guvenli saklama
@@ -126,34 +126,34 @@ Durum etiketleri:
 - `[VAR]` KVKK/GDPR uyumu
 
 ## 11) Ayarlar
-- `[PLAN]` Imza ayari
-- `[PLAN]` Varsayilan yazi tipi ayari
-- `[PLAN]` Varsayilan gonderici hesabi
-- `[PLAN]` Otomatik yanitlayici
-- `[PLAN]` Mail yonlendirme
-- `[PLAN]` Filtre kurallari
-- `[PLAN]` Engellenen gonderenler
-- `[PLAN]` Beyaz liste
-- `[PLAN]` Kara liste
+- `[VAR]` Imza ayari
+- `[VAR]` Varsayilan yazi tipi ayari
+- `[VAR]` Varsayilan gonderici hesabi
+- `[VAR]` Otomatik yanitlayici
+- `[VAR]` Mail yonlendirme
+- `[VAR]` Filtre kurallari
+- `[VAR]` Engellenen gonderenler
+- `[VAR]` Beyaz liste
+- `[VAR]` Kara liste
 - `[VAR]` Tema ayari
-- `[PLAN]` Bildirim ayari
+- `[VAR]` Bildirim ayari
 - `[VAR]` Gorunum ayari
-- `[PLAN]` Konusma gorunumu ac/kapat
-- `[PLAN]` Okuma paneli konumu
+- `[VAR]` Konusma gorunumu ac/kapat
+- `[VAR]` Okuma paneli konumu
 
 ## 12) Gelismis verimlilik ozellikleri
 - `[VAR]` Klavye kisayollari
 - `[VAR]` Hizli islem butonlari
-- `[PLAN]` Surukle birak ile tasima
-- `[PLAN]` Pinleme
-- `[PLAN]` Sonra oku
-- `[PLAN]` Hatirlatici kurma
-- `[PLAN]` Takvim entegrasyonu
+- `[VAR]` Surukle birak ile tasima
+- `[VAR]` Pinleme
+- `[VAR]` Sonra oku
+- `[VAR]` Hatirlatici kurma
+- `[VAR]` Takvim entegrasyonu
 - `[VAR]` Gorev olusturma
-- `[PLAN]` Not ekleme
-- `[PLAN]` Sik kullanilan sablonlar
-- `[PLAN]` Mail takip etiketi
-- `[PLAN]` Gonderim zaman onerisi
+- `[VAR]` Not ekleme
+- `[VAR]` Sik kullanilan sablonlar
+- `[VAR]` Mail takip etiketi
+- `[VAR]` Gonderim zaman onerisi
 
 ## 13) Yapay zeka ozellikleri
 - `[VAR]` Mail ozetleme
@@ -211,7 +211,7 @@ Durum etiketleri:
 - `[VAR]` Ek dosya modeli
 - `[VAR]` Klasor/etiket modeli
 - `[VAR]` Kisi modeli
-- `[PLAN]` Filtre kurali modeli
+- `[VAR]` Filtre kurali modeli
 - `[VAR]` Bildirim sistemi
 - `[VAR]` Arama altyapisi
 - `[VAR]` Dosya yukleme sistemi

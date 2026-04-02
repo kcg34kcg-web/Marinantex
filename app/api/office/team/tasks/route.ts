@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
 import { publishOfficeNotification } from '@/lib/office/notifications';
+import { createAdminClient } from '@/utils/supabase/admin';
+import { resolveInternalUserBureauScope } from '@/lib/dashboard/client-access';
 
 const createTaskSchema = z.object({
   messageId: z.string().uuid(),
@@ -18,9 +20,24 @@ export async function GET() {
     return Response.json({ error: access.message }, { status: access.status });
   }
 
+  const membershipResult = await access.supabase
+    .from('office_thread_members')
+    .select('thread_id')
+    .eq('user_id', access.userId);
+
+  if (membershipResult.error) {
+    return Response.json({ error: 'Görevler alınamadı.' }, { status: 500 });
+  }
+
+  const threadIds = [...new Set((membershipResult.data ?? []).map((item) => item.thread_id))];
+  if (threadIds.length === 0) {
+    return Response.json({ tasks: [] });
+  }
+
   const { data, error } = await access.supabase
     .from('office_tasks')
     .select('id, thread_id, title, status, priority, assigned_to, due_at, created_at')
+    .in('thread_id', threadIds)
     .order('created_at', { ascending: false })
     .limit(30);
 
@@ -43,6 +60,22 @@ export async function POST(request: Request) {
   }
 
   const payload = parsed.data;
+  const membershipResult = await access.supabase
+    .from('office_thread_members')
+    .select('thread_id')
+    .eq('thread_id', payload.threadId)
+    .eq('user_id', access.userId)
+    .maybeSingle();
+
+  if (membershipResult.error || !membershipResult.data) {
+    return Response.json({ error: 'Bu sohbette gorev olusturma yetkiniz yok.' }, { status: 403 });
+  }
+
+  const admin = createAdminClient();
+  const scope = await resolveInternalUserBureauScope(admin, access.userId);
+  if (!scope) {
+    return Response.json({ error: 'Büro kapsamı doğrulanamadı.' }, { status: 403 });
+  }
 
   const { data: messageExists } = await access.supabase
     .from('office_messages')
@@ -55,6 +88,22 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Kaynak mesaj bulunamadı.' }, { status: 404 });
   }
 
+  const assigneeId = payload.assignedTo ?? access.userId;
+  if (!scope.bureauProfileIds.includes(assigneeId)) {
+    return Response.json({ error: 'Görev atananı ofis kapsamı dışında.' }, { status: 400 });
+  }
+
+  const assigneeCheck = await admin
+    .from('profiles')
+    .select('id, role')
+    .eq('id', assigneeId)
+    .in('role', ['lawyer', 'assistant'])
+    .maybeSingle();
+
+  if (assigneeCheck.error || !assigneeCheck.data) {
+    return Response.json({ error: 'Görev atananı ofis kapsamı dışında.' }, { status: 400 });
+  }
+
   const { data, error } = await access.supabase
     .from('office_tasks')
     .insert({
@@ -63,7 +112,7 @@ export async function POST(request: Request) {
       title: payload.title,
       description: payload.description ?? null,
       priority: payload.priority,
-      assigned_to: payload.assignedTo ?? access.userId,
+      assigned_to: assigneeId,
       created_by: access.userId,
       due_at: payload.dueAt ?? null,
       status: 'open',
@@ -83,6 +132,8 @@ export async function POST(request: Request) {
     detail: payload.title,
     actionUrl: '/office',
     actionLabel: 'Görevi Gör',
+    bureauId: access.bureauId,
+    recipientUserIds: [assigneeId],
   });
 
   return Response.json({ task: data });

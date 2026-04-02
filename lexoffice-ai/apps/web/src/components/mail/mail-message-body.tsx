@@ -38,7 +38,7 @@ export function MailMessageBody({
           <button
             type="button"
             className={`rounded border px-2 py-1 text-xs ${
-              mode === "html" ? "border-brand-500 bg-brand-50" : "border-slate-300 bg-white"
+              mode === "html" ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-300 bg-white"
             }`}
             onClick={() => setMode("html")}
           >
@@ -47,7 +47,7 @@ export function MailMessageBody({
           <button
             type="button"
             className={`rounded border px-2 py-1 text-xs ${
-              mode === "text" ? "border-brand-500 bg-brand-50" : "border-slate-300 bg-white"
+              mode === "text" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-300 bg-white"
             }`}
             onClick={() => setMode("text")}
           >
@@ -82,7 +82,7 @@ export function MailMessageBody({
       {mode === "html" && hasHtml ? (
         <div className="max-h-[540px] overflow-auto rounded-lg border border-slate-200 bg-white p-3">
           <div
-            className="[&_a]:text-brand-700 [&_a[data-link-risk='true']]:font-medium [&_a[data-link-risk='true']]:text-rose-700 [&_a[data-link-risk='true']]:underline [&_img]:h-auto [&_img]:max-w-full [&_ol]:list-decimal [&_ol]:pl-6 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-slate-200 [&_td]:p-1 [&_th]:border [&_th]:border-slate-200 [&_th]:bg-slate-50 [&_th]:p-1 [&_ul]:list-disc [&_ul]:pl-6"
+            className="[&_a]:text-blue-700 [&_a[data-link-risk='true']]:font-medium [&_a[data-link-risk='true']]:text-rose-700 [&_a[data-link-risk='true']]:underline [&_img]:h-auto [&_img]:max-w-full [&_ol]:list-decimal [&_ol]:pl-6 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-slate-200 [&_td]:p-1 [&_th]:border [&_th]:border-slate-200 [&_th]:bg-slate-50 [&_th]:p-1 [&_ul]:list-disc [&_ul]:pl-6"
             dangerouslySetInnerHTML={{ __html: sanitized.html }}
           />
         </div>

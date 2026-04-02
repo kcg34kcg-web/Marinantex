@@ -143,9 +143,160 @@ export const toggleMessageLabelSchema = z.object({
   action: z.enum(["add", "remove"]).default("add")
 });
 
+const nullableDateTimeStringSchema = z
+  .string()
+  .datetime()
+  .nullable()
+  .optional()
+  .transform((value) => (value === undefined ? undefined : value));
+
+const nullableThreadNoteSchema = z
+  .string()
+  .max(2_000)
+  .nullable()
+  .optional()
+  .transform((value) => {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (value === null) {
+      return null;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  });
+
+export const getThreadProductivitySchema = z.object({
+  tenantId: z.string().cuid(),
+  threadId: z.string().cuid()
+});
+
+export const updateThreadProductivitySchema = z
+  .object({
+    tenantId: z.string().cuid(),
+    threadId: z.string().cuid(),
+    isPinned: z.boolean().optional(),
+    readLaterAt: nullableDateTimeStringSchema,
+    reminderAt: nullableDateTimeStringSchema,
+    note: nullableThreadNoteSchema
+  })
+  .refine(
+    (input) =>
+      input.isPinned !== undefined ||
+      input.readLaterAt !== undefined ||
+      input.reminderAt !== undefined ||
+      input.note !== undefined,
+    { message: "Guncellenecek en az bir alan gonderilmelidir." }
+  );
+
+export const mailSenderListKindSchema = z.enum(["WHITELIST", "BLACKLIST", "BLOCKED"]);
+
+const optionalRuleTextSchema = z
+  .string()
+  .max(320)
+  .nullable()
+  .optional()
+  .transform((value) => {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  });
+
+const optionalRuleActionEmailSchema = z
+  .string()
+  .email()
+  .nullable()
+  .optional()
+  .or(z.literal("").transform(() => null))
+  .transform((value) => {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    return value.trim().toLowerCase();
+  });
+
+const mailFilterRuleBaseSchema = z.object({
+  tenantId: z.string().cuid(),
+  mailboxId: z.string().cuid().nullable().optional(),
+  name: z.string().min(1).max(120),
+  enabled: z.boolean().default(true),
+  priority: z.coerce.number().int().min(0).max(1000).default(100),
+  fromPattern: optionalRuleTextSchema,
+  subjectPattern: optionalRuleTextSchema,
+  bodyPattern: optionalRuleTextSchema,
+  hasAttachments: z.boolean().nullable().optional(),
+  actionState: z.enum(["RECEIVED", "ARCHIVED", "TRASH", "SPAM"]).nullable().optional(),
+  actionMarkRead: z.boolean().default(false),
+  actionStar: z.boolean().default(false),
+  actionImportant: z.boolean().default(false),
+  actionLabelName: optionalRuleTextSchema,
+  actionForwardTo: optionalRuleActionEmailSchema,
+  stopProcessing: z.boolean().default(false)
+});
+
+export const createMailFilterRuleSchema = mailFilterRuleBaseSchema
+  .refine(
+    (input) =>
+      input.actionState !== null ||
+      input.actionMarkRead ||
+      input.actionStar ||
+      input.actionImportant ||
+      input.actionLabelName !== null ||
+      input.actionForwardTo !== null,
+    { message: "En az bir kural aksiyonu seçilmelidir." }
+  );
+
+export const updateMailFilterRuleSchema = mailFilterRuleBaseSchema.partial().extend({
+  tenantId: z.string().cuid(),
+  ruleId: z.string().cuid()
+});
+
+export const listMailFilterRulesSchema = z.object({
+  tenantId: z.string().cuid(),
+  mailboxId: z.string().cuid().optional()
+});
+
+export const deleteMailFilterRuleSchema = z.object({
+  tenantId: z.string().cuid(),
+  ruleId: z.string().cuid()
+});
+
+const emailOrDomainSchema = z
+  .string()
+  .min(3)
+  .max(320)
+  .transform((value) => value.trim().toLowerCase())
+  .refine(
+    (value) =>
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ||
+      /^@[a-z0-9.-]+\.[a-z]{2,}$/i.test(value),
+    { message: "Geçerli bir e-posta veya @domain.com formatı girin." }
+  );
+
+export const createSenderListEntrySchema = z.object({
+  tenantId: z.string().cuid(),
+  kind: mailSenderListKindSchema,
+  emailOrDomain: emailOrDomainSchema,
+  note: z.string().max(500).nullable().optional()
+});
+
+export const listSenderListEntriesSchema = z.object({
+  tenantId: z.string().cuid(),
+  kind: mailSenderListKindSchema.optional()
+});
+
+export const deleteSenderListEntrySchema = z.object({
+  tenantId: z.string().cuid(),
+  entryId: z.string().cuid()
+});
+
 export type ListThreadsInput = z.infer<typeof listThreadsSchema>;
 export type TriggerSyncInput = z.infer<typeof triggerSyncSchema>;
 export type SendMailInput = z.infer<typeof sendMailSchema>;
 export type ScheduleSendMailInput = z.infer<typeof scheduleSendMailSchema>;
 export type LinkThreadToMatterInput = z.infer<typeof linkThreadToMatterSchema>;
 export type ThreadView = z.infer<typeof threadViewSchema>;
+export type MailSenderListKind = z.infer<typeof mailSenderListKindSchema>;
+export type UpdateThreadProductivityInput = z.infer<typeof updateThreadProductivitySchema>;

@@ -19,6 +19,8 @@ interface MutationContext {
   userAgent?: string;
 }
 
+const SHARE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32}$/;
+
 @Injectable()
 export class ShareLinksService {
   private readonly defaultExpiresInHours = 72;
@@ -172,6 +174,7 @@ export class ShareLinksService {
   }
 
   async resolvePublic(token: string, meta?: MutationContext) {
+    this.assertPublicTokenFormat(token);
     const tokenHash = this.hashToken(token);
     const link = await this.prisma.shareLink.findUnique({
       where: {
@@ -274,6 +277,7 @@ export class ShareLinksService {
     input: CreateShareLinkCommentDto,
     meta?: MutationContext,
   ) {
+    this.assertPublicTokenFormat(token);
     const tokenHash = this.hashToken(token);
     const link = await this.prisma.shareLink.findUnique({
       where: {
@@ -369,5 +373,11 @@ export class ShareLinksService {
 
   private hashToken(token: string): string {
     return createHash("sha256").update(token).digest("hex");
+  }
+
+  private assertPublicTokenFormat(token: string): void {
+    if (!SHARE_TOKEN_PATTERN.test(token.trim())) {
+      throw new BadRequestException("Invalid share token");
+    }
   }
 }

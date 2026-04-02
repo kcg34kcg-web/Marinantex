@@ -1,11 +1,13 @@
 export type ThemePreference = "system" | "light" | "dark";
 export type DensityPreference = "comfortable" | "compact";
 export type MailLayoutPreference = "split" | "list";
+export type MailReadingPanePosition = "right" | "bottom" | "off";
 
 export type AppearancePreferences = {
   theme: ThemePreference;
   density: DensityPreference;
   mailLayout: MailLayoutPreference;
+  mailReadingPanePosition: MailReadingPanePosition;
 };
 
 export const APPEARANCE_STORAGE_KEY = "lexoffice.appearance.preferences";
@@ -14,7 +16,8 @@ export const APPEARANCE_CHANGED_EVENT = "lexoffice:appearance-changed";
 const DEFAULT_APPEARANCE: AppearancePreferences = {
   theme: "system",
   density: "comfortable",
-  mailLayout: "split"
+  mailLayout: "split",
+  mailReadingPanePosition: "right"
 };
 
 export function getDefaultAppearancePreferences(): AppearancePreferences {
@@ -29,7 +32,8 @@ export function normalizeAppearancePreferences(input: unknown): AppearancePrefer
   return {
     theme: parseThemePreference(input.theme),
     density: parseDensityPreference(input.density),
-    mailLayout: parseMailLayoutPreference(input.mailLayout)
+    mailLayout: parseMailLayoutPreference(input.mailLayout),
+    mailReadingPanePosition: parseMailReadingPanePosition(input.mailReadingPanePosition)
   };
 }
 
@@ -85,6 +89,7 @@ export function applyAppearancePreferences(preferences: AppearancePreferences): 
   root.dataset.theme = resolvedTheme;
   root.dataset.density = normalized.density;
   root.dataset.mailLayout = normalized.mailLayout;
+  root.dataset.mailReadingPanePosition = normalized.mailReadingPanePosition;
   root.classList.toggle("dark", resolvedTheme === "dark");
 }
 
@@ -107,6 +112,13 @@ function parseMailLayoutPreference(value: unknown): MailLayoutPreference {
     return value;
   }
   return DEFAULT_APPEARANCE.mailLayout;
+}
+
+function parseMailReadingPanePosition(value: unknown): MailReadingPanePosition {
+  if (value === "right" || value === "bottom" || value === "off") {
+    return value;
+  }
+  return DEFAULT_APPEARANCE.mailReadingPanePosition;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

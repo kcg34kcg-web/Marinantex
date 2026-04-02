@@ -74,6 +74,8 @@ export default function SharedDocumentPage() {
         <iframe
           title="Shared Document Preview"
           className="min-h-[950px] w-full rounded-lg border border-slate-300 bg-white"
+          sandbox=""
+          referrerPolicy="no-referrer"
           srcDoc={previewHtml}
         />
       </section>

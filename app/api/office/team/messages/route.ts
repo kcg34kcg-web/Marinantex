@@ -1,14 +1,31 @@
 import { z } from 'zod';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
 import { publishOfficeNotification } from '@/lib/office/notifications';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { logDashboardAudit } from '@/lib/dashboard/audit';
+import type { Database } from '@/types/database';
 
 const sendMessageSchema = z.object({
   threadId: z.string().uuid(),
   body: z.string().min(1).max(4000),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
+
+async function hasThreadMembership(supabase: SupabaseClient<Database>, input: { threadId: string; userId: string }) {
+  const membershipResult = await supabase
+    .from('office_thread_members')
+    .select('thread_id')
+    .eq('thread_id', input.threadId)
+    .eq('user_id', input.userId)
+    .maybeSingle();
+
+  if (membershipResult.error) {
+    return false;
+  }
+
+  return Boolean(membershipResult.data);
+}
 
 export async function GET(request: Request) {
   const access = await requireInternalOfficeUser();
@@ -21,6 +38,16 @@ export async function GET(request: Request) {
 
   if (!threadId) {
     return Response.json({ error: 'threadId gereklidir.' }, { status: 400 });
+  }
+
+  const threadIdParsed = z.string().uuid().safeParse(threadId);
+  if (!threadIdParsed.success) {
+    return Response.json({ error: 'threadId gecersiz.' }, { status: 400 });
+  }
+
+  const isMember = await hasThreadMembership(access.supabase, { threadId, userId: access.userId });
+  if (!isMember) {
+    return Response.json({ error: 'Bu sohbeti goruntuleme yetkiniz yok.' }, { status: 403 });
   }
 
   const { data, error } = await access.supabase
@@ -55,6 +82,11 @@ export async function POST(request: Request) {
   }
 
   const payload = parsed.data;
+  const isMember = await hasThreadMembership(access.supabase, { threadId: payload.threadId, userId: access.userId });
+  if (!isMember) {
+    return Response.json({ error: 'Bu sohbete mesaj gonderme yetkiniz yok.' }, { status: 403 });
+  }
+  const admin = createAdminClient();
 
   let insertResponse: { data: { id: string } | null; error: { message?: string } | null } | null = null;
   let lastErrorMessage: string | null = null;
@@ -80,7 +112,6 @@ export async function POST(request: Request) {
   }
 
   if (!insertResponse || insertResponse.error || !insertResponse.data) {
-    const admin = createAdminClient();
     await logDashboardAudit(admin, {
       actorUserId: access.userId,
       action: 'office_message_send_failed',
@@ -98,6 +129,14 @@ export async function POST(request: Request) {
   const now = new Date().toISOString();
   await access.supabase.from('office_threads').update({ last_message_at: now }).eq('id', payload.threadId);
 
+  const recipientsResult = await admin
+    .from('office_thread_members')
+    .select('user_id')
+    .eq('thread_id', payload.threadId);
+  const recipientUserIds = (recipientsResult.data ?? [])
+    .map((item) => item.user_id)
+    .filter((userId) => userId !== access.userId);
+
   publishOfficeNotification({
     type: 'risk_communication',
     category: 'messages',
@@ -105,9 +144,10 @@ export async function POST(request: Request) {
     detail: payload.body.length > 100 ? `${payload.body.slice(0, 97)}...` : payload.body,
     actionUrl: '/office',
     actionLabel: 'Ekibi Aç',
+    bureauId: access.bureauId,
+    recipientUserIds,
   });
 
-  const admin = createAdminClient();
   await logDashboardAudit(admin, {
     actorUserId: access.userId,
     action: 'office_message_sent',

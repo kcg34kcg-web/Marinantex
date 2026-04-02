@@ -50,6 +50,8 @@
     "backend/**",
     "lexoffice-ai/**",
     "tests/**",
+    "components/ui copy/**",
+    "components/chat copy/**",
     "**/*.test.ts",
     "**/*.spec.ts"
   ]

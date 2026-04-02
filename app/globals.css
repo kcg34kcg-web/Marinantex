@@ -1285,16 +1285,20 @@ html[data-theme] {
   --main-surface-1: var(--surface-main-1);
   --main-surface-2: var(--surface-main-2);
   --main-surface-3: var(--surface-main-3);
+  --main-border: var(--glass-border-soft, var(--border));
+  --main-text: var(--text);
+  --main-muted: var(--secondary);
+  --main-text-shadow: none;
 }
 
 html[data-contrast-level='high'] {
-  --surface-main-0: color-mix(in srgb, var(--surface-main-0), black 18%);
-  --surface-main-1: color-mix(in srgb, var(--surface-main-1), black 18%);
-  --surface-main-2: color-mix(in srgb, var(--surface-main-2), black 20%);
-  --surface-main-3: color-mix(in srgb, var(--surface-main-3), black 16%);
-  --main-border: color-mix(in srgb, var(--main-border), white 26%);
-  --main-text: color-mix(in srgb, var(--main-text), white 10%);
-  --main-muted: color-mix(in srgb, var(--main-muted), white 20%);
+  --surface-main-0: color-mix(in srgb, var(--surface), var(--bg) 18%);
+  --surface-main-1: color-mix(in srgb, var(--surface), var(--bg) 18%);
+  --surface-main-2: color-mix(in srgb, var(--surface), var(--bg) 20%);
+  --surface-main-3: color-mix(in srgb, var(--surface), var(--bg) 16%);
+  --main-border: color-mix(in srgb, var(--glass-border-soft, var(--border)), white 26%);
+  --main-text: color-mix(in srgb, var(--text), white 10%);
+  --main-muted: color-mix(in srgb, var(--secondary), white 20%);
   --main-text-shadow: 0 1px 2px rgba(0, 0, 0, 0.66);
   --focus-ring: color-mix(in srgb, var(--accent), white 44%);
 }
@@ -1654,12 +1658,12 @@ html[data-font-family='mono'] {
 }
 
 html[data-contrast-level='high'] {
-  --main-border: color-mix(in srgb, var(--main-border), var(--text) 26%);
+  --main-border: color-mix(in srgb, var(--glass-border-soft, var(--border)), var(--text) 26%);
   --focus-ring: color-mix(in srgb, var(--primary), white 48%);
-  --surface-main-0: color-mix(in srgb, var(--surface-main-0), var(--bg) 8%);
-  --surface-main-1: color-mix(in srgb, var(--surface-main-1), var(--bg) 12%);
-  --surface-main-2: color-mix(in srgb, var(--surface-main-2), var(--bg) 6%);
-  --surface-main-3: color-mix(in srgb, var(--surface-main-3), var(--bg) 3%);
+  --surface-main-0: color-mix(in srgb, var(--surface), var(--bg) 8%);
+  --surface-main-1: color-mix(in srgb, var(--surface), var(--bg) 12%);
+  --surface-main-2: color-mix(in srgb, var(--surface), var(--bg) 6%);
+  --surface-main-3: color-mix(in srgb, var(--surface), var(--bg) 3%);
 }
 
 html {

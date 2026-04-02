@@ -1,5 +1,7 @@
 ﻿import { z } from 'zod';
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
+import { createAdminClient } from '@/utils/supabase/admin';
+import { resolveInternalUserBureauScope } from '@/lib/dashboard/client-access';
 
 const listCasesQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
@@ -55,10 +57,41 @@ export async function GET(request: Request) {
 
     const { q, status, quickView, sortBy, page, pageSize } = parsed.data;
     const supabase = access.supabase;
+    let scopedLawyerIds: string[] | null = null;
+
+    if (access.role === 'assistant') {
+      const admin = createAdminClient();
+      const scope = await resolveInternalUserBureauScope(admin, access.userId);
+      if (!scope || scope.bureauProfileIds.length === 0) {
+        return Response.json({
+          items: [],
+          pagination: {
+            page,
+            pageSize,
+            total: 0,
+            totalPages: 1,
+          },
+          stats: {
+            total: 0,
+            open: 0,
+            inProgress: 0,
+            closed: 0,
+            archived: 0,
+          },
+        });
+      }
+      scopedLawyerIds = scope.bureauProfileIds;
+    }
 
     let casesQuery = supabase
       .from('cases')
       .select('id, title, status, updated_at, file_no, client_display_name', { count: 'exact' });
+
+    if (access.role === 'lawyer') {
+      casesQuery = casesQuery.eq('lawyer_id', access.userId);
+    } else if (scopedLawyerIds) {
+      casesQuery = casesQuery.in('lawyer_id', scopedLawyerIds);
+    }
 
     if (status !== 'all') {
       casesQuery = casesQuery.eq('status', status);
@@ -91,24 +124,65 @@ export async function GET(request: Request) {
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
     const shouldUseWideRange = Boolean(q && q.trim().length > 0);
-    const queryResult = shouldUseWideRange
-      ? await casesQuery.range(0, 399)
-      : await casesQuery.range(from, to);
-
-    if (queryResult.error) {
-      return Response.json({ error: 'Dosya listesi alinamadi.' }, { status: 500 });
-    }
-
-    const rows = (queryResult.data ?? []) as Array<{
+    type CaseListRow = {
       id: string;
       title: string;
       status: 'open' | 'in_progress' | 'closed' | 'archived';
       updated_at: string;
       file_no: string | null;
       client_display_name: string | null;
-    }>;
+    };
+
+    let rows: CaseListRow[] = [];
+    let baseTotalCount = 0;
+
+    if (shouldUseWideRange) {
+      const chunkSize = 400;
+      const maxChunks = 10;
+
+      for (let chunkIndex = 0; chunkIndex < maxChunks; chunkIndex += 1) {
+        const chunkFrom = chunkIndex * chunkSize;
+        const chunkTo = chunkFrom + chunkSize - 1;
+        const chunkResult = await casesQuery.range(chunkFrom, chunkTo);
+
+        if (chunkResult.error) {
+          return Response.json({ error: 'Dosya listesi alinamadi.' }, { status: 500 });
+        }
+
+        const chunkRows = (chunkResult.data ?? []) as CaseListRow[];
+        rows.push(...chunkRows);
+        if (chunkRows.length < chunkSize) {
+          break;
+        }
+      }
+    } else {
+      const queryResult = await casesQuery.range(from, to);
+      if (queryResult.error) {
+        return Response.json({ error: 'Dosya listesi alinamadi.' }, { status: 500 });
+      }
+
+      rows = (queryResult.data ?? []) as CaseListRow[];
+      baseTotalCount = queryResult.count ?? 0;
+    }
 
     const caseIds = rows.map((item) => item.id);
+
+    let openCountQuery = supabase.from('cases').select('id', { count: 'exact', head: true }).eq('status', 'open');
+    let inProgressCountQuery = supabase.from('cases').select('id', { count: 'exact', head: true }).eq('status', 'in_progress');
+    let closedCountQuery = supabase.from('cases').select('id', { count: 'exact', head: true }).eq('status', 'closed');
+    let archivedCountQuery = supabase.from('cases').select('id', { count: 'exact', head: true }).eq('status', 'archived');
+
+    if (access.role === 'lawyer') {
+      openCountQuery = openCountQuery.eq('lawyer_id', access.userId);
+      inProgressCountQuery = inProgressCountQuery.eq('lawyer_id', access.userId);
+      closedCountQuery = closedCountQuery.eq('lawyer_id', access.userId);
+      archivedCountQuery = archivedCountQuery.eq('lawyer_id', access.userId);
+    } else if (scopedLawyerIds) {
+      openCountQuery = openCountQuery.in('lawyer_id', scopedLawyerIds);
+      inProgressCountQuery = inProgressCountQuery.in('lawyer_id', scopedLawyerIds);
+      closedCountQuery = closedCountQuery.in('lawyer_id', scopedLawyerIds);
+      archivedCountQuery = archivedCountQuery.in('lawyer_id', scopedLawyerIds);
+    }
 
     const [noteDatesResult, taskDatesResult, caseClientsResult, openCountResult, inProgressCountResult, closedCountResult, archivedCountResult] =
       await Promise.all([
@@ -125,10 +199,10 @@ export async function GET(request: Request) {
               .in('case_id', caseIds)
               .is('deleted_at', null)
           : Promise.resolve({ data: [], error: null }),
-        supabase.from('cases').select('id', { count: 'exact', head: true }).eq('status', 'open'),
-        supabase.from('cases').select('id', { count: 'exact', head: true }).eq('status', 'in_progress'),
-        supabase.from('cases').select('id', { count: 'exact', head: true }).eq('status', 'closed'),
-        supabase.from('cases').select('id', { count: 'exact', head: true }).eq('status', 'archived'),
+        openCountQuery,
+        inProgressCountQuery,
+        closedCountQuery,
+        archivedCountQuery,
       ]);
 
     if (caseClientsResult.error && caseClientsResult.error.code !== '42P01') {
@@ -241,7 +315,7 @@ export async function GET(request: Request) {
     });
 
     const pagedItems = shouldUseWideRange ? searchedItems.slice(from, from + pageSize) : searchedItems;
-    const total = shouldUseWideRange ? searchedItems.length : (queryResult.count ?? 0);
+    const total = shouldUseWideRange ? searchedItems.length : baseTotalCount;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
     return Response.json({

@@ -1,5 +1,5 @@
-import { CalendarWorkspace } from '@/components/dashboard/calendar-workspace';
+import { redirect } from 'next/navigation';
 
 export default function DashboardCalendarPage() {
-  return <CalendarWorkspace mode="calendar_only" />;
+  redirect('/dashboard');
 }

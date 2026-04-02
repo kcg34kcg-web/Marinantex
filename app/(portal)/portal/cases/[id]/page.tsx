@@ -1,6 +1,6 @@
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ClientSummaryAssistant } from '@/components/portal/client-summary-assistant';
 import { PortalRiskAwareMessageBox } from '@/components/portal/portal-risk-aware-message-box';
+import { PortalCaseWorkspace } from '@/components/portal/portal-case-workspace';
 import { requirePortalTwoFactor } from '@/lib/portal/two-factor';
 
 interface PortalCaseDetailPageProps {
@@ -13,15 +13,7 @@ export default async function PortalCaseDetailPage({ params }: PortalCaseDetailP
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Dosya Detayı</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm text-slate-700">
-          <p>Dosya Kimliği: {id}</p>
-          <p>Bu alanda yalnızca müvekkile açık güncellemeler görüntülenir.</p>
-        </CardContent>
-      </Card>
+      <PortalCaseWorkspace caseId={id} />
 
       <ClientSummaryAssistant caseId={id} />
       <PortalRiskAwareMessageBox caseId={id} />

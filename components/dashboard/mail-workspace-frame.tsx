@@ -1,12 +1,19 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { cn } from '@/lib/utils';
 
 type BootstrapState = 'loading' | 'ready' | 'error';
 
-export function MailWorkspaceFrame({ workspaceUrl }: { workspaceUrl: string }) {
+type MailWorkspaceFrameProps = {
+  workspaceUrl: string;
+  className?: string;
+};
+
+export function MailWorkspaceFrame({ workspaceUrl, className }: MailWorkspaceFrameProps) {
   const [state, setState] = useState<BootstrapState>('loading');
   const [errorText, setErrorText] = useState<string | null>(null);
+  const frameClassName = className ?? 'h-[calc(100dvh-220px)] min-h-[700px] w-full rounded-xl';
 
   const bootstrapSession = useCallback(async () => {
     setState('loading');
@@ -38,7 +45,7 @@ export function MailWorkspaceFrame({ workspaceUrl }: { workspaceUrl: string }) {
 
   if (state === 'loading') {
     return (
-      <div className="flex h-[calc(100dvh-220px)] min-h-[700px] items-center justify-center rounded-xl bg-slate-50 text-sm text-slate-600">
+      <div className={cn('flex items-center justify-center bg-white text-sm text-slate-600', frameClassName)}>
         Mail workspace oturumu hazirlaniyor...
       </div>
     );
@@ -46,7 +53,12 @@ export function MailWorkspaceFrame({ workspaceUrl }: { workspaceUrl: string }) {
 
   if (state === 'error') {
     return (
-      <div className="flex h-[calc(100dvh-220px)] min-h-[700px] flex-col items-center justify-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 text-center">
+      <div
+        className={cn(
+          'flex flex-col items-center justify-center gap-3 border border-rose-200 bg-rose-50 px-4 text-center',
+          frameClassName,
+        )}
+      >
         <p className="text-sm font-medium text-rose-700">{errorText ?? 'Mail workspace acilamadi.'}</p>
         <button
           type="button"
@@ -67,7 +79,7 @@ export function MailWorkspaceFrame({ workspaceUrl }: { workspaceUrl: string }) {
       key={workspaceUrl}
       title="Mail Workspace"
       src={workspaceUrl}
-      className="h-[calc(100dvh-220px)] min-h-[700px] w-full rounded-xl border-0"
+      className={cn('border-0', frameClassName)}
       loading="lazy"
     />
   );

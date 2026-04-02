@@ -5,9 +5,18 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import {
   APPEARANCE_CHANGED_EVENT,
+  type MailReadingPanePosition,
   readAppearancePreferences
 } from "@/lib/appearance-preferences";
 import { withBasePath } from "@/lib/base-path";
+import {
+  MAIL_NOTIFICATION_CHANGED_EVENT,
+  MAIL_NOTIFICATION_PREFS_STORAGE_KEY,
+  getDefaultMailNotificationPreferences,
+  readMailNotificationPreferences,
+  type MailNotificationPreferences
+} from "@/lib/mail-notification-preferences";
+import { ComposeEditor } from "./compose-editor";
 import { FilterBar } from "./filter-bar";
 import { MailList } from "./mail-list";
 import { MailSidebar } from "./mail-sidebar";
@@ -29,6 +38,7 @@ type SidebarView =
 type ReadStatus = "all" | "read" | "unread";
 type SortBy = "date" | "sender";
 type SortDirection = "asc" | "desc";
+type ComposeFont = "system" | "sans" | "serif" | "mono";
 
 type WorkspaceMailbox = {
   id: string;
@@ -55,6 +65,11 @@ type WorkspaceThread = {
   unreadCount: number;
   kind: "THREAD" | "DRAFT";
   draftId: string | null;
+  isPinned: boolean;
+  pinnedAt: string | null;
+  readLaterAt: string | null;
+  reminderAt: string | null;
+  note: string | null;
   lastMessageAt: string | null;
   sender: string;
   latestMessageId: string | null;
@@ -73,6 +88,11 @@ type ThreadApiResponse = {
   subject: string | null;
   snippet: string | null;
   unreadCount: number;
+  isPinned?: boolean;
+  pinnedAt?: string | null;
+  readLaterAt?: string | null;
+  reminderAt?: string | null;
+  note?: string | null;
   lastMessageAt: string | null;
   mailbox?: {
     id: string;
@@ -92,29 +112,11 @@ type ThreadApiResponse = {
 const THREAD_CACHE_STORAGE_PREFIX = "lexoffice.mail.thread-cache";
 const THREAD_CACHE_TTL_MS = 20 * 60 * 1000;
 const THREAD_CACHE_MAX_ITEMS = 400;
-const MAIL_NOTIFICATION_PREFS_STORAGE_KEY = "lexoffice.mail.notification-preferences";
-
-type MailNotificationPreferences = {
-  desktopEnabled: boolean;
-  soundEnabled: boolean;
-  importantOnly: boolean;
-  quietHoursEnabled: boolean;
-  quietHoursStart: string;
-  quietHoursEnd: string;
-};
-
-const DEFAULT_MAIL_NOTIFICATION_PREFERENCES: MailNotificationPreferences = {
-  desktopEnabled: false,
-  soundEnabled: false,
-  importantOnly: false,
-  quietHoursEnabled: false,
-  quietHoursStart: "22:00",
-  quietHoursEnd: "08:00"
-};
 
 export function MailWorkspace({
   tenantSlug,
   tenantId,
+  composeDefaultFont,
   mailboxes,
   labels,
   threads,
@@ -134,6 +136,7 @@ export function MailWorkspace({
 }: {
   tenantSlug: string;
   tenantId: string;
+  composeDefaultFont: ComposeFont;
   mailboxes: WorkspaceMailbox[];
   labels: WorkspaceLabel[];
   threads: WorkspaceThread[];
@@ -162,17 +165,19 @@ export function MailWorkspace({
   const [syncPending, setSyncPending] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [notificationPreferences, setNotificationPreferences] = useState<MailNotificationPreferences>(
-    DEFAULT_MAIL_NOTIFICATION_PREFERENCES
+    getDefaultMailNotificationPreferences()
   );
   const [sensitiveOnly, setSensitiveOnly] = useState(false);
   const [mailLayoutMode, setMailLayoutMode] = useState<"split" | "list">("split");
+  const [readingPanePosition, setReadingPanePosition] = useState<MailReadingPanePosition>("right");
   const [showFilters, setShowFilters] = useState(false);
-  const [showNotificationSettings, setShowNotificationSettings] = useState(false);
   const [selectedThreadIds, setSelectedThreadIds] = useState<Set<string>>(new Set());
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(
     selectedThreadId ?? threads[0]?.id
   );
   const [bulkLabelId, setBulkLabelId] = useState<string | undefined>(selectedLabelId);
+  const [isInlineComposeOpen, setIsInlineComposeOpen] = useState(false);
+  const [composeSessionKey, setComposeSessionKey] = useState(0);
   const audioContextRef = useRef<AudioContext | null>(null);
   const notifiedUnreadThreadIdsRef = useRef<Set<string>>(new Set());
   const notificationBaselineReadyRef = useRef(false);
@@ -223,6 +228,25 @@ export function MailWorkspace({
 
   const currentMailbox =
     mailboxes.find((mailbox) => mailbox.id === currentMailboxId) ?? mailboxes[0];
+  const composeMailboxOptions = useMemo(
+    () =>
+      mailboxes.map((mailbox) => ({
+        id: mailbox.id,
+        email: mailbox.email,
+        displayName: null as string | null
+      })),
+    [mailboxes]
+  );
+  const initialComposeMailboxId = currentMailbox?.id ?? composeMailboxOptions[0]?.id ?? "";
+  const openInlineCompose = useCallback(() => {
+    if (composeMailboxOptions.length === 0 || initialComposeMailboxId.length === 0) {
+      setSyncError("Mail gonderebilmek icin once bir mailbox baglayin.");
+      return;
+    }
+
+    setComposeSessionKey((previous) => previous + 1);
+    setIsInlineComposeOpen(true);
+  }, [composeMailboxOptions.length, initialComposeMailboxId]);
 
   const visibleLabels = useMemo(() => {
     if (!currentMailboxId) {
@@ -266,47 +290,36 @@ export function MailWorkspace({
   }, [nextCursor, threadCacheKey, threadItems]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
+    const syncFromSettings = () => {
+      setNotificationPreferences(readMailNotificationPreferences());
+    };
 
-    const raw = window.localStorage.getItem(MAIL_NOTIFICATION_PREFS_STORAGE_KEY);
-    if (!raw) {
-      const legacyDesktop = window.localStorage.getItem("mail.desktopNotifications.enabled") === "true";
-      setNotificationPreferences((previous) => ({
-        ...previous,
-        desktopEnabled: legacyDesktop
-      }));
-      return;
-    }
+    const handleStorage = (event: StorageEvent) => {
+      if (
+        event.key !== null &&
+        event.key !== MAIL_NOTIFICATION_PREFS_STORAGE_KEY &&
+        event.key !== "mail.desktopNotifications.enabled"
+      ) {
+        return;
+      }
+      syncFromSettings();
+    };
 
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      setNotificationPreferences(normalizeMailNotificationPreferences(parsed));
-    } catch {
-      setNotificationPreferences(DEFAULT_MAIL_NOTIFICATION_PREFERENCES);
-    }
+    syncFromSettings();
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener(MAIL_NOTIFICATION_CHANGED_EVENT, syncFromSettings);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener(MAIL_NOTIFICATION_CHANGED_EVENT, syncFromSettings);
+    };
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.localStorage.setItem(
-      MAIL_NOTIFICATION_PREFS_STORAGE_KEY,
-      JSON.stringify(notificationPreferences)
-    );
-    window.localStorage.setItem(
-      "mail.desktopNotifications.enabled",
-      notificationPreferences.desktopEnabled ? "true" : "false"
-    );
-  }, [notificationPreferences]);
 
   useEffect(() => {
     const syncFromAppearance = () => {
       const appearance = readAppearancePreferences();
       setMailLayoutMode(appearance.mailLayout);
+      setReadingPanePosition(appearance.mailReadingPanePosition);
     };
 
     syncFromAppearance();
@@ -387,45 +400,6 @@ export function MailWorkspace({
     }
   }, [bulkLabelId, visibleLabels]);
 
-  const updateNotificationPreferences = useCallback(
-    (updater: (current: MailNotificationPreferences) => MailNotificationPreferences) => {
-      setNotificationPreferences((current) => updater(current));
-    },
-    []
-  );
-
-  const toggleDesktopNotifications = useCallback(async () => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    if (!("Notification" in window)) {
-      setSyncError("Tarayıcı masaüstü bildirimi desteklemiyor.");
-      return;
-    }
-
-    if (notificationPreferences.desktopEnabled) {
-      updateNotificationPreferences((current) => ({ ...current, desktopEnabled: false }));
-      return;
-    }
-
-    if (Notification.permission === "denied") {
-      setSyncError("Tarayıcı bildirim izni engellendi. Tarayıcı ayarlarından izin verin.");
-      return;
-    }
-
-    if (Notification.permission !== "granted") {
-      const result = await Notification.requestPermission();
-      if (result !== "granted") {
-        setSyncError("Masaüstü bildirim izni verilmedi.");
-        return;
-      }
-    }
-
-    updateNotificationPreferences((current) => ({ ...current, desktopEnabled: true }));
-    setSyncError(null);
-  }, [notificationPreferences.desktopEnabled, updateNotificationPreferences]);
-
   const showReconnectBanner = useMemo(() => {
     return mailboxes.some(
       (mailbox) =>
@@ -444,6 +418,18 @@ export function MailWorkspace({
     });
 
     const sorted = [...filtered].sort((left, right) => {
+      if (left.isPinned !== right.isPinned) {
+        return left.isPinned ? -1 : 1;
+      }
+
+      if (left.isPinned && right.isPinned) {
+        const leftPinnedAt = left.pinnedAt ? new Date(left.pinnedAt).getTime() : 0;
+        const rightPinnedAt = right.pinnedAt ? new Date(right.pinnedAt).getTime() : 0;
+        if (leftPinnedAt !== rightPinnedAt) {
+          return rightPinnedAt - leftPinnedAt;
+        }
+      }
+
       if (currentSortBy === "sender") {
         const result = left.sender.localeCompare(right.sender, "tr", { sensitivity: "base" });
         return currentSortDirection === "asc" ? result : -result;
@@ -656,6 +642,79 @@ export function MailWorkspace({
         );
         setSyncError(payload.error?.message ?? "Mesaj bayrak güncellemesi başarısız");
       }
+    },
+    [tenantId, threadItems]
+  );
+
+  const toggleThreadPin = useCallback(
+    async (threadId: string): Promise<void> => {
+      const thread = threadItems.find((item) => item.id === threadId);
+      if (!thread || thread.kind === "DRAFT") {
+        return;
+      }
+
+      const nextPinned = !thread.isPinned;
+      const nextPinnedAt = nextPinned ? new Date().toISOString() : null;
+
+      setThreadItems((previous) =>
+        previous.map((item) =>
+          item.id === threadId
+            ? {
+                ...item,
+                isPinned: nextPinned,
+                pinnedAt: nextPinnedAt
+              }
+            : item
+        )
+      );
+
+      const response = await fetch(withBasePath(`/api/v1/mail/threads/${threadId}/productivity`), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenantId,
+          isPinned: nextPinned
+        })
+      });
+
+      const payload = (await response.json()) as {
+        ok: boolean;
+        data?: {
+          productivity: {
+            isPinned: boolean;
+            pinnedAt: string | null;
+          };
+        };
+        error?: { message: string };
+      };
+
+      if (!payload.ok || !payload.data) {
+        setThreadItems((previous) =>
+          previous.map((item) =>
+            item.id === threadId
+              ? {
+                  ...item,
+                  isPinned: thread.isPinned,
+                  pinnedAt: thread.pinnedAt
+                }
+              : item
+          )
+        );
+        setSyncError(payload.error?.message ?? "Pinleme islemi basarisiz");
+        return;
+      }
+
+      setThreadItems((previous) =>
+        previous.map((item) =>
+          item.id === threadId
+            ? {
+                ...item,
+                isPinned: payload.data?.productivity.isPinned ?? nextPinned,
+                pinnedAt: payload.data?.productivity.pinnedAt ?? nextPinnedAt
+              }
+            : item
+        )
+      );
     },
     [tenantId, threadItems]
   );
@@ -901,6 +960,84 @@ export function MailWorkspace({
     router.refresh();
   }, [currentMailbox?.id, router, tenantId]);
 
+  const moveThreadByDrop = useCallback(
+    async (threadId: string, view: SidebarView, labelId?: string): Promise<void> => {
+      const thread = threadItems.find((item) => item.id === threadId);
+      if (!thread || thread.kind === "DRAFT" || !thread.latestMessageId) {
+        setSyncError("Surukle birak icin uygun mesaj bulunamadi");
+        return;
+      }
+
+      if (view === "label") {
+        if (!labelId) {
+          setSyncError("Etiket hedefi bulunamadi");
+          return;
+        }
+
+        const response = await fetch(withBasePath(`/api/v1/mail/messages/${thread.latestMessageId}/labels`), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tenantId,
+            labelId,
+            action: "add"
+          })
+        });
+
+        const payload = (await response.json()) as {
+          ok: boolean;
+          error?: { message: string };
+        };
+
+        if (!payload.ok) {
+          setSyncError(payload.error?.message ?? "Etiketleme basarisiz");
+          return;
+        }
+
+        router.refresh();
+        return;
+      }
+
+      const state =
+        view === "archive"
+          ? "ARCHIVED"
+          : view === "spam"
+            ? "SPAM"
+            : view === "trash"
+              ? "TRASH"
+              : view === "inbox" || view === "unread" || view === "starred" || view === "important"
+                ? "RECEIVED"
+                : null;
+
+      if (!state) {
+        setSyncError("Bu klasore surukle birak desteklenmiyor");
+        return;
+      }
+
+      const response = await fetch(withBasePath(`/api/v1/mail/messages/${thread.latestMessageId}/state`), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenantId,
+          state
+        })
+      });
+
+      const payload = (await response.json()) as {
+        ok: boolean;
+        error?: { message: string };
+      };
+
+      if (!payload.ok) {
+        setSyncError(payload.error?.message ?? "Surukle birak tasima basarisiz");
+        return;
+      }
+
+      router.refresh();
+    },
+    [router, tenantId, threadItems]
+  );
+
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -936,7 +1073,7 @@ export function MailWorkspace({
 
       if (event.key === "c") {
         event.preventDefault();
-        router.push(`/${tenantSlug}/mail/compose`);
+        openInlineCompose();
         return;
       }
 
@@ -963,17 +1100,19 @@ export function MailWorkspace({
   }, [
     activeThreadId,
     currentMailboxId,
+    openInlineCompose,
     openThread,
-    router,
-    tenantSlug,
     toggleThreadRead,
     toggleThreadSelection,
     triggerSync,
     viewThreads
   ]);
 
+  const showRightReadingPane = mailLayoutMode === "split" && readingPanePosition === "right";
+  const showBottomReadingPane = mailLayoutMode === "split" && readingPanePosition === "bottom";
+
   return (
-    <div className="flex h-screen flex-col bg-[#f6f8fc]">
+    <div className="flex h-screen flex-col bg-white">
       <div className="border-b border-slate-200 bg-white px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-[260px] flex-1">
@@ -1008,13 +1147,12 @@ export function MailWorkspace({
           >
             {showFilters ? "Filtreleri Gizle" : "Filtreler"}
           </button>
-          <button
-            type="button"
+          <Link
+            href={`/${tenantSlug}/settings`}
             className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
-            onClick={() => setShowNotificationSettings((current) => !current)}
           >
-            {showNotificationSettings ? "Bildirimleri Gizle" : "Bildirimler"}
-          </button>
+            Ayarlar
+          </Link>
           {currentMailbox ? (
             <SyncStatusBadge
               status={currentMailbox.syncStates[0]?.syncStatus ?? "IDLE"}
@@ -1108,89 +1246,6 @@ export function MailWorkspace({
               }}
               onSensitiveToggle={() => setSensitiveOnly((current) => !current)}
             />
-          </div>
-        ) : null}
-
-        {showNotificationSettings ? (
-          <div className="mt-3 rounded-xl border border-slate-300 bg-slate-50 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-              Bildirim Ayarları
-            </p>
-            <div className="mt-3 grid gap-3 text-sm text-slate-700 md:grid-cols-2">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={notificationPreferences.desktopEnabled}
-                  onChange={() => {
-                    void toggleDesktopNotifications();
-                  }}
-                />
-                Masaüstü bildirimi
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={notificationPreferences.soundEnabled}
-                  onChange={(event) => {
-                    const checked = event.currentTarget.checked;
-                    updateNotificationPreferences((current) => ({ ...current, soundEnabled: checked }));
-                    if (checked) {
-                      playNotificationSound(audioContextRef);
-                    }
-                  }}
-                />
-                Bildirim sesi
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={notificationPreferences.importantOnly}
-                  onChange={(event) => {
-                    const checked = event.currentTarget.checked;
-                    updateNotificationPreferences((current) => ({ ...current, importantOnly: checked }));
-                  }}
-                />
-                Sadece önemli mailler
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={notificationPreferences.quietHoursEnabled}
-                  onChange={(event) => {
-                    const checked = event.currentTarget.checked;
-                    updateNotificationPreferences((current) => ({
-                      ...current,
-                      quietHoursEnabled: checked
-                    }));
-                  }}
-                />
-                Sessiz saatler
-              </label>
-            </div>
-            {notificationPreferences.quietHoursEnabled ? (
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                <span>Sessiz aralık:</span>
-                <input
-                  type="time"
-                  className="rounded border border-slate-300 bg-white px-2 py-1"
-                  value={notificationPreferences.quietHoursStart}
-                  onChange={(event) => {
-                    const value = event.currentTarget.value;
-                    updateNotificationPreferences((current) => ({ ...current, quietHoursStart: value }));
-                  }}
-                />
-                <span>-</span>
-                <input
-                  type="time"
-                  className="rounded border border-slate-300 bg-white px-2 py-1"
-                  value={notificationPreferences.quietHoursEnd}
-                  onChange={(event) => {
-                    const value = event.currentTarget.value;
-                    updateNotificationPreferences((current) => ({ ...current, quietHoursEnd: value }));
-                  }}
-                />
-              </div>
-            ) : null}
           </div>
         ) : null}
 
@@ -1298,7 +1353,7 @@ export function MailWorkspace({
 
       <div
         className={`grid flex-1 overflow-hidden ${
-          mailLayoutMode === "split" ? "lg:grid-cols-[260px_500px_1fr]" : "lg:grid-cols-[260px_1fr]"
+          showRightReadingPane ? "lg:grid-cols-[260px_500px_1fr]" : "lg:grid-cols-[260px_1fr]"
         }`}
       >
         <MailSidebar
@@ -1337,35 +1392,67 @@ export function MailWorkspace({
             void createLabel();
           }}
           onCompose={() => {
-            router.push(`/${tenantSlug}/mail/compose`);
+            openInlineCompose();
+          }}
+          onDropThreadToView={(threadId, view, labelId) => {
+            void moveThreadByDrop(threadId, view, labelId);
           }}
         />
 
-        <MailList
-          items={viewThreads}
-          {...(activeThreadId ? { activeThreadId } : {})}
-          selectedThreadIds={selectedThreadIds}
-          onToggleSelect={toggleThreadSelection}
-          onToggleStar={(threadId) => {
-            void toggleFlag(threadId, "isStarred");
-          }}
-          onToggleImportant={(threadId) => {
-            void toggleFlag(threadId, "isImportant");
-          }}
-          onActivate={setActiveThreadId}
-          onOpen={openThread}
-          hasMore={nextCursor !== null}
-          loadingMore={loadingMore}
-          loadError={loadError}
-          onLoadMore={loadMoreThreads}
-        />
+        <div className={`min-h-0 bg-white ${showBottomReadingPane ? "flex flex-col overflow-hidden" : ""}`}>
+          <div className={showBottomReadingPane ? "min-h-0 flex-1 overflow-hidden" : "h-full"}>
+            <MailList
+              items={viewThreads}
+              {...(activeThreadId ? { activeThreadId } : {})}
+              selectedThreadIds={selectedThreadIds}
+              onToggleSelect={toggleThreadSelection}
+              onToggleStar={(threadId) => {
+                void toggleFlag(threadId, "isStarred");
+              }}
+              onToggleImportant={(threadId) => {
+                void toggleFlag(threadId, "isImportant");
+              }}
+              onTogglePin={(threadId) => {
+                void toggleThreadPin(threadId);
+              }}
+              onActivate={setActiveThreadId}
+              onOpen={openThread}
+              hasMore={nextCursor !== null}
+              loadingMore={loadingMore}
+              loadError={loadError}
+              onLoadMore={loadMoreThreads}
+            />
+          </div>
 
-        {mailLayoutMode === "split" ? (
+          {showBottomReadingPane ? (
+            <div className="hidden border-t border-slate-200 bg-white p-4 lg:flex lg:flex-col lg:justify-between">
+              <div>
+                <p className="text-base font-semibold text-slate-800">Mail Önizleme</p>
+                <p className="mt-2 text-sm text-slate-500">
+                  Okuma paneli altta. Hızlıca açmak için listeden bir mail seçin.
+                </p>
+              </div>
+              {activeThreadId ? (
+                <button
+                  type="button"
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
+                  onClick={() => {
+                    openThread(activeThreadId);
+                  }}
+                >
+                  Seçili Maili Aç
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        {showRightReadingPane ? (
           <div className="hidden border-l border-slate-200 bg-white p-6 lg:flex lg:flex-col lg:justify-between">
             <div>
               <p className="text-base font-semibold text-slate-800">Mail Önizleme</p>
               <p className="mt-2 text-sm text-slate-500">
-                Listeden bir mail seçip açın. Daha sade ve hızlı akış için önizleme panelini pasif tutuyoruz.
+                Okuma paneli sağda. Listeden bir mail seçip açın.
               </p>
             </div>
             {activeThreadId ? (
@@ -1382,6 +1469,32 @@ export function MailWorkspace({
           </div>
         ) : null}
       </div>
+
+      {isInlineComposeOpen ? (
+        <>
+          <div className="fixed inset-0 z-40 bg-[linear-gradient(135deg,rgba(37,99,235,0.14),rgba(249,115,22,0.14),rgba(255,255,255,0.86))] backdrop-blur-[2px]" />
+          <div className="pointer-events-none fixed inset-0 z-50 flex items-end justify-end p-3 sm:p-5">
+            <div className="pointer-events-auto relative w-full max-w-4xl rounded-2xl border border-blue-100 bg-white p-1 shadow-[0_36px_90px_-46px_rgba(37,99,235,0.6)]">
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-1 rounded-t-2xl bg-gradient-to-r from-blue-600 via-blue-500 to-orange-500" />
+              <button
+                type="button"
+                className="absolute right-4 top-4 z-10 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                onClick={() => setIsInlineComposeOpen(false)}
+              >
+                Kapat
+              </button>
+              <ComposeEditor
+                key={composeSessionKey}
+                tenantSlug={tenantSlug}
+                tenantId={tenantId}
+                mailboxOptions={composeMailboxOptions}
+                initialMailboxId={initialComposeMailboxId}
+                composeDefaultFont={composeDefaultFont}
+              />
+            </div>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -1395,6 +1508,11 @@ function mapApiThread(thread: ThreadApiResponse): WorkspaceThread {
     subject: thread.subject,
     snippet: thread.snippet,
     unreadCount: thread.unreadCount,
+    isPinned: thread.isPinned === true,
+    pinnedAt: thread.pinnedAt ?? null,
+    readLaterAt: thread.readLaterAt ?? null,
+    reminderAt: thread.reminderAt ?? null,
+    note: thread.note ?? null,
     lastMessageAt: thread.lastMessageAt,
     sender: thread.messages[0]?.fromName ?? thread.messages[0]?.fromEmail ?? "Unknown",
     latestMessageId: thread.messages[0]?.id ?? null,
@@ -1455,39 +1573,6 @@ function parseBoolean(value: string | null): boolean | null {
   return null;
 }
 
-function normalizeMailNotificationPreferences(input: unknown): MailNotificationPreferences {
-  if (!isRecord(input)) {
-    return { ...DEFAULT_MAIL_NOTIFICATION_PREFERENCES };
-  }
-
-  return {
-    desktopEnabled: input.desktopEnabled === true,
-    soundEnabled: input.soundEnabled === true,
-    importantOnly: input.importantOnly === true,
-    quietHoursEnabled: input.quietHoursEnabled === true,
-    quietHoursStart: normalizeTimeValue(input.quietHoursStart),
-    quietHoursEnd: normalizeTimeValue(input.quietHoursEnd, "08:00")
-  };
-}
-
-function normalizeTimeValue(value: unknown, fallback = "22:00"): string {
-  if (typeof value !== "string") {
-    return fallback;
-  }
-
-  const trimmed = value.trim();
-  if (/^\d{2}:\d{2}$/.test(trimmed)) {
-    const [hoursRaw, minutesRaw] = trimmed.split(":");
-    const hours = Number(hoursRaw);
-    const minutes = Number(minutesRaw);
-    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
-      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-    }
-  }
-
-  return fallback;
-}
-
 function isWithinQuietHours(date: Date, start: string, end: string): boolean {
   const currentMinutes = date.getHours() * 60 + date.getMinutes();
   const startMinutes = parseTimeToMinutes(start);
@@ -1544,10 +1629,6 @@ function playNotificationSound(audioContextRef: MutableRefObject<AudioContext | 
   } catch {
     return;
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function buildThreadCacheKey(input: {

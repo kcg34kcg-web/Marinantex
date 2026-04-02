@@ -2,6 +2,7 @@ import { prisma } from "@lexoffice/db";
 import { PERMISSIONS } from "@lexoffice/core";
 import { Topbar } from "@/components/app/topbar";
 import { ClientCreateForm } from "@/components/crm/client-create-form";
+import { ContactGroupManagementPanel } from "@/components/crm/contact-group-management-panel";
 import { ContactManagementPanel } from "@/components/crm/contact-management-panel";
 import { services } from "@/lib/services";
 import { getTenantContext } from "@/lib/tenant-context";
@@ -29,6 +30,27 @@ export default async function ClientsPage({
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
     take: 100
   });
+  const groups = await prisma.contactGroup.findMany({
+    where: { tenantId: tenant.id, deletedAt: null },
+    include: {
+      members: {
+        orderBy: [{ createdAt: "asc" }],
+        include: {
+          contact: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+              firstName: true,
+              lastName: true
+            }
+          }
+        }
+      }
+    },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    take: 100
+  });
 
   return (
     <>
@@ -47,6 +69,30 @@ export default async function ClientsPage({
             title: contact.title,
             notes: contact.notes,
             updatedAt: contact.updatedAt.toISOString()
+          }))}
+        />
+        <ContactGroupManagementPanel
+          tenantId={tenant.id}
+          contacts={contacts.map((contact) => ({
+            id: contact.id,
+            fullName: contact.fullName,
+            firstName: contact.firstName,
+            lastName: contact.lastName,
+            email: contact.email
+          }))}
+          groups={groups.map((group) => ({
+            id: group.id,
+            name: group.name,
+            description: group.description,
+            color: group.color,
+            updatedAt: group.updatedAt.toISOString(),
+            members: group.members.map((member) => ({
+              contactId: member.contactId,
+              email: member.contact.email,
+              fullName: member.contact.fullName,
+              firstName: member.contact.firstName,
+              lastName: member.contact.lastName
+            }))
           }))}
         />
         <ClientCreateForm tenantId={tenant.id} />

@@ -1,7 +1,7 @@
 "use client";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect } from "react";
-import { Gavel } from "lucide-react"; // Tokmak ikonu
+import { Logo } from "@/components/brand/Logo";
 
 export default function LexwoowTransition() {
   const [isVisible, setIsVisible] = useState(true);
@@ -19,9 +19,8 @@ export default function LexwoowTransition() {
           exit={{ opacity: 0 }}
           className="fixed inset-0 z-[100] bg-slate-950 flex flex-col items-center justify-center"
         >
-          {/* Tokmak Animasyonu */}
           <motion.div
-            initial={{ rotate: -45, y: -100 }}
+            initial={{ rotate: -8, y: -80 }}
             animate={{ rotate: 0, y: 0 }}
             transition={{ 
               type: "spring", 
@@ -29,9 +28,8 @@ export default function LexwoowTransition() {
               damping: 15,
               delay: 0.2 
             }}
-            className="text-amber-500"
           >
-            <Gavel size={120} />
+            <Logo width={300} height={92} className="h-20 w-auto md:h-24" priority />
           </motion.div>
 
           {/* Tokmağın Vurduğu Andaki Şok Dalgası */}

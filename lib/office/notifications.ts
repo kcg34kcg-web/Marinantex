@@ -9,6 +9,8 @@ export interface OfficeNotification {
   detail: string;
   actionUrl?: string;
   actionLabel?: string;
+  bureauId?: string;
+  recipientUserIds?: string[];
   createdAt: string;
 }
 
@@ -36,8 +38,45 @@ export function publishOfficeNotification(event: Omit<OfficeNotification, 'id' |
   return fullEvent;
 }
 
-export function getRecentOfficeNotifications(): OfficeNotification[] {
-  return [...recentEvents].reverse();
+function isVisibleToAudience(
+  event: OfficeNotification,
+  audience: {
+    bureauId: string;
+    userId: string;
+  },
+) {
+  if (!event.bureauId || event.bureauId !== audience.bureauId) {
+    return false;
+  }
+
+  if (event.recipientUserIds && event.recipientUserIds.length > 0) {
+    return event.recipientUserIds.includes(audience.userId);
+  }
+
+  return true;
+}
+
+export function getRecentOfficeNotificationsForAudience(
+  audience: {
+    bureauId: string;
+    userId: string;
+  },
+  limit = 10,
+): OfficeNotification[] {
+  return [...recentEvents]
+    .reverse()
+    .filter((event) => isVisibleToAudience(event, audience))
+    .slice(0, limit);
+}
+
+export function isOfficeNotificationVisibleToAudience(
+  event: OfficeNotification,
+  audience: {
+    bureauId: string;
+    userId: string;
+  },
+): boolean {
+  return isVisibleToAudience(event, audience);
 }
 
 export function subscribeOfficeNotifications(handler: (event: OfficeNotification) => void): () => void {

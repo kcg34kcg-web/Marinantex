@@ -11,6 +11,9 @@ interface VirtualItem {
 interface UseVirtualizerOptions {
   count: number;
   estimateSize: () => number;
+  getScrollElement?: () => Element | null;
+  overscan?: number;
+  horizontal?: boolean;
 }
 
 interface VirtualizerResult {

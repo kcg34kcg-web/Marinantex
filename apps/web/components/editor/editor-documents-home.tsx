@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Archive,
@@ -26,8 +26,8 @@ type ViewMode = "table" | "cards";
 
 interface ApiContext {
   apiBaseUrl: string;
-  token: string;
-  tenantId: string;
+  token: string | null;
+  tenantId: string | null;
 }
 
 interface LocalDocumentRecord {
@@ -51,6 +51,10 @@ interface DocumentListItem {
 
 const LOCAL_DOCUMENT_INDEX_KEY = "editor-unified:document-index";
 const MAX_LOCAL_INDEX_SIZE = 60;
+const REMOTE_LIST_UNAVAILABLE_WITH_LOCAL =
+  "Uzak belge listesi su an alinamiyor; yerel belgeler gosteriliyor.";
+const REMOTE_LIST_UNAVAILABLE_EMPTY =
+  "Uzak belge listesine erisilemiyor. Oturum acik degilse tekrar giris yapip yeniden deneyin.";
 const STATUS_FILTERS: Array<{ id: StatusFilter; label: string }> = [
   { id: "ALL", label: "Tum Belgeler" },
   { id: "DRAFT", label: "Taslaklar" },
@@ -95,11 +99,42 @@ function readApiContext(): ApiContext | null {
   if (typeof window === "undefined") return null;
   const token = window.localStorage.getItem("mx_access_token");
   const tenantId = window.localStorage.getItem("mx_tenant_id");
-  if (!token || !tenantId) return null;
   return {
     apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:4000",
     token,
     tenantId,
+  };
+}
+
+async function canUseApi(context: ApiContext): Promise<boolean> {
+  try {
+    const response = await fetch(`${context.apiBaseUrl}/auth/me`, {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      headers: buildApiAuthHeaders(context),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function buildApiAuthHeaders(context: ApiContext): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (context.token) {
+    headers.Authorization = `Bearer ${context.token}`;
+  }
+  if (context.tenantId) {
+    headers["x-tenant-id"] = context.tenantId;
+  }
+  return headers;
+}
+
+function buildApiHeaders(context: ApiContext): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    ...buildApiAuthHeaders(context),
   };
 }
 
@@ -126,7 +161,14 @@ function readLocalIndex(): DocumentListItem[] {
         source: "local",
       });
     });
-    return items.sort((a, b) => toSafeDate(b.updatedAt) - toSafeDate(a.updatedAt));
+    const deduped = new Map<string, DocumentListItem>();
+    items.forEach((item) => {
+      const existing = deduped.get(item.id);
+      if (!existing || toSafeDate(item.updatedAt) >= toSafeDate(existing.updatedAt)) {
+        deduped.set(item.id, item);
+      }
+    });
+    return Array.from(deduped.values()).sort((a, b) => toSafeDate(b.updatedAt) - toSafeDate(a.updatedAt));
   } catch {
     return [];
   }
@@ -242,6 +284,7 @@ function isToday(input?: string): boolean {
 
 export function EditorDocumentsHome() {
   const router = useRouter();
+  const loadRequestIdRef = useRef(0);
   const [documents, setDocuments] = useState<DocumentListItem[]>([]);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
@@ -253,6 +296,9 @@ export function EditorDocumentsHome() {
   const [createError, setCreateError] = useState<string | null>(null);
 
   const loadDocuments = useCallback(async (options?: { silent?: boolean }) => {
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
+    const isCurrentRequest = () => loadRequestIdRef.current === requestId;
     const silent = Boolean(options?.silent);
     if (silent) setIsRefreshing(true);
     else setIsLoading(true);
@@ -262,17 +308,24 @@ export function EditorDocumentsHome() {
       const localItems = readLocalIndex();
       const apiContext = readApiContext();
       if (!apiContext) {
+        if (!isCurrentRequest()) return;
         setDocuments(localItems);
+        return;
+      }
+      const apiReady = await canUseApi(apiContext);
+      if (!apiReady) {
+        if (!isCurrentRequest()) return;
+        setDocuments(localItems);
+        setLoadError(
+          localItems.length > 0 ? REMOTE_LIST_UNAVAILABLE_WITH_LOCAL : REMOTE_LIST_UNAVAILABLE_EMPTY,
+        );
         return;
       }
 
       const response = await fetch(`${apiContext.apiBaseUrl}/documents?limit=60`, {
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${apiContext.token}`,
-          "x-tenant-id": apiContext.tenantId,
-          "Content-Type": "application/json",
-        },
+        credentials: "include",
+        headers: buildApiHeaders(apiContext),
         cache: "no-store",
       });
 
@@ -283,17 +336,20 @@ export function EditorDocumentsHome() {
       const text = await response.text();
       const payload = text ? JSON.parse(text) : [];
       const remoteItems = parseRemoteDocuments(payload);
+      if (!isCurrentRequest()) return;
       setDocuments(mergeDocuments(localItems, remoteItems));
     } catch (error) {
+      if (!isCurrentRequest()) return;
       const localItems = readLocalIndex();
       setDocuments(localItems);
       if (localItems.length > 0) {
-        setLoadError("Uzak belge listesi su an alinamiyor; yerel belgeler gosteriliyor.");
+        setLoadError(REMOTE_LIST_UNAVAILABLE_WITH_LOCAL);
       } else {
         const message = error instanceof Error ? error.message : "Belge listesi alinirken beklenmeyen hata olustu.";
-        setLoadError(message);
+        setLoadError(message || REMOTE_LIST_UNAVAILABLE_EMPTY);
       }
     } finally {
+      if (!isCurrentRequest()) return;
       setIsLoading(false);
       setIsRefreshing(false);
     }
@@ -337,7 +393,7 @@ export function EditorDocumentsHome() {
       const templateLabel = options?.templateLabel?.trim() || "Belge";
       const documentType = options?.type?.trim() || "PETITION";
       const apiContext = readApiContext();
-      if (apiContext) {
+      if (apiContext && (await canUseApi(apiContext))) {
         const title = `${templateLabel} ${new Date().toLocaleDateString("tr-TR")} ${new Date().toLocaleTimeString("tr-TR", {
           hour: "2-digit",
           minute: "2-digit",
@@ -345,11 +401,8 @@ export function EditorDocumentsHome() {
 
         const response = await fetch(`${apiContext.apiBaseUrl}/documents`, {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiContext.token}`,
-            "x-tenant-id": apiContext.tenantId,
-            "Content-Type": "application/json",
-          },
+          credentials: "include",
+          headers: buildApiHeaders(apiContext),
           body: JSON.stringify({
             title,
             type: documentType,
@@ -641,7 +694,8 @@ export function EditorDocumentsHome() {
                 onClick={() => {
                   void createDocument({ templateLabel: template.title, type: template.type });
                 }}
-                className="group rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_10px_24px_rgba(15,23,42,0.08)]"
+                disabled={isCreating}
+                className="group rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_10px_24px_rgba(15,23,42,0.08)] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-none"
               >
                 <div className={`mb-3 inline-flex h-8 items-center rounded-lg bg-gradient-to-r px-2.5 text-[11px] font-semibold text-white ${template.accent}`}>
                   Hazir Baslangic
@@ -693,7 +747,8 @@ export function EditorDocumentsHome() {
               onClick={() => {
                 void createDocument({ templateLabel: "Belge", type: "PETITION" });
               }}
-              className="mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800"
+              disabled={isCreating}
+              className="mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <FilePlus2 className="h-4 w-4" />
               Ilk Belgeni Olustur

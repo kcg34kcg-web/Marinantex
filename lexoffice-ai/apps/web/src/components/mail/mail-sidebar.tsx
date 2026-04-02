@@ -1,3 +1,5 @@
+import type { DragEvent } from "react";
+
 type SidebarView =
   | "inbox"
   | "unread"
@@ -31,7 +33,8 @@ export function MailSidebar({
   onSelectMailbox,
   onSelectView,
   onCreateLabel,
-  onCompose
+  onCompose,
+  onDropThreadToView
 }: {
   mailboxes: Array<{
     id: string;
@@ -54,14 +57,35 @@ export function MailSidebar({
   onSelectView: (view: SidebarView, labelId?: string) => void;
   onCreateLabel: () => void;
   onCompose: () => void;
+  onDropThreadToView: (threadId: string, view: SidebarView, labelId?: string) => void;
 }) {
+  function getDropHandlers(view: SidebarView, labelId?: string) {
+    return {
+      onDragOver: (event: DragEvent) => {
+        const threadId = event.dataTransfer.getData("application/x-lexoffice-thread-id");
+        if (threadId.length > 0) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+        }
+      },
+      onDrop: (event: DragEvent) => {
+        const threadId = event.dataTransfer.getData("application/x-lexoffice-thread-id");
+        if (threadId.length === 0) {
+          return;
+        }
+        event.preventDefault();
+        onDropThreadToView(threadId, view, labelId);
+      }
+    };
+  }
+
   return (
-    <aside className="w-full border-r border-slate-200 bg-[#f8fafd] lg:w-64">
+    <aside className="w-full border-r border-slate-200 bg-white lg:w-64">
       <div className="border-b border-slate-200 px-4 py-4">
         <button
           type="button"
           onClick={onCompose}
-          className="inline-flex w-full items-center justify-center rounded-2xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+          className="inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-blue-600 to-orange-500 px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_-16px_rgba(37,99,235,0.65)] transition hover:from-blue-700 hover:to-orange-600"
         >
           + Yeni Mail
         </button>
@@ -76,10 +100,11 @@ export function MailSidebar({
                 type="button"
                 className={`w-full rounded-xl px-3 py-2 text-left text-sm ${
                   selectedView === view.id
-                    ? "bg-brand-100 font-medium text-brand-800"
+                    ? "bg-blue-50 font-medium text-blue-700"
                     : "text-slate-700 hover:bg-slate-100"
                 }`}
                 onClick={() => onSelectView(view.id)}
+                {...getDropHandlers(view.id)}
               >
                 {view.label}
               </button>
@@ -95,7 +120,7 @@ export function MailSidebar({
             <button
               type="button"
               className={`w-full rounded-xl px-3 py-2 text-left text-sm ${
-                !selectedMailboxId ? "bg-brand-100 font-medium text-brand-800" : "text-slate-700 hover:bg-slate-100"
+                !selectedMailboxId ? "bg-blue-50 font-medium text-blue-700" : "text-slate-700 hover:bg-slate-100"
               }`}
               onClick={() => onSelectMailbox(undefined)}
             >
@@ -108,7 +133,7 @@ export function MailSidebar({
                 type="button"
                 className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm ${
                   mailbox.id === selectedMailboxId
-                    ? "bg-brand-100 font-medium text-brand-800"
+                    ? "bg-blue-50 font-medium text-blue-700"
                     : "text-slate-700 hover:bg-slate-100"
                 }`}
                 onClick={() => onSelectMailbox(mailbox.id)}
@@ -151,10 +176,11 @@ export function MailSidebar({
                   type="button"
                   className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm ${
                     selectedView === "label" && selectedLabelId === label.id
-                      ? "bg-brand-100 font-medium text-brand-800"
+                      ? "bg-blue-50 font-medium text-blue-700"
                       : "text-slate-700 hover:bg-slate-100"
                   }`}
                   onClick={() => onSelectView("label", label.id)}
+                  {...getDropHandlers("label", label.id)}
                 >
                   <span
                     className="inline-block h-2 w-2 rounded-full"

@@ -1,0 +1,92 @@
+name: marinantex-rag-local
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: marinantex-rag-redis-local
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - rag-local-network
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: marinantex-ollama-local
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:11434/api/tags >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 25s
+    networks:
+      - rag-local-network
+
+  backend-rag:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: marinantex-backend-rag-local
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+      - ./.env.local
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      REDIS_URL: redis://redis:6379
+      OPENAI_BASE_URL: http://ollama:11434/v1
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-ollama}
+      EMBEDDING_BASE_URL: http://ollama:11434/v1
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-ollama}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+      EMBEDDING_SEND_DIMENSIONS_PARAM: ${EMBEDDING_SEND_DIMENSIONS_PARAM:-false}
+      EMBEDDING_AUTO_RESIZE_TO_TARGET: ${EMBEDDING_AUTO_RESIZE_TO_TARGET:-true}
+      EMBEDDING_FORCE_LOCAL_FALLBACK: ${EMBEDDING_FORCE_LOCAL_FALLBACK:-false}
+      QWEN_SERVING_BACKEND: ${QWEN_SERVING_BACKEND:-openai}
+      QWEN_SERVED_MODEL: ${QWEN_SERVED_MODEL:-qwen2.5:3b}
+      AI_TIER_HAZIR_PROVIDER: ${AI_TIER_HAZIR_PROVIDER:-openai}
+      AI_TIER_HAZIR_MODEL: ${AI_TIER_HAZIR_MODEL:-qwen2.5:3b}
+      AI_TIER_DUSUNCELI_PROVIDER: ${AI_TIER_DUSUNCELI_PROVIDER:-openai}
+      AI_TIER_DUSUNCELI_MODEL: ${AI_TIER_DUSUNCELI_MODEL:-qwen2.5:3b}
+      AI_TIER_UZMAN_PROVIDER: ${AI_TIER_UZMAN_PROVIDER:-openai}
+      AI_TIER_UZMAN_MODEL: ${AI_TIER_UZMAN_MODEL:-qwen2.5:3b}
+      AI_TIER_MUAZZAM_PROVIDER: ${AI_TIER_MUAZZAM_PROVIDER:-openai}
+      AI_TIER_MUAZZAM_MODEL: ${AI_TIER_MUAZZAM_MODEL:-qwen2.5:3b}
+      LLM_TIER2_MODEL: ${LLM_TIER2_MODEL:-qwen2.5:3b}
+      LLM_TIER3_MODEL: ${LLM_TIER3_MODEL:-qwen2.5:3b}
+      LLM_TIER4_MODEL: ${LLM_TIER4_MODEL:-qwen2.5:3b}
+    ports:
+      - "${RAG_API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health > /dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    networks:
+      - rag-local-network
+
+networks:
+  rag-local-network:
+    driver: bridge
+
+volumes:
+  ollama_data:

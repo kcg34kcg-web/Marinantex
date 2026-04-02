@@ -36,6 +36,33 @@ import {
   copyUyapCompatible,
   pasteInternalUdfFragment,
 } from "../../lib/editor/clipboard";
+import {
+  buildTableOfContentsContent,
+  buildLegalBlockContent,
+  findTableOfContentsRange,
+  listLegalBlockDefinitions,
+} from "../../lib/editor/legal-blocks";
+import {
+  findTextMatchRanges,
+  isRangeInsideWindow,
+  toSafeReplaceRanges,
+} from "../../lib/editor/find-replace";
+import {
+  normalizeDocumentComments,
+  type DocumentComment,
+} from "../../lib/editor/comments";
+import {
+  collectTopNoteTags,
+  filterDocumentNotes,
+  normalizeDocumentNotes,
+  type DocumentNote,
+  type DocumentNoteScope,
+} from "../../lib/editor/document-notes";
+import {
+  getLegalStylePresetById,
+  listLegalStylePresets,
+  type LegalStylePresetId,
+} from "../../lib/editor/style-presets";
 import { downloadUdfFromEditorJson, importUdfFile } from "../../lib/editor/udf";
 
 type Layout = "embedded" | "full";
@@ -43,7 +70,22 @@ type DocStatus = "DRAFT" | "REVIEW" | "FINAL" | "ARCHIVED";
 type ExportStatus = "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED" | "EXPIRED";
 type SharePermission = "VIEW" | "COMMENT";
 type SaveState = "idle" | "saving" | "saved" | "error" | "offline";
-type ToolbarMenu = "typography" | "color" | "table" | "insert" | null;
+type OrderedListStyleValue =
+  | "decimal"
+  | "lower-alpha"
+  | "upper-alpha"
+  | "lower-roman"
+  | "upper-roman";
+type ToolbarMenu =
+  | "typography"
+  | "color"
+  | "table"
+  | "insert"
+  | "layout"
+  | "view"
+  | "references"
+  | "outline"
+  | null;
 
 interface MentionItem {
   id: string;
@@ -83,18 +125,25 @@ interface FindMatch {
   preview: string;
 }
 
-interface SearchResult {
-  id: string;
-  title: string;
-  content: string;
+interface FindSelectionWindow {
+  from: number;
+  to: number;
 }
 
+interface DocumentPageMeta {
+  headerText: string;
+  footerText: string;
+  showPageNumbers: boolean;
+}
 interface TemplateItem {
   id: string;
   name: string;
   documentType: string;
   schemaVersion: number;
-  canonicalJson: { content: JSONContent };
+  canonicalJson: {
+    content?: JSONContent;
+    [key: string]: unknown;
+  };
 }
 
 interface ClauseItem {
@@ -108,20 +157,54 @@ interface ExportItem {
   id: string;
   format: "PDF" | "DOCX";
   status: ExportStatus;
+  createdAt?: string;
+  completedAt?: string | null;
+  expiresAt?: string | null;
+  fileSizeBytes?: number | null;
+  failureReason?: string | null;
 }
 
 interface ShareLinkItem {
   id: string;
   permission: SharePermission;
   expiresAt: string;
+  createdAt?: string;
+  maxViews?: number | null;
+  viewCount?: number;
+  lastAccessedAt?: string | null;
   revokedAt?: string | null;
   publicUrl?: string;
 }
 
-interface DynamicFieldDef {
-  fieldKey: string;
-  label: string;
-  defaultValue?: string;
+interface DocumentVersionItem {
+  id: string;
+  versionNumber: number;
+  schemaVersion: number;
+  snapshotHash: string;
+  isFinalSnapshot: boolean;
+  createdById: string;
+  createdAt: string;
+}
+
+interface LockSnapshot {
+  id: string;
+  userId: string;
+  acquiredAt: string;
+  expiresAt: string;
+}
+
+interface CollaborationPeer {
+  id: string;
+  updatedAt: number;
+  mode: "edit" | "preview";
+}
+
+interface SuggestionItem {
+  id: string;
+  selectedText: string;
+  proposedText: string;
+  note: string;
+  createdAt: string;
 }
 
 interface DocumentListItem {
@@ -181,21 +264,57 @@ const LOCAL_CLAUSES: ClauseItem[] = [
     bodyJson: { type: "paragraph", content: [{ type: "text", text: "Yetkili mahkeme Istanbul Mahkemeleridir." }] },
   },
 ];
-const LOCAL_DYNAMIC_FIELDS: DynamicFieldDef[] = [
-  { fieldKey: "client_name", label: "Muvekkil Adi" },
-  { fieldKey: "case_no", label: "Dosya No" },
-];
+const LOCAL_DYNAMIC_FIELDS = [
+  { fieldKey: "client_name", label: "Muvekkil Adi", defaultValue: "" },
+  { fieldKey: "case_no", label: "Dosya No", defaultValue: "" },
+  { fieldKey: "court_name", label: "Mahkeme", defaultValue: "" },
+  { fieldKey: "hearing_date", label: "Durusma Tarihi", defaultValue: "" },
+] as const;
+const LEGAL_BLOCKS = listLegalBlockDefinitions();
+const LEGAL_STYLE_PRESETS = listLegalStylePresets();
 const QUICK_COLORS = [
   "#000000", "#434343", "#666666", "#999999", "#CCCCCC",
   "#C00000", "#E67E22", "#F1C40F", "#2E7D32", "#1ABC9C",
   "#1976D2", "#283593", "#6A1B9A", "#AD1457", "#FFFFFF",
 ];
 const LOCAL_DOCUMENT_INDEX_KEY = "editor-unified:document-index";
+const SAFE_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"]);
+const DOC_STATUS_TRANSITIONS: Record<DocStatus, DocStatus[]> = {
+  DRAFT: ["REVIEW", "ARCHIVED"],
+  REVIEW: ["DRAFT", "ARCHIVED", "FINAL"],
+  FINAL: ["ARCHIVED"],
+  ARCHIVED: ["DRAFT"],
+};
+const ORDERED_LIST_STYLE_VALUES = [
+  "decimal",
+  "lower-alpha",
+  "upper-alpha",
+  "lower-roman",
+  "upper-roman",
+] as const;
 
 function toSafeDate(input?: string): number {
   if (!input) return 0;
   const parsed = Date.parse(input);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatDate(input?: string | null): string {
+  if (!input) return "-";
+  const value = new Date(input);
+  if (!Number.isFinite(value.getTime())) return "-";
+  return new Intl.DateTimeFormat("tr-TR", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(value);
+}
+
+function extractTemplateContent(template: TemplateItem): JSONContent | null {
+  const raw = template.canonicalJson?.content;
+  if (raw && typeof raw === "object") {
+    return raw;
+  }
+  return null;
 }
 
 function fallbackDocumentTitle(docId: string): string {
@@ -215,6 +334,133 @@ function deriveDocumentTitle(text: string, docId: string): string {
 
 function normalizePickerColor(color: string, fallback: string): string {
   return /^#(?:[0-9a-fA-F]{3}){1,2}$/.test(color) ? color : fallback;
+}
+
+function parseCssPixel(input: unknown, fallback = 0): number {
+  if (typeof input !== "string" || !input.trim()) return fallback;
+  const parsed = Number.parseFloat(input.replace("px", "").trim());
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizePageMeta(input: {
+  headerText?: unknown;
+  footerText?: unknown;
+  showPageNumbers?: unknown;
+}): DocumentPageMeta | null {
+  const headerText = typeof input.headerText === "string" ? input.headerText.trim() : "";
+  const footerText = typeof input.footerText === "string" ? input.footerText.trim() : "";
+  const showPageNumbers = input.showPageNumbers === true;
+  if (!headerText && !footerText && !showPageNumbers) return null;
+  return { headerText, footerText, showPageNumbers };
+}
+
+function extractPageMetaFromContent(content: unknown): DocumentPageMeta | null {
+  if (!content || typeof content !== "object" || Array.isArray(content)) return null;
+  const root = content as Record<string, unknown>;
+  if (!root.pageMeta || typeof root.pageMeta !== "object" || Array.isArray(root.pageMeta)) {
+    return null;
+  }
+  return normalizePageMeta(root.pageMeta as Record<string, unknown>);
+}
+
+function extractDocumentCommentsFromContent(content: unknown): DocumentComment[] {
+  if (!content || typeof content !== "object" || Array.isArray(content)) return [];
+  const root = content as Record<string, unknown>;
+  return normalizeDocumentComments(root.comments);
+}
+
+function extractDocumentNotesFromContent(content: unknown): DocumentNote[] {
+  if (!content || typeof content !== "object" || Array.isArray(content)) return [];
+  const root = content as Record<string, unknown>;
+  return normalizeDocumentNotes(root.notes);
+}
+
+function stripEditorMetaFromContent(content: unknown): JSONContent | null {
+  if (!content || typeof content !== "object" || Array.isArray(content)) return null;
+  const root = content as Record<string, unknown>;
+  const { pageMeta: _pageMeta, comments: _comments, notes: _notes, ...withoutMeta } = root;
+  return withoutMeta as JSONContent;
+}
+
+function withEditorMeta(
+  content: JSONContent,
+  pageMeta: DocumentPageMeta | null,
+  comments: DocumentComment[],
+  notes: DocumentNote[],
+): Record<string, unknown> {
+  const root =
+    content && typeof content === "object" && !Array.isArray(content)
+      ? { ...(content as Record<string, unknown>) }
+      : ({ type: "doc", content: [] } as Record<string, unknown>);
+  if (pageMeta) {
+    root.pageMeta = pageMeta;
+  } else {
+    delete root.pageMeta;
+  }
+  if (comments.length > 0) {
+    root.comments = comments;
+  } else {
+    delete root.comments;
+  }
+  if (notes.length > 0) {
+    root.notes = notes;
+  } else {
+    delete root.notes;
+  }
+  return root;
+}
+
+function resolveCanonicalContent(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const root = payload as Record<string, unknown>;
+  const nested = root.content;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    return nested;
+  }
+  return root;
+}
+
+function normalizeEditorLinkHref(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  const withProtocol = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+  try {
+    const parsed = new URL(withProtocol);
+    if (!SAFE_LINK_PROTOCOLS.has(parsed.protocol)) return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeOrderedListStyle(value: unknown): OrderedListStyleValue {
+  if (
+    typeof value === "string" &&
+    (ORDERED_LIST_STYLE_VALUES as readonly string[]).includes(value)
+  ) {
+    return value as OrderedListStyleValue;
+  }
+  return "decimal";
+}
+
+function parseNoteTagsInput(raw: string): string[] {
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  raw.split(",").forEach((piece) => {
+    const normalized = piece.trim().toLocaleLowerCase("tr");
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    tags.push(normalized);
+  });
+  return tags.slice(0, 8);
 }
 
 function readLocalDocumentIndex(): LocalDocumentRecord[] {
@@ -248,7 +494,6 @@ function readApiCtx() {
   if (typeof window === "undefined") return null;
   const token = window.localStorage.getItem("mx_access_token");
   const tenantId = window.localStorage.getItem("mx_tenant_id");
-  if (!token || !tenantId) return null;
   return {
     apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:4000",
     token,
@@ -256,17 +501,49 @@ function readApiCtx() {
   };
 }
 
+function buildApiAuthHeaders(ctx: {
+  token: string | null;
+  tenantId: string | null;
+}): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (ctx.token) {
+    headers.Authorization = `Bearer ${ctx.token}`;
+  }
+  if (ctx.tenantId) {
+    headers["x-tenant-id"] = ctx.tenantId;
+  }
+  return headers;
+}
+
+async function probeApiAvailability(
+  ctx: ReturnType<typeof readApiCtx>,
+): Promise<boolean> {
+  if (!ctx) return false;
+  try {
+    const response = await fetch(`${ctx.apiBaseUrl}/auth/me`, {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      headers: buildApiAuthHeaders(ctx),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T | null> {
   const ctx = readApiCtx();
   if (!ctx) return null;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string> | undefined),
+    ...buildApiAuthHeaders(ctx),
+  };
   const response = await fetch(`${ctx.apiBaseUrl}${path}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${ctx.token}`,
-      "x-tenant-id": ctx.tenantId,
-      ...(init?.headers ?? {}),
-    },
+    credentials: "include",
+    headers,
   });
   if (!response.ok) throw new Error(String(response.status));
   const body = await response.text();
@@ -341,6 +618,68 @@ const FontSize = Extension.create({
   },
 });
 
+const BlockLayout = Extension.create({
+  name: "blockLayout",
+  addGlobalAttributes() {
+    return [
+      {
+        types: ["paragraph", "heading"],
+        attributes: {
+          lineHeight: {
+            default: null,
+            parseHTML: (el: HTMLElement) => el.style.lineHeight || null,
+            renderHTML: (attrs: { lineHeight?: string | null }) =>
+              attrs.lineHeight ? { style: `line-height:${attrs.lineHeight}` } : {},
+          },
+          marginTop: {
+            default: null,
+            parseHTML: (el: HTMLElement) => el.style.marginTop || null,
+            renderHTML: (attrs: { marginTop?: string | null }) =>
+              attrs.marginTop ? { style: `margin-top:${attrs.marginTop}` } : {},
+          },
+          marginBottom: {
+            default: null,
+            parseHTML: (el: HTMLElement) => el.style.marginBottom || null,
+            renderHTML: (attrs: { marginBottom?: string | null }) =>
+              attrs.marginBottom ? { style: `margin-bottom:${attrs.marginBottom}` } : {},
+          },
+          marginLeft: {
+            default: null,
+            parseHTML: (el: HTMLElement) => el.style.marginLeft || null,
+            renderHTML: (attrs: { marginLeft?: string | null }) =>
+              attrs.marginLeft ? { style: `margin-left:${attrs.marginLeft}` } : {},
+          },
+        },
+      },
+    ];
+  },
+});
+
+const OrderedListStyle = Extension.create({
+  name: "orderedListStyle",
+  addGlobalAttributes() {
+    return [
+      {
+        types: ["orderedList"],
+        attributes: {
+          listStyleType: {
+            default: "decimal",
+            parseHTML: (el: HTMLElement) => {
+              const styleRaw = el.style.listStyleType?.trim().toLowerCase();
+              return normalizeOrderedListStyle(styleRaw);
+            },
+            renderHTML: (attrs: { listStyleType?: string | null }) => {
+              const listStyleType = normalizeOrderedListStyle(attrs.listStyleType);
+              if (listStyleType === "decimal") return {};
+              return { style: `list-style-type:${listStyleType}` };
+            },
+          },
+        },
+      },
+    ];
+  },
+});
+
 const Footnote = Node.create({
   name: "footnote",
   group: "inline",
@@ -348,7 +687,16 @@ const Footnote = Node.create({
   atom: true,
   addAttributes() { return { content: { default: "" } }; },
   parseHTML() { return [{ tag: "sup[data-footnote]" }]; },
-  renderHTML({ HTMLAttributes }) { return ["sup", mergeAttributes(HTMLAttributes, { "data-footnote": "", title: HTMLAttributes.content }), "[Dipnot]"]; },
+  renderHTML({ HTMLAttributes }) {
+    return [
+      "sup",
+      mergeAttributes(HTMLAttributes, {
+        "data-footnote": "",
+        title: HTMLAttributes.content,
+        contenteditable: "false",
+      }),
+    ];
+  },
   addCommands() { return { insertFootnote: (content) => ({ commands }) => commands.insertContent({ type: "footnote", attrs: { content } }) }; },
 });
 
@@ -472,17 +820,14 @@ export default function EditorUnified({
   const [status, setStatus] = useState<DocStatus>("DRAFT");
   const [wordCount, setWordCount] = useState(0);
   const [message, setMessage] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [remoteMentionItems, setRemoteMentionItems] = useState<MentionItem[]>([]);
-  const [searching, setSearching] = useState(false);
   const [templates, setTemplates] = useState<TemplateItem[]>(LOCAL_TEMPLATES);
   const [clauses, setClauses] = useState<ClauseItem[]>(LOCAL_CLAUSES);
   const [exports, setExports] = useState<ExportItem[]>([]);
   const [links, setLinks] = useState<ShareLinkItem[]>([]);
+  const [versions, setVersions] = useState<DocumentVersionItem[]>([]);
   const [localDocuments, setLocalDocuments] = useState<DocumentListItem[]>([]);
   const [remoteDocuments, setRemoteDocuments] = useState<DocumentListItem[]>([]);
-  const [creatingDocument, setCreatingDocument] = useState(false);
   const [newLink, setNewLink] = useState("");
   const [permission, setPermission] = useState<SharePermission>("VIEW");
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
@@ -498,26 +843,107 @@ export default function EditorUnified({
   const [apiAvailable, setApiAvailable] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [wordGoal, setWordGoal] = useState(900);
+  const [zoomLevel, setZoomLevel] = useState(100);
+  const [headerText, setHeaderText] = useState("");
+  const [footerText, setFooterText] = useState("");
+  const [showPageNumbers, setShowPageNumbers] = useState(false);
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [findQuery, setFindQuery] = useState("");
+  const [replaceQuery, setReplaceQuery] = useState("");
+  const [findCaseSensitive, setFindCaseSensitive] = useState(false);
+  const [findWholeWord, setFindWholeWord] = useState(false);
+  const [findInSelection, setFindInSelection] = useState(false);
+  const [findIncludeNotes, setFindIncludeNotes] = useState(false);
+  const [findSelectionWindow, setFindSelectionWindow] = useState<FindSelectionWindow | null>(null);
   const [findMatches, setFindMatches] = useState<FindMatch[]>([]);
   const [activeFindMatch, setActiveFindMatch] = useState(-1);
+  const [documentComments, setDocumentComments] = useState<DocumentComment[]>([]);
+  const [documentNotes, setDocumentNotes] = useState<DocumentNote[]>([]);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteTagsDraft, setNoteTagsDraft] = useState("");
+  const [noteScope, setNoteScope] = useState<DocumentNoteScope>("PRIVATE");
+  const [noteAttachSelection, setNoteAttachSelection] = useState(true);
+  const [noteSearchQuery, setNoteSearchQuery] = useState("");
+  const [noteSearchScope, setNoteSearchScope] = useState<"ALL" | DocumentNoteScope>("ALL");
+  const [noteSearchPinnedOnly, setNoteSearchPinnedOnly] = useState(false);
+  const [activeInspectorTab, setActiveInspectorTab] = useState<
+    "workflow" | "versions" | "exports" | "shares" | "library" | "collab" | "suggestions" | "comments" | "notes"
+  >("workflow");
+  const [restoringVersionId, setRestoringVersionId] = useState<string | null>(null);
+  const [downloadingExportId, setDownloadingExportId] = useState<string | null>(null);
+  const [revokingShareId, setRevokingShareId] = useState<string | null>(null);
+  const [requestingExportFormat, setRequestingExportFormat] = useState<"pdf" | "docx" | null>(null);
+  const [creatingShareLink, setCreatingShareLink] = useState(false);
+  const [suggestionMode, setSuggestionMode] = useState(false);
+  const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
+  const [peerSessions, setPeerSessions] = useState<CollaborationPeer[]>([]);
+  const [currentLock, setCurrentLock] = useState<LockSnapshot | null>(null);
   const mentionRef = useRef<MentionUi | null>(null);
   const autosaveRef = useRef<number | null>(null);
   const lockRefreshRef = useRef<number | null>(null);
+  const presenceChannelRef = useRef<BroadcastChannel | null>(null);
+  const sessionIdRef = useRef(`session-${Math.random().toString(36).slice(2, 12)}`);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const udfInputRef = useRef<HTMLInputElement | null>(null);
   const findInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceInputRef = useRef<HTMLInputElement | null>(null);
   const findQueryRef = useRef("");
+  const findCaseSensitiveRef = useRef(false);
+  const findWholeWordRef = useRef(false);
+  const findInSelectionRef = useRef(false);
+  const findSelectionWindowRef = useRef<FindSelectionWindow | null>(null);
   const hydratedDraftRef = useRef(false);
+  const commentsHydratedRef = useRef(false);
   const lastToastRef = useRef<{ text: string; at: number } | null>(null);
   const mentionSource = useMemo(
     () => [
       ...(lawItems && lawItems.length ? lawItems : LOCAL_MENTIONS),
       ...remoteMentionItems,
-      ...searchResults.map((r) => ({ id: r.id, label: r.title, text: r.content })),
     ],
-    [lawItems, remoteMentionItems, searchResults],
+    [lawItems, remoteMentionItems],
+  );
+  const canonicalPageMeta = useMemo(
+    () =>
+      normalizePageMeta({
+        headerText,
+        footerText,
+        showPageNumbers,
+      }),
+    [footerText, headerText, showPageNumbers],
+  );
+  const canonicalComments = useMemo(
+    () => normalizeDocumentComments(documentComments),
+    [documentComments],
+  );
+  const canonicalNotes = useMemo(
+    () => normalizeDocumentNotes(documentNotes),
+    [documentNotes],
+  );
+  const noteQuickTags = useMemo(
+    () => collectTopNoteTags(documentNotes, 6),
+    [documentNotes],
+  );
+  const filteredDocumentNotes = useMemo(
+    () =>
+      filterDocumentNotes(documentNotes, {
+        query: noteSearchQuery,
+        scope: noteSearchScope,
+        pinnedOnly: noteSearchPinnedOnly,
+      }),
+    [documentNotes, noteSearchPinnedOnly, noteSearchQuery, noteSearchScope],
+  );
+  const findMatchedNotes = useMemo(
+    () => {
+      if (!findIncludeNotes) return [];
+      const query = findQuery.trim();
+      if (!query) return [];
+      return filterDocumentNotes(documentNotes, {
+        query,
+        scope: "ALL",
+        pinnedOnly: false,
+      }).slice(0, 12);
+    },
+    [documentNotes, findIncludeNotes, findQuery],
   );
 
   const updateMention = useCallback((value: MentionUi | null) => { mentionRef.current = value; setMention(value); }, []);
@@ -558,28 +984,6 @@ export default function EditorUnified({
     });
   }, []);
 
-  const documentItems = useMemo(() => {
-    const merged = new Map<string, DocumentListItem>();
-    remoteDocuments.forEach((item) => {
-      merged.set(item.id, item);
-    });
-    localDocuments.forEach((item) => {
-      if (merged.has(item.id)) {
-        const existing = merged.get(item.id);
-        if (existing) {
-          merged.set(item.id, {
-            ...existing,
-            updatedAt: toSafeDate(item.updatedAt) > toSafeDate(existing.updatedAt) ? item.updatedAt : existing.updatedAt,
-            title: existing.title || item.title,
-          });
-        }
-      } else {
-        merged.set(item.id, item);
-      }
-    });
-    return Array.from(merged.values()).sort((a, b) => toSafeDate(b.updatedAt) - toSafeDate(a.updatedAt));
-  }, [localDocuments, remoteDocuments]);
-
   const collectOutlineItems = useCallback((instance: Editor): OutlineItem[] => {
     const next: OutlineItem[] = [];
     instance.state.doc.descendants((node, pos) => {
@@ -597,28 +1001,40 @@ export default function EditorUnified({
     return next;
   }, []);
 
-  const collectFindMatches = useCallback((instance: Editor, query: string): FindMatch[] => {
-    const needle = query.trim().toLocaleLowerCase("tr");
+  const collectFindMatches = useCallback((
+    instance: Editor,
+    query: string,
+    options?: {
+      caseSensitive?: boolean;
+      wholeWord?: boolean;
+      selectionWindow?: FindSelectionWindow | null;
+    },
+  ): FindMatch[] => {
+    const needle = query.trim();
     if (!needle) return [];
     const next: FindMatch[] = [];
     instance.state.doc.descendants((node, pos) => {
-      if (!node.isText || !node.text) return;
-      const lower = node.text.toLocaleLowerCase("tr");
-      let start = 0;
-      while (start < lower.length) {
-        const index = lower.indexOf(needle, start);
-        if (index === -1) break;
-        const from = pos + index;
-        const to = from + needle.length;
-        const previewStart = Math.max(0, index - 20);
-        const previewEnd = Math.min(node.text.length, index + needle.length + 20);
+      const text = node.text;
+      if (!node.isText || !text) return;
+      const ranges = findTextMatchRanges(text, needle, {
+        caseSensitive: options?.caseSensitive,
+        wholeWord: options?.wholeWord,
+        locale: "tr",
+      });
+      ranges.forEach((range) => {
+        const from = pos + range.from;
+        const to = pos + range.to;
+        if (options?.selectionWindow && !isRangeInsideWindow({ from, to }, options.selectionWindow)) {
+          return;
+        }
+        const previewStart = Math.max(0, range.from - 20);
+        const previewEnd = Math.min(text.length, range.to + 20);
         next.push({
           from,
           to,
-          preview: node.text.slice(previewStart, previewEnd),
+          preview: text.slice(previewStart, previewEnd),
         });
-        start = index + needle.length;
-      }
+      });
     });
     return next;
   }, []);
@@ -627,24 +1043,63 @@ export default function EditorUnified({
     if (layout !== "full" || typeof window === "undefined") return;
     const goalKey = `editor:word-goal:${docId}`;
     const focusKey = `editor:focus-mode:${docId}`;
+    const pageMetaKey = `editor:page-meta:${docId}`;
     const rawGoal = window.localStorage.getItem(goalKey);
     const rawFocus = window.sessionStorage.getItem(focusKey);
+    const rawPageMeta = window.localStorage.getItem(pageMetaKey);
     if (rawGoal) {
       const parsed = Number.parseInt(rawGoal, 10);
       if (Number.isFinite(parsed) && parsed >= 0) setWordGoal(parsed);
     }
     if (rawFocus === "1") setIsFocusMode(true);
+    if (rawPageMeta) {
+      try {
+        const parsed = JSON.parse(rawPageMeta) as {
+          zoomLevel?: number;
+          headerText?: string;
+          footerText?: string;
+          showPageNumbers?: boolean;
+        };
+        if (typeof parsed.zoomLevel === "number") {
+          setZoomLevel(clampNumber(parsed.zoomLevel, 60, 180));
+        }
+        if (typeof parsed.headerText === "string") {
+          setHeaderText(parsed.headerText);
+        }
+        if (typeof parsed.footerText === "string") {
+          setFooterText(parsed.footerText);
+        }
+        if (typeof parsed.showPageNumbers === "boolean") {
+          setShowPageNumbers(parsed.showPageNumbers);
+        }
+      } catch {
+        // Ignore malformed stored data.
+      }
+    }
   }, [docId, layout]);
 
   useEffect(() => {
     if (layout !== "full" || typeof window === "undefined") return;
     window.localStorage.setItem(`editor:word-goal:${docId}`, String(wordGoal));
     window.sessionStorage.setItem(`editor:focus-mode:${docId}`, isFocusMode ? "1" : "0");
-  }, [docId, isFocusMode, layout, wordGoal]);
+    window.localStorage.setItem(
+      `editor:page-meta:${docId}`,
+      JSON.stringify({
+        zoomLevel,
+        headerText,
+        footerText,
+        showPageNumbers,
+      }),
+    );
+  }, [docId, footerText, headerText, isFocusMode, layout, showPageNumbers, wordGoal, zoomLevel]);
 
   useEffect(() => {
     findQueryRef.current = findQuery;
-  }, [findQuery]);
+    findCaseSensitiveRef.current = findCaseSensitive;
+    findWholeWordRef.current = findWholeWord;
+    findInSelectionRef.current = findInSelection;
+    findSelectionWindowRef.current = findSelectionWindow;
+  }, [findCaseSensitive, findInSelection, findQuery, findSelectionWindow, findWholeWord]);
 
   useEffect(() => {
     if (!isFocusMode) return;
@@ -688,15 +1143,28 @@ export default function EditorUnified({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const syncApiAvailability = () => {
-      setApiAvailable(Boolean(readApiCtx()));
+    let active = true;
+
+    const syncApiAvailability = async () => {
+      const ctx = readApiCtx();
+      const available = await probeApiAvailability(ctx);
+      if (active) setApiAvailable(available);
     };
-    syncApiAvailability();
-    window.addEventListener("focus", syncApiAvailability);
-    window.addEventListener("storage", syncApiAvailability);
+
+    void syncApiAvailability();
+    const onFocus = () => {
+      void syncApiAvailability();
+    };
+    const onStorage = () => {
+      void syncApiAvailability();
+    };
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("storage", onStorage);
+
     return () => {
-      window.removeEventListener("focus", syncApiAvailability);
-      window.removeEventListener("storage", syncApiAvailability);
+      active = false;
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("storage", onStorage);
     };
   }, []);
 
@@ -743,6 +1211,13 @@ export default function EditorUnified({
   }, [docId, refreshDocumentList]);
 
   useEffect(() => {
+    const remoteMatch = remoteDocuments.find((item) => item.id === docId);
+    const localMatch = localDocuments.find((item) => item.id === docId);
+    const nextStatus = remoteMatch?.status || localMatch?.status || "DRAFT";
+    setStatus(nextStatus);
+  }, [docId, localDocuments, remoteDocuments]);
+
+  useEffect(() => {
     if (localDocuments.some((item) => item.id === docId)) return;
     syncLocalDocument({
       id: docId,
@@ -755,7 +1230,7 @@ export default function EditorUnified({
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
-      StarterKit, TextStyle, FontSize, FontFamily.configure({ types: ["textStyle"] }), Color, Highlight.configure({ multicolor: true }),
+      StarterKit, TextStyle, FontSize, BlockLayout, OrderedListStyle, FontFamily.configure({ types: ["textStyle"] }), Color, Highlight.configure({ multicolor: true }),
       Underline, Subscript, Superscript, TaskList, TaskItem.configure({ nested: true }), Table.configure({ resizable: true }), TableRow, TableHeader, TableCell, Image.configure({ allowBase64: true }),
       LinkExtension.configure({ openOnClick: false, autolink: true, defaultProtocol: "https" }), TextAlign.configure({ types: ["heading", "paragraph"] }), CharacterCount,
       Placeholder.configure({ placeholder: "Belge metnini yazin veya @ ile kanun maddesi ekleyin..." }), Footnote, LawMention, DynamicField,
@@ -765,16 +1240,27 @@ export default function EditorUnified({
       attributes: { class: "focus:outline-none max-w-none text-slate-900", style: "font-family:'Times New Roman',serif;" },
       handleKeyDown: (_view, event) => {
         const current = mentionRef.current;
-        if (!current) return false;
-        if (event.key === "ArrowDown") { event.preventDefault(); updateMention({ ...current, selected: (current.selected + 1) % current.items.length }); return true; }
-        if (event.key === "ArrowUp") { event.preventDefault(); updateMention({ ...current, selected: (current.selected + current.items.length - 1) % current.items.length }); return true; }
-        if (event.key === "Escape") { event.preventDefault(); updateMention(null); return true; }
-        if (event.key === "Enter" || event.key === "Tab") {
-          event.preventDefault();
-          const item = current.items[current.selected];
-          editor?.chain().focus().insertContentAt({ from: current.from, to: current.to }, { type: "lawMention", attrs: item }).insertContent(" ").run();
-          updateMention(null);
-          return true;
+        if (current) {
+          if (event.key === "ArrowDown") { event.preventDefault(); updateMention({ ...current, selected: (current.selected + 1) % current.items.length }); return true; }
+          if (event.key === "ArrowUp") { event.preventDefault(); updateMention({ ...current, selected: (current.selected + current.items.length - 1) % current.items.length }); return true; }
+          if (event.key === "Escape") { event.preventDefault(); updateMention(null); return true; }
+          if (event.key === "Enter" || event.key === "Tab") {
+            event.preventDefault();
+            const item = current.items[current.selected];
+            editor?.chain().focus().insertContentAt({ from: current.from, to: current.to }, { type: "lawMention", attrs: item }).insertContent(" ").run();
+            updateMention(null);
+            return true;
+          }
+        }
+
+        if (event.key === "Tab") {
+          const handled = event.shiftKey
+            ? (editor?.chain().focus().liftListItem("listItem").run() || editor?.chain().focus().liftListItem("taskItem").run())
+            : (editor?.chain().focus().sinkListItem("listItem").run() || editor?.chain().focus().sinkListItem("taskItem").run());
+          if (handled) {
+            event.preventDefault();
+            return true;
+          }
         }
         return false;
       },
@@ -888,6 +1374,40 @@ export default function EditorUnified({
     },
   });
 
+  const buildCanonicalTree = useCallback(() => {
+    if (!editor) return null;
+    return {
+      type: "tiptap_doc",
+      schemaVersion: 1,
+      content: withEditorMeta(
+        editor.getJSON() as JSONContent,
+        canonicalPageMeta,
+        canonicalComments,
+        canonicalNotes,
+      ),
+    };
+  }, [canonicalComments, canonicalNotes, canonicalPageMeta, editor]);
+
+  const applyEditorContent = useCallback((contentCandidate: unknown): boolean => {
+    if (!editor) return false;
+    const content = stripEditorMetaFromContent(contentCandidate);
+    if (!content) return false;
+    const pageMeta = extractPageMetaFromContent(contentCandidate);
+    if (pageMeta) {
+      setHeaderText(pageMeta.headerText);
+      setFooterText(pageMeta.footerText);
+      setShowPageNumbers(pageMeta.showPageNumbers);
+    } else {
+      setHeaderText("");
+      setFooterText("");
+      setShowPageNumbers(false);
+    }
+    setDocumentComments(extractDocumentCommentsFromContent(contentCandidate));
+    setDocumentNotes(extractDocumentNotesFromContent(contentCandidate));
+    editor.commands.setContent(content);
+    return true;
+  }, [editor]);
+
   const insertImageFile = useCallback((file: File) => {
     if (!editor) return;
     if (!file.type.startsWith("image/")) {
@@ -924,7 +1444,11 @@ export default function EditorUnified({
       setOutlineItems(collectOutlineItems(editor));
       const liveFindQuery = findQueryRef.current;
       if (liveFindQuery.trim()) {
-        const nextMatches = collectFindMatches(editor, liveFindQuery);
+        const nextMatches = collectFindMatches(editor, liveFindQuery, {
+          caseSensitive: findCaseSensitiveRef.current,
+          wholeWord: findWholeWordRef.current,
+          selectionWindow: findInSelectionRef.current ? findSelectionWindowRef.current : null,
+        });
         setFindMatches(nextMatches);
         setActiveFindMatch((prev) => {
           if (!nextMatches.length) return -1;
@@ -944,11 +1468,8 @@ export default function EditorUnified({
         autosaveRef.current = window.setTimeout(async () => {
           setSaveState("saving");
           const nowIso = new Date().toISOString();
-          const canonical = {
-            type: "tiptap_doc",
-            schemaVersion: 1,
-            content: editor.getJSON() as Record<string, unknown>,
-          };
+          const canonical = buildCanonicalTree();
+          if (!canonical) return;
           const currentTitle = deriveDocumentTitle(editor.getText(), docId);
           const saved = await apiRequest(`/documents/${docId}/autosave`, {
             method: "POST",
@@ -1002,10 +1523,14 @@ export default function EditorUnified({
     editor.on("update", handleUpdate);
     editor.on("selectionUpdate", handleSelectionUpdate);
     return () => {
+      if (autosaveRef.current) {
+        window.clearTimeout(autosaveRef.current);
+        autosaveRef.current = null;
+      }
       editor.off("update", handleUpdate);
       editor.off("selectionUpdate", handleSelectionUpdate);
     };
-  }, [apiAvailable, collectFindMatches, collectOutlineItems, docId, draftKey, editor, mentionSource, mode, onChange, readOnly, status, syncLocalDocument, updateMention]);
+  }, [apiAvailable, buildCanonicalTree, collectFindMatches, collectOutlineItems, docId, draftKey, editor, mentionSource, mode, onChange, readOnly, status, syncLocalDocument, updateMention]);
 
   useEffect(() => {
     if (!editor) return;
@@ -1014,14 +1539,18 @@ export default function EditorUnified({
       setActiveFindMatch(-1);
       return;
     }
-    const nextMatches = collectFindMatches(editor, findQuery);
+    const nextMatches = collectFindMatches(editor, findQuery, {
+      caseSensitive: findCaseSensitive,
+      wholeWord: findWholeWord,
+      selectionWindow: findInSelection ? findSelectionWindow : null,
+    });
     setFindMatches(nextMatches);
     setActiveFindMatch((prev) => {
       if (!nextMatches.length) return -1;
       if (prev < 0) return 0;
       return Math.min(prev, nextMatches.length - 1);
     });
-  }, [collectFindMatches, editor, findQuery]);
+  }, [collectFindMatches, editor, findCaseSensitive, findInSelection, findQuery, findSelectionWindow, findWholeWord]);
 
   useEffect(() => {
     return () => {
@@ -1042,18 +1571,30 @@ export default function EditorUnified({
       if (!parsed.canonical?.content) return;
       const hasRealContent = editor.getText().trim() && editor.getText().trim() !== "Belge metnini yazin...";
       if (hasRealContent) return;
-      editor.commands.setContent(parsed.canonical.content);
+      if (!applyEditorContent(parsed.canonical.content)) return;
       setMessage("Yerel draft geri yuklendi.");
     } catch {
       // ignore malformed draft payload
     }
-  }, [draftKey, editor]);
+  }, [applyEditorContent, draftKey, editor]);
 
   const insertSnippet = useCallback((title: string, content: string, pos?: number) => {
     if (!editor) return;
     let chain = editor.chain().focus();
     if (typeof pos === "number") chain = chain.setTextSelection(pos);
     chain.insertContent(snippetHtml(title, content)).run();
+  }, [editor]);
+
+  const setLinkFromPrompt = useCallback(() => {
+    if (!editor) return;
+    const rawHref = window.prompt("URL", "https://");
+    if (rawHref === null) return;
+    const href = normalizeEditorLinkHref(rawHref);
+    if (!href) {
+      setMessage("Gecersiz veya guvensiz baglanti adresi.");
+      return;
+    }
+    editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
   }, [editor]);
 
   useEffect(() => {
@@ -1135,6 +1676,7 @@ export default function EditorUnified({
       setClauses(LOCAL_CLAUSES);
       setExports([]);
       setLinks([]);
+      setVersions([]);
       return;
     }
     void Promise.all([
@@ -1142,6 +1684,7 @@ export default function EditorUnified({
       apiRequest<ClauseItem[]>("/clauses").then((v) => v && setClauses(v)).catch(() => null),
       apiRequest<ExportItem[]>(`/documents/${docId}/exports`).then((v) => v && setExports(v)).catch(() => null),
       apiRequest<ShareLinkItem[]>(`/documents/${docId}/share-links`).then((v) => v && setLinks(v)).catch(() => null),
+      apiRequest<DocumentVersionItem[]>(`/documents/${docId}/versions`).then((v) => v && setVersions(v)).catch(() => null),
     ]);
   }, [apiAvailable, docId, layout]);
 
@@ -1160,25 +1703,36 @@ export default function EditorUnified({
     setHasWriteLease(false);
 
     const acquire = async () => {
-      const lock = await apiRequest(`/documents/${docId}/locks/acquire`, {
+      const lock = await apiRequest<LockSnapshot>(`/documents/${docId}/locks/acquire`, {
         method: "POST",
         body: JSON.stringify({ leaseSeconds: 120 }),
       }).catch(() => null);
       if (!active) return;
       if (!lock) {
         setHasWriteLease(false);
+        setCurrentLock(null);
         setMode("preview");
         setMessage("Yazma kilidi alinamadi. Belge onizleme modunda acildi.");
         return;
       }
       setHasWriteLease(true);
+      setCurrentLock(lock);
       setMessage("");
       lockRefreshRef.current = window.setInterval(() => {
-        void apiRequest(`/documents/${docId}/locks/refresh`, {
+        void apiRequest<LockSnapshot>(`/documents/${docId}/locks/refresh`, {
           method: "POST",
           body: JSON.stringify({ leaseSeconds: 120 }),
+        }).then((nextLock) => {
+          if (nextLock) {
+            setCurrentLock(nextLock);
+          }
         }).catch(() => {
+          if (lockRefreshRef.current) {
+            window.clearInterval(lockRefreshRef.current);
+            lockRefreshRef.current = null;
+          }
           setHasWriteLease(false);
+          setCurrentLock(null);
           setMode("preview");
           setMessage("Yazma kilidi yenilenemedi. Onizleme moduna gecildi.");
         });
@@ -1192,6 +1746,7 @@ export default function EditorUnified({
         window.clearInterval(lockRefreshRef.current);
         lockRefreshRef.current = null;
       }
+      setCurrentLock(null);
       void apiRequest(`/documents/${docId}/locks/release`, {
         method: "POST",
         body: JSON.stringify({}),
@@ -1200,28 +1755,129 @@ export default function EditorUnified({
   }, [apiAvailable, docId, layout]);
 
   useEffect(() => {
-    if (layout !== "full" || mode !== "preview") return;
-    setPreviewLoading(true);
-    void apiRequest<{ html: string }>(`/documents/${docId}/print-preview`).then((v) => {
-      setPreviewHtml(v?.html ?? `<!doctype html><html><body>${editor?.getHTML() || ""}</body></html>`);
-    }).catch(() => setPreviewHtml(`<!doctype html><html><body>${editor?.getHTML() || ""}</body></html>`)).finally(() => setPreviewLoading(false));
-  }, [docId, editor, layout, mode]);
-
-  const search = useCallback(async () => {
-    if (!searchQuery.trim()) return;
-    setSearching(true);
-    try {
-      const res = await fetch("/api/legal-search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: searchQuery }) });
-      const data = await res.json() as { results?: Array<{ id?: string; title?: string; content?: string }> };
-      setSearchResults((data.results || []).map((x, i) => ({ id: x.id || `${x.title || "r"}-${i}`, title: x.title || `Sonuc ${i + 1}`, content: x.content || "" })));
-    } catch {
-      const q = searchQuery.toLocaleLowerCase("tr");
-      setSearchResults(LOCAL_MENTIONS.filter((x) => `${x.label} ${x.text}`.toLocaleLowerCase("tr").includes(q)).map((x) => ({ id: x.id, title: x.label, content: x.text })));
-      setMessage("Canli arama servisi yok; yerel kaynak kullanildi.");
-    } finally {
-      setSearching(false);
+    if (!apiAvailable || layout !== "full") {
+      setCurrentLock(null);
+      return;
     }
-  }, [searchQuery]);
+    let alive = true;
+    const poll = async () => {
+      const lock = await apiRequest<LockSnapshot | null>(
+        `/documents/${docId}/locks/current`,
+      ).catch(() => null);
+      if (!alive) return;
+      setCurrentLock(lock);
+    };
+    void poll();
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 15_000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [apiAvailable, docId, layout]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || layout !== "full") {
+      return;
+    }
+    const channel = new BroadcastChannel(`editor-presence:${docId}`);
+    presenceChannelRef.current = channel;
+    const emitPresence = () => {
+      channel.postMessage({
+        type: "presence",
+        id: sessionIdRef.current,
+        mode,
+        at: Date.now(),
+      });
+    };
+    emitPresence();
+    const heartbeat = window.setInterval(emitPresence, 10_000);
+    const prune = window.setInterval(() => {
+      const limit = Date.now() - 30_000;
+      setPeerSessions((prev) => prev.filter((item) => item.updatedAt >= limit));
+    }, 5_000);
+
+    channel.onmessage = (event) => {
+      const payload = event.data as {
+        type?: string;
+        id?: string;
+        at?: number;
+        mode?: "edit" | "preview";
+      };
+      const payloadId = payload.id;
+      const payloadAt = payload.at;
+      if (payload.type !== "presence" || !payloadId || !payloadAt) {
+        return;
+      }
+      if (payloadId === sessionIdRef.current) {
+        return;
+      }
+      setPeerSessions((prev) => {
+        const without = prev.filter((item) => item.id !== payloadId);
+        return [
+          ...without,
+          {
+            id: payloadId,
+            updatedAt: payloadAt,
+            mode: payload.mode === "preview" ? "preview" : "edit",
+          },
+        ];
+      });
+    };
+
+    return () => {
+      window.clearInterval(heartbeat);
+      window.clearInterval(prune);
+      channel.close();
+      presenceChannelRef.current = null;
+      setPeerSessions([]);
+    };
+  }, [docId, layout, mode]);
+
+  useEffect(() => {
+    if (!suggestionMode) return;
+    setMessage("Oneri modu acik: degisiklikleri suggestion paneline not etmeyi unutmayin.");
+  }, [suggestionMode]);
+
+  const syncCanonicalBeforePreviewOrExport = useCallback(async () => {
+    if (!apiAvailable || !editor) return;
+    if (status === "FINAL" || status === "ARCHIVED") return;
+    const canonical = buildCanonicalTree();
+    if (!canonical) return;
+    await apiRequest(`/documents/${docId}/autosave`, {
+      method: "POST",
+      body: JSON.stringify({
+        schemaVersion: 1,
+        canonicalJson: canonical,
+        recoveredFromCrash: false,
+      }),
+    }).catch(() => null);
+  }, [apiAvailable, buildCanonicalTree, docId, editor, status]);
+
+  useEffect(() => {
+    if (layout !== "full" || mode !== "preview") return;
+    let active = true;
+    const loadPreview = async () => {
+      setPreviewLoading(true);
+      try {
+        if (!readOnly) {
+          await syncCanonicalBeforePreviewOrExport();
+        }
+        const response = await apiRequest<{ html: string }>(`/documents/${docId}/print-preview`).catch(() => null);
+        if (!active) return;
+        setPreviewHtml(response?.html ?? `<!doctype html><html><body>${editor?.getHTML() || ""}</body></html>`);
+      } finally {
+        if (active) {
+          setPreviewLoading(false);
+        }
+      }
+    };
+    void loadPreview();
+    return () => {
+      active = false;
+    };
+  }, [docId, editor, layout, mode, readOnly, syncCanonicalBeforePreviewOrExport]);
 
   const refreshExports = useCallback(async () => {
     if (!apiAvailable) {
@@ -1233,49 +1889,41 @@ export default function EditorUnified({
   }, [apiAvailable, docId]);
 
   const requestExport = useCallback(async (format: "pdf" | "docx") => {
-    if (!apiAvailable) {
-      if (format === "docx") {
-        if (!editor) return;
-        const html = `<!doctype html><html><head><meta charset=\"utf-8\"/></head><body>${editor.getHTML()}</body></html>`;
-        downloadBlob(`belge-${docId}.doc`, new Blob([html], { type: "application/msword;charset=utf-8" }));
-        setMessage("Yerel DOCX cikti olusturuldu.");
-      } else {
-        setMode("preview");
-        setMessage("PDF export API baglantisi olmadan kullanilamiyor. Tarayicidan yazdir secenegini kullanin.");
+    if (requestingExportFormat) return;
+    setRequestingExportFormat(format);
+    try {
+      if (!apiAvailable) {
+        if (format === "docx") {
+          if (!editor) return;
+          const html = `<!doctype html><html><head><meta charset=\"utf-8\"/></head><body>${editor.getHTML()}</body></html>`;
+          downloadBlob(`belge-${docId}.doc`, new Blob([html], { type: "application/msword;charset=utf-8" }));
+          setMessage("Yerel DOCX cikti olusturuldu.");
+        } else {
+          setMode("preview");
+          setMessage("PDF export API baglantisi olmadan kullanilamiyor. Tarayicidan yazdir secenegini kullanin.");
+        }
+        return;
       }
-      return;
+      if (!readOnly) {
+        await syncCanonicalBeforePreviewOrExport();
+      }
+      const endpoint = format === "pdf" ? "pdf" : "docx";
+      const requested = await apiRequest(`/documents/${docId}/exports/${endpoint}`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      }).catch(() => {
+        setMessage("Export istegi basarisiz.");
+        return null;
+      });
+      if (!requested) {
+        setMessage("Export API yanit vermedi.");
+        return;
+      }
+      await refreshExports();
+    } finally {
+      setRequestingExportFormat(null);
     }
-    const endpoint = format === "pdf" ? "pdf" : "docx";
-    const requested = await apiRequest(`/documents/${docId}/exports/${endpoint}`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    }).catch(() => {
-      setMessage("Export istegi basarisiz.");
-      return null;
-    });
-    if (!requested) {
-      setMessage("Export API yanit vermedi.");
-      return;
-    }
-    await refreshExports();
-  }, [apiAvailable, docId, editor, refreshExports]);
-
-  const downloadExport = useCallback(async (exportId: string) => {
-    if (!apiAvailable) {
-      setMessage("Yerel modda queue export indirme kapali.");
-      return;
-    }
-    const signed = await apiRequest<{ signedUrl?: string }>(`/documents/${docId}/exports/${exportId}/signed-url`).catch(() => null);
-    if (!signed?.signedUrl) {
-      setMessage("Indirme linki olusturulamadi.");
-      return;
-    }
-    window.open(signed.signedUrl, "_blank", "noopener,noreferrer");
-    await apiRequest(`/documents/${docId}/exports/${exportId}/downloaded`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    }).catch(() => null);
-  }, [apiAvailable, docId]);
+  }, [apiAvailable, docId, editor, readOnly, refreshExports, requestingExportFormat, syncCanonicalBeforePreviewOrExport]);
 
   const refreshLinks = useCallback(async () => {
     if (!apiAvailable) {
@@ -1287,41 +1935,236 @@ export default function EditorUnified({
   }, [apiAvailable, docId]);
 
   const createShareLink = useCallback(async () => {
-    if (!apiAvailable) {
-      setNewLink(`${window.location.origin}/editor/${docId}`);
-      setMessage("Yerel modda genel paylasim linki uretilmez. Sadece sayfa adresi olusturuldu.");
-      return;
+    if (creatingShareLink) return;
+    setCreatingShareLink(true);
+    try {
+      if (!apiAvailable) {
+        setNewLink(`${window.location.origin}/editor/${docId}`);
+        setMessage("Yerel modda genel paylasim linki uretilmez. Sadece sayfa adresi olusturuldu.");
+        return;
+      }
+      const created = await apiRequest<{ publicUrl?: string }>(`/documents/${docId}/share-links`, {
+        method: "POST",
+        body: JSON.stringify({ permission, expiresInHours: 72 }),
+      }).catch(() => null);
+      if (!created?.publicUrl) {
+        setMessage("Paylasim linki olusturulamadi.");
+        return;
+      }
+      setNewLink(created.publicUrl);
+      await refreshLinks();
+    } finally {
+      setCreatingShareLink(false);
     }
-    const created = await apiRequest<{ publicUrl?: string }>(`/documents/${docId}/share-links`, {
-      method: "POST",
-      body: JSON.stringify({ permission, expiresInHours: 72 }),
-    }).catch(() => null);
-    if (!created?.publicUrl) {
-      setMessage("Paylasim linki olusturulamadi.");
-      return;
-    }
-    setNewLink(created.publicUrl);
-    await refreshLinks();
-  }, [apiAvailable, docId, permission, refreshLinks]);
+  }, [apiAvailable, creatingShareLink, docId, permission, refreshLinks]);
 
-  const revokeShareLink = useCallback(async (shareLinkId: string) => {
+  const copyShareLink = useCallback(async () => {
+    if (!newLink) return;
+    try {
+      await navigator.clipboard.writeText(newLink);
+      setMessage("Paylasim linki kopyalandi.");
+    } catch {
+      setMessage("Paylasim linki kopyalanamadi; manuel olarak secip kopyalayin.");
+    }
+  }, [newLink]);
+
+  const refreshVersions = useCallback(async () => {
     if (!apiAvailable) {
-      setLinks((prev) => prev.filter((item) => item.id !== shareLinkId));
-      setMessage("Yerel modda link kaydi sadece arayuzden kaldirildi.");
+      setVersions([]);
       return;
     }
-    await apiRequest(`/documents/${docId}/share-links/${shareLinkId}/revoke`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    }).catch(() => null);
-    await refreshLinks();
-  }, [apiAvailable, docId, refreshLinks]);
+    const list = await apiRequest<DocumentVersionItem[]>(
+      `/documents/${docId}/versions`,
+    ).catch(() => null);
+    if (list) {
+      setVersions(list);
+    }
+  }, [apiAvailable, docId]);
+
+  const downloadExport = useCallback(
+    async (exportId: string) => {
+      if (!apiAvailable) {
+        setMessage("Yerel modda kuyruk export indirme kullanilamaz.");
+        return;
+      }
+      setDownloadingExportId(exportId);
+      try {
+        const signed = await apiRequest<{ signedUrl?: string }>(
+          `/documents/${docId}/exports/${exportId}/signed-url`,
+        ).catch(() => null);
+        if (!signed?.signedUrl) {
+          setMessage("Export indirme linki olusturulamadi.");
+          return;
+        }
+        window.open(signed.signedUrl, "_blank", "noopener,noreferrer");
+        await apiRequest(`/documents/${docId}/exports/${exportId}/downloaded`, {
+          method: "POST",
+          body: JSON.stringify({}),
+        }).catch(() => null);
+        setMessage("Export indirme baslatildi.");
+      } finally {
+        setDownloadingExportId(null);
+      }
+    },
+    [apiAvailable, docId],
+  );
+
+  const revokeShareLink = useCallback(
+    async (shareLinkId: string) => {
+      if (!apiAvailable) {
+        setLinks((prev) => prev.filter((item) => item.id !== shareLinkId));
+        setMessage("Yerel modda paylasim kaydi sadece listeden kaldirildi.");
+        return;
+      }
+      setRevokingShareId(shareLinkId);
+      try {
+        await apiRequest(`/documents/${docId}/share-links/${shareLinkId}/revoke`, {
+          method: "POST",
+          body: JSON.stringify({}),
+        }).catch(() => null);
+        await refreshLinks();
+      } finally {
+        setRevokingShareId(null);
+      }
+    },
+    [apiAvailable, docId, refreshLinks],
+  );
+
+  const updateDocumentStatus = useCallback(
+    async (nextStatus: DocStatus) => {
+      if (nextStatus === status) return;
+      const allowed = DOC_STATUS_TRANSITIONS[status] || [];
+      if (!allowed.includes(nextStatus)) {
+        setMessage(`Durum gecisi gecersiz: ${status} -> ${nextStatus}`);
+        return;
+      }
+      if (!apiAvailable) {
+        setStatus(nextStatus);
+        syncLocalDocument({
+          id: docId,
+          status: nextStatus,
+          updatedAt: new Date().toISOString(),
+        });
+        setMessage(`Yerel modda durum ${nextStatus} olarak guncellendi.`);
+        return;
+      }
+      const updated = await apiRequest<{ status?: DocStatus }>(
+        `/documents/${docId}/status`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ status: nextStatus }),
+        },
+      ).catch(() => null);
+      if (!updated?.status) {
+        setMessage("Durum guncellenemedi.");
+        return;
+      }
+      setStatus(updated.status);
+      syncLocalDocument({
+        id: docId,
+        status: updated.status,
+        updatedAt: new Date().toISOString(),
+      });
+      setMessage(`Durum ${updated.status} olarak guncellendi.`);
+    },
+    [apiAvailable, docId, status, syncLocalDocument],
+  );
+
+  const finalizeDocument = useCallback(async () => {
+    if (status === "FINAL") return;
+    if (!apiAvailable) {
+      setStatus("FINAL");
+      syncLocalDocument({
+        id: docId,
+        status: "FINAL",
+        updatedAt: new Date().toISOString(),
+      });
+      setMode("preview");
+      setMessage("Yerel modda belge final olarak isaretlendi.");
+      return;
+    }
+    const finalized = await apiRequest<{ status?: DocStatus }>(
+      `/documents/${docId}/finalize`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ).catch(() => null);
+    if (!finalized?.status) {
+      setMessage("Belge finalize edilemedi.");
+      return;
+    }
+    setStatus(finalized.status);
+    setMode("preview");
+    syncLocalDocument({
+      id: docId,
+      status: finalized.status,
+      updatedAt: new Date().toISOString(),
+    });
+    await refreshVersions();
+    setMessage("Belge finalize edildi.");
+  }, [apiAvailable, docId, refreshVersions, status, syncLocalDocument]);
+
+  const restoreVersion = useCallback(
+    async (version: DocumentVersionItem) => {
+      if (status === "FINAL" || status === "ARCHIVED") {
+        setMessage("Final/Arsiv belgede geri yukleme icin once Draft kopyasi olusturun.");
+        return;
+      }
+      if (!apiAvailable) {
+        setMessage("Versiyon geri yukleme yalnizca sunucu modunda kullanilabilir.");
+        return;
+      }
+      setRestoringVersionId(version.id);
+      try {
+        const restored = await apiRequest<{
+          status?: DocStatus;
+          latestVersion?: number;
+          updatedAt?: string;
+        }>(`/documents/${docId}/versions/${version.id}/restore`, {
+          method: "POST",
+          body: JSON.stringify({}),
+        }).catch(() => null);
+        if (!restored) {
+          setMessage("Versiyon geri yuklenemedi.");
+          return;
+        }
+        if (editor) {
+          const snapshot = await apiRequest<{
+            canonicalJson?: Record<string, unknown>;
+            schemaVersion?: number;
+          }>(`/documents/${docId}/versions/${version.id}`).catch(() => null);
+          const contentCandidate = resolveCanonicalContent(snapshot?.canonicalJson);
+          if (contentCandidate) {
+            applyEditorContent(contentCandidate);
+          }
+        }
+        await refreshVersions();
+        await refreshDocumentList();
+        setSaveState("saved");
+        setMessage(`v${version.versionNumber} surumu geri yuklendi.`);
+      } finally {
+        setRestoringVersionId(null);
+      }
+    },
+    [apiAvailable, applyEditorContent, docId, editor, refreshDocumentList, refreshVersions, status],
+  );
 
   const forkDraft = useCallback(async () => {
     if (!apiAvailable) {
-      setStatus("DRAFT");
-      setMode("edit");
-      setMessage("Yerel modda yeni dokuman olusturulamaz; mevcut belge taslaga cekildi.");
+      const localId = `local-${Date.now().toString(36)}`;
+      const nowIso = new Date().toISOString();
+      const canonical = buildCanonicalTree();
+      if (canonical && typeof window !== "undefined") {
+        window.localStorage.setItem(
+          `editor-unified:draft:${localId}`,
+          JSON.stringify({
+            canonical,
+            updatedAt: nowIso,
+          }),
+        );
+      }
+      window.location.assign(`/editor/${localId}`);
       return;
     }
     const next = await apiRequest<{ id?: string }>(`/documents/${docId}/fork-draft`, {
@@ -1333,136 +2176,542 @@ export default function EditorUnified({
       return;
     }
     window.location.assign(`/editor/${next.id}`);
-  }, [apiAvailable, docId]);
+  }, [apiAvailable, buildCanonicalTree, docId]);
 
-  const openDocumentFromList = useCallback((nextDocId: string) => {
-    if (!nextDocId || nextDocId === docId) return;
-    window.location.assign(`/editor/${nextDocId}`);
-  }, [docId]);
-
-  const createNewDocument = useCallback(async () => {
-    if (creatingDocument) return;
-    setCreatingDocument(true);
-    const nowIso = new Date().toISOString();
-    const title = `Belge ${new Date().toLocaleDateString("tr-TR")} ${new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}`;
-
-    try {
-      if (apiAvailable) {
-        const created = await apiRequest<{ id?: string; title?: string; status?: DocStatus; updatedAt?: string }>("/documents", {
-          method: "POST",
-          body: JSON.stringify({
-            title,
-            type: "PETITION",
-            schemaVersion: 1,
-            canonicalJson: {
-              type: "tiptap_doc",
-              schemaVersion: 1,
-              content: INITIAL_CONTENT,
-            },
-          }),
-        }).catch(() => null);
-
-        if (!created?.id) {
-          setMessage("Yeni belge olusturulamadi.");
-          return;
-        }
-
-        syncLocalDocument({
-          id: created.id,
-          title: created.title || title,
-          status: created.status || "DRAFT",
-          updatedAt: created.updatedAt || nowIso,
-        });
-        void refreshDocumentList();
-        window.location.assign(`/editor/${created.id}`);
+  const applyTemplate = useCallback(
+    (template: TemplateItem) => {
+      if (!editor) return;
+      const content = extractTemplateContent(template);
+      if (!content) {
+        setMessage("Template icerigi okunamadi.");
         return;
       }
-
-      const localId = `local-${Date.now().toString(36)}`;
-      const localDraftKey = `editor-unified:draft:${localId}`;
-      window.localStorage.setItem(
-        localDraftKey,
-        JSON.stringify({
-          canonical: {
-            type: "tiptap_doc",
-            schemaVersion: 1,
-            content: INITIAL_CONTENT,
-          },
-          updatedAt: nowIso,
-        }),
-      );
-      syncLocalDocument({
-        id: localId,
-        title,
-        status: "DRAFT",
-        updatedAt: nowIso,
-      });
-      window.location.assign(`/editor/${localId}`);
-    } finally {
-      setCreatingDocument(false);
-    }
-  }, [apiAvailable, creatingDocument, refreshDocumentList, syncLocalDocument]);
-
-  const updateDocumentStatus = useCallback(
-    async (nextStatus: DocStatus) => {
-      if (!apiAvailable) {
-        setStatus(nextStatus);
-        syncLocalDocument({
-          id: docId,
-          status: nextStatus,
-          updatedAt: new Date().toISOString(),
-        });
-        if (nextStatus === "FINAL" || nextStatus === "ARCHIVED") {
-          setMode("preview");
-        }
-        setMessage(`Yerel modda durum ${nextStatus} olarak guncellendi.`);
+      if (!applyEditorContent(content)) {
+        setMessage("Template icerigi gecersiz.");
         return;
       }
-      const updated = await apiRequest<{ status?: DocStatus }>(`/documents/${docId}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: nextStatus }),
-      }).catch(() => null);
-      if (!updated?.status) {
-        setMessage("Durum guncellenemedi.");
-        return;
-      }
-      setStatus(updated.status);
-      syncLocalDocument({
-        id: docId,
-        status: updated.status,
-        updatedAt: new Date().toISOString(),
-      });
+      setMessage(`Template uygulandi: ${template.name}`);
     },
-    [apiAvailable, docId, syncLocalDocument],
+    [applyEditorContent, editor],
   );
 
-  const finalizeDocument = useCallback(async () => {
-    if (!apiAvailable) {
-      setStatus("FINAL");
-      syncLocalDocument({
-        id: docId,
-        status: "FINAL",
-        updatedAt: new Date().toISOString(),
-      });
-      setMode("preview");
-      setMessage("Yerel modda finalize simulasyonu yapildi.");
+  const insertClause = useCallback(
+    (clause: ClauseItem) => {
+      if (!editor) return;
+      const candidate = clause.bodyJson;
+      if (candidate && typeof candidate === "object") {
+        editor.chain().focus().insertContent(candidate as JSONContent).run();
+        setMessage(`Clause eklendi: ${clause.title}`);
+        return;
+      }
+      insertSnippet(clause.title, String(candidate || ""));
+    },
+    [editor, insertSnippet],
+  );
+
+  const insertDynamicField = useCallback(
+    (field: (typeof LOCAL_DYNAMIC_FIELDS)[number]) => {
+      if (!editor) return;
+      editor
+        .chain()
+        .focus()
+        .insertDynamicField({
+          fieldKey: field.fieldKey,
+          label: field.label,
+          value: field.defaultValue || "",
+        })
+        .run();
+      setMessage(`Dinamik alan eklendi: ${field.label}`);
+    },
+    [editor],
+  );
+
+  const insertLegalBlock = useCallback(
+    (blockId: (typeof LEGAL_BLOCKS)[number]["id"]) => {
+      if (!editor) return;
+      const nodes = buildLegalBlockContent(blockId);
+      editor.chain().focus().insertContent(nodes).run();
+      const target = LEGAL_BLOCKS.find((item) => item.id === blockId);
+      setMessage(`Hukuki blok eklendi: ${target?.label || blockId}`);
+    },
+    [editor],
+  );
+
+  const indentListItem = useCallback(() => {
+    if (!editor) return;
+    const handled =
+      editor.chain().focus().sinkListItem("listItem").run() ||
+      editor.chain().focus().sinkListItem("taskItem").run();
+    if (!handled) {
+      setMessage("Girinti artirmak icin bir liste satiri secin.");
+    }
+  }, [editor]);
+
+  const outdentListItem = useCallback(() => {
+    if (!editor) return;
+    const handled =
+      editor.chain().focus().liftListItem("listItem").run() ||
+      editor.chain().focus().liftListItem("taskItem").run();
+    if (!handled) {
+      setMessage("Girinti azaltmak icin bir alt liste satiri secin.");
+    }
+  }, [editor]);
+
+  const updateActiveBlockAttributes = useCallback(
+    (nextAttrs: Record<string, string | null>) => {
+      if (!editor) return;
+      if (editor.isActive("heading")) {
+        editor.chain().focus().updateAttributes("heading", nextAttrs).run();
+        return;
+      }
+      editor.chain().focus().updateAttributes("paragraph", nextAttrs).run();
+    },
+    [editor],
+  );
+
+  const setLineSpacing = useCallback(
+    (lineHeight: string) => {
+      updateActiveBlockAttributes({ lineHeight });
+    },
+    [updateActiveBlockAttributes],
+  );
+
+  const adjustParagraphSpacing = useCallback(
+    (delta: number) => {
+      if (!editor) return;
+      const source = editor.isActive("heading")
+        ? editor.getAttributes("heading")
+        : editor.getAttributes("paragraph");
+      const current = parseCssPixel(source.marginBottom, 0);
+      const next = clampNumber(current + delta, 0, 96);
+      updateActiveBlockAttributes({ marginBottom: next === 0 ? null : `${next}px` });
+    },
+    [editor, updateActiveBlockAttributes],
+  );
+
+  const adjustParagraphIndent = useCallback(
+    (delta: number) => {
+      if (!editor) return;
+      const source = editor.isActive("heading")
+        ? editor.getAttributes("heading")
+        : editor.getAttributes("paragraph");
+      const current = parseCssPixel(source.marginLeft, 0);
+      const next = clampNumber(current + delta, 0, 120);
+      updateActiveBlockAttributes({ marginLeft: next === 0 ? null : `${next}px` });
+    },
+    [editor, updateActiveBlockAttributes],
+  );
+
+  const applyLegalStylePreset = useCallback(
+    (presetId: LegalStylePresetId) => {
+      if (!editor) return;
+      const preset = getLegalStylePresetById(presetId);
+      if (!preset) return;
+      const blockAttrs = {
+        lineHeight: preset.lineHeight,
+        marginBottom: preset.paragraphSpacingPx > 0 ? `${preset.paragraphSpacingPx}px` : null,
+        marginLeft: preset.paragraphIndentPx > 0 ? `${preset.paragraphIndentPx}px` : null,
+      } as const;
+
+      editor
+        .chain()
+        .focus()
+        .setFontFamily(preset.fontFamily)
+        .setMark("textStyle", { fontSize: preset.fontSize })
+        .setTextAlign(preset.textAlign)
+        .updateAttributes("paragraph", blockAttrs)
+        .updateAttributes("heading", blockAttrs)
+        .run();
+      setMessage(`${preset.label} stili uygulandi.`);
+    },
+    [editor],
+  );
+
+  const insertFootnoteFromPrompt = useCallback(() => {
+    if (!editor) return;
+    const note = window.prompt("Dipnot");
+    if (!note?.trim()) return;
+    editor.chain().focus().insertFootnote(note.trim()).run();
+    setMessage("Dipnot eklendi.");
+  }, [editor]);
+
+  const focusOutlineItem = useCallback(
+    (item: OutlineItem) => {
+      if (!editor) return;
+      editor.chain().focus().setTextSelection(item.pos).scrollIntoView().run();
+      setOpenToolbarMenu(null);
+    },
+    [editor],
+  );
+
+  const insertTableOfContents = useCallback(() => {
+    if (!editor) return;
+    const tocContent = buildTableOfContentsContent(
+      outlineItems.map((item) => ({ level: item.level, text: item.text })),
+    );
+    editor.chain().focus().insertContent(tocContent).run();
+    setMessage(
+      outlineItems.length
+        ? `${outlineItems.length} basliktan icindekiler eklendi.`
+        : "Belgede baslik olmadigi icin yonlendirme metni eklendi.",
+    );
+    setOpenToolbarMenu(null);
+  }, [editor, outlineItems]);
+
+  const refreshTableOfContents = useCallback(() => {
+    if (!editor) return;
+
+    const rootContent = Array.isArray(editor.getJSON().content)
+      ? (editor.getJSON().content as JSONContent[])
+      : [];
+    const range = findTableOfContentsRange(rootContent);
+    if (!range) {
+      setMessage("Guncellenecek icindekiler bulunamadi. Once 'Icindekiler Ekle' kullanin.");
       return;
     }
-    const finalized = await apiRequest<{ status?: DocStatus }>(`/documents/${docId}/finalize`, {
-      method: "POST",
-      body: "{}",
-    }).catch(() => null);
-    if (!finalized?.status) {
-      setMessage("Belge finalize edilemedi.");
+
+    const tocContent = buildTableOfContentsContent(
+      outlineItems.map((item) => ({ level: item.level, text: item.text })),
+    );
+
+    const startIndex = clampNumber(range.startIndex, 0, Math.max(0, editor.state.doc.childCount - 1));
+    const endIndex = clampNumber(range.endIndex, startIndex, Math.max(startIndex, editor.state.doc.childCount - 1));
+
+    let from = 1;
+    for (let i = 0; i < startIndex; i += 1) {
+      from += editor.state.doc.child(i).nodeSize;
+    }
+    let to = from;
+    for (let i = startIndex; i <= endIndex; i += 1) {
+      to += editor.state.doc.child(i).nodeSize;
+    }
+
+    try {
+      const replacement = tocContent.map((node) => editor.state.schema.nodeFromJSON(node as Record<string, unknown>));
+      const transaction = editor.state.tr.replaceWith(from, to, replacement);
+      editor.view.dispatch(transaction.scrollIntoView());
+      setMessage(
+        outlineItems.length
+          ? `${outlineItems.length} baslikla icindekiler guncellendi.`
+          : "Icindekiler baslik bulunmadigi icin yonlendirme metniyle guncellendi.",
+      );
+      setOpenToolbarMenu(null);
+    } catch {
+      setMessage("Icindekiler guncellenirken bir hata olustu.");
+    }
+  }, [editor, outlineItems]);
+
+  const setZoomSafe = useCallback((nextZoom: number) => {
+    setZoomLevel(clampNumber(nextZoom, 60, 180));
+  }, []);
+
+  const setOrderedListStyle = useCallback(
+    (style: OrderedListStyleValue) => {
+      if (!editor) return;
+      const normalized = normalizeOrderedListStyle(style);
+      let chain = editor.chain().focus();
+      if (!editor.isActive("orderedList")) {
+        chain = chain.toggleOrderedList();
+      }
+      chain.updateAttributes("orderedList", { listStyleType: normalized }).run();
+      setMessage(`Numaralandirma bicimi: ${normalized}`);
+    },
+    [editor],
+  );
+
+  const createSuggestion = useCallback(() => {
+    if (!editor) return;
+    const { from, to, empty } = editor.state.selection;
+    if (empty) {
+      setMessage("Oneri icin once bir metin secin.");
       return;
     }
-    setStatus(finalized.status);
+    const selectedText = editor.state.doc.textBetween(from, to, "\n", "\0").trim();
+    if (!selectedText) {
+      setMessage("Secilen metin bos.");
+      return;
+    }
+    const proposedText = window.prompt("Onerilen yeni metin", selectedText);
+    if (proposedText === null) return;
+    const note = window.prompt("Kisa not (opsiyonel)", "") || "";
+    setSuggestions((prev) => [
+      {
+        id: `s-${Date.now().toString(36)}`,
+        selectedText,
+        proposedText: proposedText.trim(),
+        note: note.trim(),
+        createdAt: new Date().toISOString(),
+      },
+      ...prev,
+    ]);
+    setMessage("Oneri eklendi.");
+  }, [editor]);
+
+  const createCommentFromSelection = useCallback(() => {
+    if (!editor) return;
+    if (!editor.isEditable) {
+      setMessage("Yorum eklemek icin duzenleme moduna gecin.");
+      return;
+    }
+    const { from, to, empty } = editor.state.selection;
+    if (empty) {
+      setMessage("Yorum icin once bir metin secin.");
+      return;
+    }
+    const selectedText = editor.state.doc.textBetween(from, to, "\n", "\0").trim();
+    if (!selectedText) {
+      setMessage("Secilen metin bos.");
+      return;
+    }
+    const bodyRaw = window.prompt("Yorum", "");
+    if (bodyRaw === null || !bodyRaw.trim()) return;
+    const nowIso = new Date().toISOString();
+    const comment: DocumentComment = {
+      id: `cm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      body: bodyRaw.trim(),
+      selectedText,
+      createdAt: nowIso,
+      resolved: false,
+      from,
+      to,
+    };
+    setDocumentComments((prev) => [comment, ...prev]);
+    setActiveInspectorTab("comments");
+    setMessage("Yorum eklendi.");
+  }, [editor]);
+
+  const focusCommentSelection = useCallback(
+    (comment: DocumentComment) => {
+      if (!editor) return;
+      if (typeof comment.from !== "number" || typeof comment.to !== "number") {
+        setMessage("Yorum secim konumu bulunamadi.");
+        return;
+      }
+      const maxPos = Math.max(1, editor.state.doc.content.size);
+      const from = clampNumber(comment.from, 1, maxPos);
+      const to = clampNumber(comment.to, from, maxPos);
+      editor.chain().focus().setTextSelection({ from, to }).scrollIntoView().run();
+    },
+    [editor],
+  );
+
+  const toggleCommentResolved = useCallback((commentId: string) => {
+    setDocumentComments((prev) =>
+      prev.map((item) =>
+        item.id === commentId
+          ? {
+              ...item,
+              resolved: !item.resolved,
+            }
+          : item,
+      ),
+    );
+  }, []);
+
+  const removeComment = useCallback((commentId: string) => {
+    setDocumentComments((prev) => prev.filter((item) => item.id !== commentId));
+  }, []);
+
+  const createDocumentNote = useCallback(() => {
+    const body = noteDraft.trim();
+    if (!body) {
+      setMessage("Not metni bos olamaz.");
+      return;
+    }
+    if (!editor || !editor.isEditable) {
+      setMessage("Not eklemek icin duzenleme moduna gecin.");
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    let from: number | undefined;
+    let to: number | undefined;
+    let selectedText: string | undefined;
+    if (editor && noteAttachSelection) {
+      const selection = editor.state.selection;
+      if (!selection.empty && selection.to > selection.from) {
+        from = selection.from;
+        to = selection.to;
+        selectedText = editor.state.doc.textBetween(selection.from, selection.to, "\n", "\0").trim() || undefined;
+      }
+    }
+    const note: DocumentNote = {
+      id: `nt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      body,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      pinned: false,
+      tags: parseNoteTagsInput(noteTagsDraft),
+      scope: noteScope,
+      selectedText,
+      from,
+      to,
+    };
+    setDocumentNotes((prev) => normalizeDocumentNotes([note, ...prev]));
+    setNoteDraft("");
+    setNoteTagsDraft("");
+    setActiveInspectorTab("notes");
+    setMessage("Belge notu eklendi.");
+  }, [editor, noteAttachSelection, noteDraft, noteScope, noteTagsDraft]);
+
+  const createDocumentNoteFromPrompt = useCallback(() => {
+    if (!editor) return;
+    if (!editor.isEditable) {
+      setMessage("Not eklemek icin duzenleme moduna gecin.");
+      return;
+    }
+    const bodyRaw = window.prompt("Not", "");
+    if (bodyRaw === null || !bodyRaw.trim()) return;
+    const { from: selFrom, to: selTo, empty } = editor.state.selection;
+    const selectedText = !empty
+      ? editor.state.doc.textBetween(selFrom, selTo, "\n", "\0").trim() || undefined
+      : undefined;
+    const nowIso = new Date().toISOString();
+    const note: DocumentNote = {
+      id: `nt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      body: bodyRaw.trim(),
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      pinned: false,
+      tags: [],
+      scope: "PRIVATE",
+      selectedText,
+      from: !empty ? selFrom : undefined,
+      to: !empty ? selTo : undefined,
+    };
+    setDocumentNotes((prev) => normalizeDocumentNotes([note, ...prev]));
+    setActiveInspectorTab("notes");
+    setMessage("Belge notu eklendi.");
+  }, [editor]);
+
+  const applyNoteQuickFilter = useCallback(
+    (kind: "all" | "team" | "pinned" | "tag", tag?: string) => {
+      if (kind === "all") {
+        setNoteSearchQuery("");
+        setNoteSearchScope("ALL");
+        setNoteSearchPinnedOnly(false);
+        return;
+      }
+      if (kind === "team") {
+        setNoteSearchQuery("");
+        setNoteSearchScope("TEAM");
+        setNoteSearchPinnedOnly(false);
+        return;
+      }
+      if (kind === "pinned") {
+        setNoteSearchQuery("");
+        setNoteSearchScope("ALL");
+        setNoteSearchPinnedOnly(true);
+        return;
+      }
+      const normalizedTag = (tag || "").trim().toLocaleLowerCase("tr");
+      setNoteSearchQuery(normalizedTag);
+      setNoteSearchScope("ALL");
+      setNoteSearchPinnedOnly(false);
+    },
+    [],
+  );
+
+  const focusDocumentNoteSelection = useCallback(
+    (note: DocumentNote) => {
+      if (!editor) return;
+      if (typeof note.from !== "number" || typeof note.to !== "number") {
+        setMessage("Not secim konumu bulunamadi.");
+        return;
+      }
+      const maxPos = Math.max(1, editor.state.doc.content.size);
+      const from = clampNumber(note.from, 1, maxPos);
+      const to = clampNumber(note.to, from, maxPos);
+      editor.chain().focus().setTextSelection({ from, to }).scrollIntoView().run();
+    },
+    [editor],
+  );
+
+  const openFindMatchedNote = useCallback(
+    (note: DocumentNote) => {
+      setActiveInspectorTab("notes");
+      if (typeof note.from === "number" && typeof note.to === "number") {
+        focusDocumentNoteSelection(note);
+        return;
+      }
+      setMessage("Not secim konumu olmadigi icin Notlar sekmesi acildi.");
+    },
+    [focusDocumentNoteSelection],
+  );
+
+  const toggleDocumentNotePinned = useCallback((noteId: string) => {
+    setDocumentNotes((prev) =>
+      normalizeDocumentNotes(
+        prev.map((item) =>
+          item.id === noteId
+            ? {
+                ...item,
+                pinned: !item.pinned,
+                updatedAt: new Date().toISOString(),
+              }
+            : item,
+        ),
+      ),
+    );
+  }, []);
+
+  const removeDocumentNote = useCallback((noteId: string) => {
+    setDocumentNotes((prev) => prev.filter((item) => item.id !== noteId));
+  }, []);
+
+  useEffect(() => {
+    if (!editor) return;
+    if (!commentsHydratedRef.current) {
+      commentsHydratedRef.current = true;
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const canonical = buildCanonicalTree();
+    if (!canonical) return;
+    const currentTitle = deriveDocumentTitle(editor.getText(), docId);
+    window.localStorage.setItem(
+      draftKey,
+      JSON.stringify({ canonical, updatedAt: nowIso }),
+    );
     syncLocalDocument({
       id: docId,
-      status: finalized.status,
-      updatedAt: new Date().toISOString(),
+      title: currentTitle,
+      status,
+      updatedAt: nowIso,
     });
-  }, [apiAvailable, docId, syncLocalDocument]);
+    if (!apiAvailable || readOnly || status === "FINAL" || status === "ARCHIVED") {
+      setSaveState(apiAvailable ? "saved" : "offline");
+      return;
+    }
+    setSaveState("saving");
+    void apiRequest(`/documents/${docId}/autosave`, {
+      method: "POST",
+      body: JSON.stringify({
+        schemaVersion: 1,
+        canonicalJson: canonical,
+        recoveredFromCrash: false,
+      }),
+    })
+      .then((saved) => {
+        setSaveState(saved ? "saved" : "error");
+      })
+      .catch(() => {
+        setSaveState("error");
+      });
+  }, [apiAvailable, buildCanonicalTree, docId, documentComments, draftKey, editor, readOnly, status, syncLocalDocument]);
+
+  useEffect(() => {
+    if (!apiAvailable || layout !== "full") {
+      return;
+    }
+    const refreshAll = () => {
+      void Promise.all([refreshExports(), refreshLinks(), refreshVersions()]);
+    };
+    refreshAll();
+    const timer = window.setInterval(refreshAll, 20_000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [apiAvailable, layout, refreshExports, refreshLinks, refreshVersions]);
 
   const insertMentionText = useCallback(() => {
     if (!editor || !mentionPreview) return;
@@ -1544,7 +2793,10 @@ export default function EditorUnified({
 
       try {
         const imported = await importUdfFile(file);
-        editor.commands.setContent(imported.editorJson);
+        if (!applyEditorContent(imported.editorJson)) {
+          setMessage("UDF icerigi gecersiz.");
+          return;
+        }
 
         if (imported.parserWarnings.length) {
           setMessage(
@@ -1565,7 +2817,7 @@ export default function EditorUnified({
         setMessage("UDF dosyası yüklenemedi.");
       }
     },
-    [editor],
+    [applyEditorContent, editor],
   );
 
   const exportWordLocal = useCallback(() => {
@@ -1586,11 +2838,8 @@ export default function EditorUnified({
     if (!editor) return;
     const nowIso = new Date().toISOString();
     const currentTitle = deriveDocumentTitle(editor.getText(), docId);
-    const canonical = {
-      type: "tiptap_doc",
-      schemaVersion: 1,
-      content: editor.getJSON() as Record<string, unknown>,
-    };
+    const canonical = buildCanonicalTree();
+    if (!canonical) return;
     if (apiAvailable && status !== "FINAL" && status !== "ARCHIVED") {
       setSaveState("saving");
       const saved = await apiRequest(`/documents/${docId}/autosave`, {
@@ -1610,6 +2859,7 @@ export default function EditorUnified({
           status,
           updatedAt: nowIso,
         });
+        await refreshVersions();
         setMessage("Belge sunucuya kaydedildi.");
         return;
       }
@@ -1619,15 +2869,19 @@ export default function EditorUnified({
       draftKey,
       JSON.stringify({ canonical, updatedAt: nowIso }),
     );
-    setSaveState("offline");
+    setSaveState(apiAvailable ? "error" : "offline");
     syncLocalDocument({
       id: docId,
       title: currentTitle,
       status,
       updatedAt: nowIso,
     });
-    setMessage("Taslak yerel olarak kaydedildi.");
-  }, [apiAvailable, docId, draftKey, editor, status, syncLocalDocument]);
+    setMessage(
+      apiAvailable
+        ? "Sunucu kaydi basarisiz; taslak yerel olarak kaydedildi."
+        : "Taslak yerel olarak kaydedildi.",
+    );
+  }, [apiAvailable, buildCanonicalTree, docId, draftKey, editor, refreshVersions, status, syncLocalDocument]);
 
   useEffect(() => {
     const handleShortcuts = (event: KeyboardEvent) => {
@@ -1648,6 +2902,12 @@ export default function EditorUnified({
         event.preventDefault();
         setIsFindBarOpen(true);
         window.setTimeout(() => findInputRef.current?.focus(), 0);
+        return;
+      }
+      if (!event.shiftKey && key === "h") {
+        event.preventDefault();
+        setIsFindBarOpen(true);
+        window.setTimeout(() => replaceInputRef.current?.focus(), 0);
         return;
       }
       if (event.shiftKey && key === "f") {
@@ -1779,11 +3039,6 @@ export default function EditorUnified({
     }, 80);
   }, [editor]);
 
-  const focusOutlineItem = useCallback((pos: number) => {
-    if (!editor) return;
-    editor.chain().focus().setTextSelection(pos).scrollIntoView().run();
-  }, [editor]);
-
   const focusFindMatch = useCallback((nextIndex: number) => {
     if (!editor || !findMatches.length) return;
     const safeIndex = ((nextIndex % findMatches.length) + findMatches.length) % findMatches.length;
@@ -1802,6 +3057,72 @@ export default function EditorUnified({
     focusFindMatch(activeFindMatch + delta);
   }, [activeFindMatch, findMatches.length, focusFindMatch]);
 
+  const toggleFindScopeSelection = useCallback((checked: boolean) => {
+    if (!checked) {
+      setFindInSelection(false);
+      setFindSelectionWindow(null);
+      setActiveFindMatch(-1);
+      return;
+    }
+    if (!editor) return;
+    const { from, to, empty } = editor.state.selection;
+    if (empty || to <= from) {
+      setFindInSelection(false);
+      setFindSelectionWindow(null);
+      setMessage("Secimde arama icin once bir metin secin.");
+      return;
+    }
+    setFindInSelection(true);
+    setFindSelectionWindow({ from, to });
+    setActiveFindMatch(-1);
+  }, [editor]);
+
+  const replaceCurrentFindMatch = useCallback(() => {
+    if (!editor || !editor.isEditable) return;
+    const query = findQuery.trim();
+    if (!query) {
+      setMessage("Degistir icin once bir arama metni girin.");
+      return;
+    }
+    if (!findMatches.length) {
+      setMessage("Degistirilecek eslesme bulunamadi.");
+      return;
+    }
+    const safeIndex = activeFindMatch >= 0 ? activeFindMatch : 0;
+    const match = findMatches[safeIndex] || findMatches[0];
+    if (!match) return;
+
+    editor
+      .chain()
+      .focus()
+      .setTextSelection({ from: match.from, to: match.to })
+      .insertContent(replaceQuery)
+      .run();
+    setMessage("Secili eslesme degistirildi.");
+  }, [activeFindMatch, editor, findMatches, findQuery, replaceQuery]);
+
+  const replaceAllFindMatches = useCallback(() => {
+    if (!editor || !editor.isEditable) return;
+    const query = findQuery.trim();
+    if (!query) {
+      setMessage("Tumunu degistir icin once bir arama metni girin.");
+      return;
+    }
+    const ranges = toSafeReplaceRanges(findMatches);
+    if (!ranges.length) {
+      setMessage("Degistirilecek eslesme bulunamadi.");
+      return;
+    }
+
+    let chain = editor.chain().focus();
+    ranges.forEach((range) => {
+      chain = chain.insertContentAt({ from: range.from, to: range.to }, replaceQuery);
+    });
+    chain.run();
+    setActiveFindMatch(-1);
+    setMessage(`${ranges.length} eslesme degistirildi.`);
+  }, [editor, findMatches, findQuery, replaceQuery]);
+
   const editorReadOnly =
     readOnly ||
     mode === "preview" ||
@@ -1814,8 +3135,39 @@ export default function EditorUnified({
   const readingMinutes = Math.max(1, Math.ceil(wordCount / 220));
   const wordGoalProgress = wordGoal > 0 ? Math.min(100, Math.round((wordCount / wordGoal) * 100)) : 0;
   const findProgressLabel = findMatches.length && activeFindMatch >= 0 ? `${activeFindMatch + 1}/${findMatches.length}` : `0/${findMatches.length}`;
-  const toolbarMenuTriggerClass =
-    "inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-3 text-xs font-medium leading-none whitespace-nowrap text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2";
+  const saveStateLabel =
+    saveState === "saving"
+      ? "Kaydediliyor"
+      : saveState === "saved"
+        ? "Kaydedildi"
+        : saveState === "error"
+          ? "Kayit Hatasi"
+          : saveState === "offline"
+            ? "Yerel Kayit"
+            : "Hazir";
+  const saveStateClass =
+    saveState === "saved"
+      ? "bg-emerald-100 text-emerald-800"
+      : saveState === "saving"
+        ? "bg-blue-100 text-blue-800"
+        : saveState === "error"
+          ? "bg-rose-100 text-rose-800"
+          : saveState === "offline"
+            ? "bg-amber-100 text-amber-800"
+            : "bg-slate-100 text-slate-700";
+  const activePeersCount = peerSessions.length;
+  const unresolvedCommentsCount = documentComments.filter((item) => !item.resolved).length;
+  const pinnedNotesCount = documentNotes.filter((item) => item.pinned).length;
+  const teamNotesCount = documentNotes.filter((item) => item.scope === "TEAM").length;
+  const visibleNotesCount = filteredDocumentNotes.length;
+  const statusOptions = DOC_STATUS_TRANSITIONS[status] || [];
+  const toolbarMenuTriggerClass = (menu: Exclude<ToolbarMenu, null>) =>
+    cn(
+      "inline-flex h-8 items-center rounded-md border px-3 text-xs font-semibold leading-none whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2",
+      openToolbarMenu === menu
+        ? "border-slate-900 bg-slate-900 text-white shadow-sm"
+        : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50",
+    );
   const toolbarMenuPanelClass =
     "fixed right-3 top-24 hidden w-[330px] rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.16)] md:block";
   const toolbarMenuPanelStyle = {
@@ -1825,6 +3177,16 @@ export default function EditorUnified({
   } as const;
   const selectedTextColor = normalizePickerColor(String(editor?.getAttributes("textStyle").color || "").trim(), "#000000");
   const selectedHighlightColor = normalizePickerColor(String(editor?.getAttributes("highlight").color || "").trim(), "#F1C40F");
+  const activeBlockAttrs = editor?.isActive("heading")
+    ? editor.getAttributes("heading")
+    : editor?.getAttributes("paragraph") || {};
+  const activeLineHeight = String(activeBlockAttrs.lineHeight || "1.5");
+  const paragraphSpacingValue = parseCssPixel(activeBlockAttrs.marginBottom, 0);
+  const paragraphIndentValue = parseCssPixel(activeBlockAttrs.marginLeft, 0);
+  const activeOrderedListStyle = normalizeOrderedListStyle(
+    editor?.getAttributes("orderedList").listStyleType,
+  );
+  const zoomLabel = `${zoomLevel}%`;
 
   const colorMenuContent = (
     <div className="space-y-3">
@@ -1916,6 +3278,150 @@ export default function EditorUnified({
     </div>
   );
 
+  const layoutMenuContent = (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Satir Araligi</p>
+        <select
+          className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
+          value={activeLineHeight}
+          disabled={editorReadOnly}
+          onChange={(event) => setLineSpacing(event.target.value)}
+        >
+          <option value="1">1.0</option>
+          <option value="1.15">1.15</option>
+          <option value="1.5">1.5</option>
+          <option value="2">2.0</option>
+        </select>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Button label="Bosluk +" onClick={() => adjustParagraphSpacing(6)} disabled={editorReadOnly} className="h-8 px-2" />
+        <Button label="Bosluk -" onClick={() => adjustParagraphSpacing(-6)} disabled={editorReadOnly} className="h-8 px-2" />
+        <Button label="Girinti +" onClick={() => adjustParagraphIndent(12)} disabled={editorReadOnly} className="h-8 px-2" />
+        <Button label="Girinti -" onClick={() => adjustParagraphIndent(-12)} disabled={editorReadOnly} className="h-8 px-2" />
+      </div>
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600">
+        Aktif bosluk: {paragraphSpacingValue}px · Girinti: {paragraphIndentValue}px
+      </div>
+      <div className="space-y-1 border-t border-slate-100 pt-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Numaralandirma Bicimi</p>
+        <select
+          className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
+          value={activeOrderedListStyle}
+          disabled={editorReadOnly}
+          onChange={(event) => setOrderedListStyle(event.target.value as OrderedListStyleValue)}
+        >
+          <option value="decimal">1. 2. 3.</option>
+          <option value="lower-alpha">a. b. c.</option>
+          <option value="upper-alpha">A. B. C.</option>
+          <option value="lower-roman">i. ii. iii.</option>
+          <option value="upper-roman">I. II. III.</option>
+        </select>
+        <p className="text-[10px] text-slate-500">
+          Secili numarali listeye uygulanir. Girinti ile cok seviyeli yapi kurabilirsiniz.
+        </p>
+      </div>
+      <div className="space-y-1 border-t border-slate-100 pt-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Ust/Alt Bilgi</p>
+        <input
+          value={headerText}
+          onChange={(event) => setHeaderText(event.target.value)}
+          placeholder="Ust bilgi metni"
+          className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
+        />
+        <input
+          value={footerText}
+          onChange={(event) => setFooterText(event.target.value)}
+          placeholder="Alt bilgi metni"
+          className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
+        />
+        <label className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-700">
+          <span>Sayfa numarasi goster</span>
+          <input
+            type="checkbox"
+            checked={showPageNumbers}
+            onChange={(event) => setShowPageNumbers(event.target.checked)}
+          />
+        </label>
+      </div>
+    </div>
+  );
+
+  const viewMenuContent = (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        <Button label="Duzenle" onClick={() => setMode("edit")} active={mode === "edit"} className="h-8 px-2" />
+        <Button label="Onizle" onClick={() => setMode("preview")} active={mode === "preview"} className="h-8 px-2" />
+        <Button label={isFocusMode ? "Odak Kapat" : "Odak Ac"} onClick={() => setIsFocusMode((prev) => !prev)} className="h-8 px-2" />
+        <Button label={isFullscreen ? "Tam Ekran Kapat" : "Tam Ekran"} onClick={() => setIsFullscreen((prev) => !prev)} className="h-8 px-2" />
+      </div>
+      <div className="space-y-2 border-t border-slate-100 pt-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Yakinlastirma</p>
+        <div className="flex items-center gap-2">
+          <Button label="-" onClick={() => setZoomSafe(zoomLevel - 10)} className="h-8 w-10 px-0" />
+          <span className="inline-flex h-8 min-w-[64px] items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700">
+            {zoomLabel}
+          </span>
+          <Button label="+" onClick={() => setZoomSafe(zoomLevel + 10)} className="h-8 w-10 px-0" />
+          <Button label="100%" onClick={() => setZoomSafe(100)} className="h-8 px-2" />
+        </div>
+      </div>
+    </div>
+  );
+
+  const referencesMenuContent = (
+    <div className="space-y-2">
+      <Button label="Yorum Ekle" onClick={createCommentFromSelection} disabled={editorReadOnly} className="h-8 w-full px-2" />
+      <Button label="Not Ekle" onClick={createDocumentNoteFromPrompt} disabled={editorReadOnly} className="h-8 w-full px-2" />
+      <Button label="Dipnot Ekle" onClick={insertFootnoteFromPrompt} disabled={editorReadOnly} className="h-8 w-full px-2" />
+      <Button label="Aciklama Ekle" onClick={() => insertLegalBlock("explanations")} disabled={editorReadOnly} className="h-8 w-full px-2" />
+      <Button label="Hukuki Nedenler" onClick={() => insertLegalBlock("legal_reasons")} disabled={editorReadOnly} className="h-8 w-full px-2" />
+      <Button label="Deliller" onClick={() => insertLegalBlock("evidence")} disabled={editorReadOnly} className="h-8 w-full px-2" />
+      <p className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600">
+        Basvurular menusu dipnot ve hukuki referans bloklarini hizli ekler.
+      </p>
+    </div>
+  );
+
+  const outlineMenuContent = (
+    <div className="space-y-2">
+      <Button
+        label="Icindekiler Ekle"
+        onClick={insertTableOfContents}
+        disabled={editorReadOnly}
+        className="h-8 w-full px-2"
+      />
+      <Button
+        label="Icindekiler Yenile"
+        onClick={refreshTableOfContents}
+        disabled={editorReadOnly}
+        className="h-8 w-full px-2"
+      />
+      {outlineItems.length === 0 ? (
+        <p className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-[11px] text-slate-600">
+          Baslik bulunamadi. Icindekiler icin H1/H2/H3 kullanin.
+        </p>
+      ) : (
+        <div className="max-h-[260px] space-y-1 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-1.5">
+          {outlineItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => focusOutlineItem(item)}
+              className="flex w-full items-center justify-between rounded-md border border-slate-200 bg-white px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-100"
+            >
+              <span className="truncate" style={{ paddingLeft: `${Math.max(0, item.level - 1) * 10}px` }}>
+                {item.text}
+              </span>
+              <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px]">H{item.level}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+  const showInlinePageMeta = mode !== "preview" || !apiAvailable;
+
   const canvas = (
     <div
       className={cn(
@@ -1925,18 +3431,39 @@ export default function EditorUnified({
     >
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2 text-[11px] font-medium text-slate-500 md:px-10">
         <span>{mode === "preview" ? "Preview mode" : "Draft mode"}</span>
-        <span>Sozcuk: {wordCount}</span>
+        <span>
+          Sozcuk: {wordCount} · Zoom: {zoomLabel}
+        </span>
       </div>
       <div className="px-4 py-6 md:px-10 md:py-8">
-        {mode === "preview" ? (
-          previewLoading ? (
-            <p className="text-sm text-slate-600">Preview yukleniyor...</p>
+        <div style={{ zoom: zoomLevel / 100 }}>
+          {showInlinePageMeta && headerText ? (
+            <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+              Ust Bilgi: {headerText}
+            </div>
+          ) : null}
+          {mode === "preview" ? (
+            previewLoading ? (
+              <p className="text-sm text-slate-600">Preview yukleniyor...</p>
+            ) : (
+              <iframe
+                title="preview"
+                className="min-h-[940px] w-full border-0"
+                sandbox=""
+                referrerPolicy="no-referrer"
+                srcDoc={previewHtml || ""}
+              />
+            )
           ) : (
-            <iframe title="preview" className="min-h-[940px] w-full border-0" srcDoc={previewHtml || ""} />
-          )
-        ) : (
-          <EditorContent editor={editor} />
-        )}
+            <EditorContent editor={editor} />
+          )}
+          {showInlinePageMeta && (footerText || showPageNumbers) ? (
+            <div className="mt-3 flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+              <span>{footerText ? `Alt Bilgi: ${footerText}` : "Alt Bilgi: -"}</span>
+              {showPageNumbers ? <span>Sayfa 1</span> : null}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -1947,52 +3474,41 @@ export default function EditorUnified({
       style={{ zIndex: 210 }}
     >
       <div className="mx-auto flex max-w-[1280px] flex-wrap items-center gap-2 px-2 py-2 md:px-6">
-        <div className="hidden min-w-0 flex-1 flex-wrap items-center gap-2 pb-1 pr-1 md:flex">
+        <div className="hidden min-w-0 flex-1 flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2 md:flex">
           <Button label="Undo" onClick={() => editor?.chain().focus().undo().run()} disabled={editorReadOnly} className="h-8 px-2.5" />
           <Button label="Redo" onClick={() => editor?.chain().focus().redo().run()} disabled={editorReadOnly} className="h-8 px-2.5" />
-          <span className="h-5 w-px bg-slate-200" />
-          <select
-            className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-            defaultValue="paragraph"
-            disabled={editorReadOnly}
-            onChange={(event) => {
-              const value = event.target.value;
-              if (!editor) return;
-              if (value === "paragraph") {
-                editor.chain().focus().setParagraph().run();
-                return;
-              }
-              editor.chain().focus().toggleHeading({ level: Number.parseInt(value, 10) as 1 | 2 | 3 | 4 | 5 | 6 }).run();
-            }}
-          >
-            <option value="paragraph">H/Paragraf</option>
-            <option value="1">H1</option>
-            <option value="2">H2</option>
-            <option value="3">H3</option>
-          </select>
-          <Button label="B" onClick={() => editor?.chain().focus().toggleBold().run()} active={Boolean(editor?.isActive("bold"))} disabled={editorReadOnly} className="h-8 px-2.5" />
-          <Button label="I" onClick={() => editor?.chain().focus().toggleItalic().run()} active={Boolean(editor?.isActive("italic"))} disabled={editorReadOnly} className="h-8 px-2.5" />
-          <Button label="U" onClick={() => editor?.chain().focus().toggleUnderline().run()} active={Boolean(editor?.isActive("underline"))} disabled={editorReadOnly} className="h-8 px-2.5" />
-          <Button label="Link" onClick={() => { const href = window.prompt("URL", "https://"); if (href) editor?.chain().focus().extendMarkRange("link").setLink({ href }).run(); }} disabled={editorReadOnly} className="h-8 px-2.5" />
-          <Button label="Liste" onClick={() => editor?.chain().focus().toggleBulletList().run()} active={Boolean(editor?.isActive("bulletList"))} disabled={editorReadOnly} className="h-8 px-2.5" />
-          <Button label="Numarali" onClick={() => editor?.chain().focus().toggleOrderedList().run()} active={Boolean(editor?.isActive("orderedList"))} disabled={editorReadOnly} className="h-8 px-2.5" />
-          <Button label="Alinti" onClick={() => editor?.chain().focus().toggleBlockquote().run()} active={Boolean(editor?.isActive("blockquote"))} disabled={editorReadOnly} className="h-8 px-2.5" />
-          <Button label="Kod" onClick={() => editor?.chain().focus().toggleCodeBlock().run()} active={Boolean(editor?.isActive("codeBlock"))} disabled={editorReadOnly} className="h-8 px-2.5" />
           <span className="h-5 w-px bg-slate-200" />
 
           <div data-toolbar-menu className="relative">
             <button
               type="button"
-              className={toolbarMenuTriggerClass}
+              className={toolbarMenuTriggerClass("typography")}
               onClick={() => setOpenToolbarMenu((prev) => (prev === "typography" ? null : "typography"))}
             >
-              Tipografi
+              Stiller
             </button>
             {openToolbarMenu === "typography" ? (
               typeof document !== "undefined"
                 ? createPortal(
                     <div data-toolbar-floating className={toolbarMenuPanelClass} style={{ ...toolbarMenuPanelStyle, zIndex: 9999 }}>
                       <div className="space-y-2">
+                        <div className="space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Hukuki Presetler</p>
+                          <div className="space-y-1.5">
+                            {LEGAL_STYLE_PRESETS.map((preset) => (
+                              <button
+                                key={`preset-desktop-${preset.id}`}
+                                type="button"
+                                onClick={() => applyLegalStylePreset(preset.id)}
+                                disabled={editorReadOnly}
+                                className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-left hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-55"
+                              >
+                                <p className="text-[11px] font-semibold text-slate-800">{preset.label}</p>
+                                <p className="text-[10px] text-slate-500">{preset.description}</p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                         <select
                           className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
                           defaultValue="'Times New Roman',serif"
@@ -2032,6 +3548,11 @@ export default function EditorUnified({
                           <Button label="Task" onClick={() => editor?.chain().focus().toggleTaskList().run()} active={Boolean(editor?.isActive("taskList"))} disabled={editorReadOnly} className="h-8 px-2" />
                         </div>
                         <div className="grid grid-cols-2 gap-2">
+                          <Button label="Girinti +" onClick={indentListItem} disabled={editorReadOnly} className="h-8 px-2" />
+                          <Button label="Girinti -" onClick={outdentListItem} disabled={editorReadOnly} className="h-8 px-2" />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <Button label="Link Ekle" onClick={setLinkFromPrompt} disabled={editorReadOnly} className="h-8 px-2" />
                           <Button label="Link Sil" onClick={() => editor?.chain().focus().unsetLink().run()} disabled={editorReadOnly} className="h-8 px-2" />
                           <Button label="Temizle" onClick={() => editor?.chain().focus().clearNodes().unsetAllMarks().run()} disabled={editorReadOnly} className="h-8 px-2" />
                         </div>
@@ -2046,7 +3567,7 @@ export default function EditorUnified({
           <div data-toolbar-menu className="relative">
             <button
               type="button"
-              className={toolbarMenuTriggerClass}
+              className={toolbarMenuTriggerClass("color")}
               onClick={() => setOpenToolbarMenu((prev) => (prev === "color" ? null : "color"))}
             >
               Renk
@@ -2066,7 +3587,7 @@ export default function EditorUnified({
           <div data-toolbar-menu className="relative">
             <button
               type="button"
-              className={toolbarMenuTriggerClass}
+              className={toolbarMenuTriggerClass("table")}
               onClick={() => setOpenToolbarMenu((prev) => (prev === "table" ? null : "table"))}
             >
               Tablo
@@ -2095,7 +3616,7 @@ export default function EditorUnified({
           <div data-toolbar-menu className="relative">
             <button
               type="button"
-              className={toolbarMenuTriggerClass}
+              className={toolbarMenuTriggerClass("insert")}
               onClick={() => setOpenToolbarMenu((prev) => (prev === "insert" ? null : "insert"))}
             >
               Ekle
@@ -2105,9 +3626,9 @@ export default function EditorUnified({
                 ? createPortal(
                     <div data-toolbar-floating className={toolbarMenuPanelClass} style={{ ...toolbarMenuPanelStyle, zIndex: 9999 }}>
                       <div className="grid grid-cols-1 gap-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Icerik Ekle</p>
                         <Button label="Gorsel URL" onClick={() => { const src = window.prompt("Gorsel URL", "https://"); if (src) editor?.chain().focus().setImage({ src }).run(); }} disabled={editorReadOnly} className="h-8 px-2" />
                         <Button label="Gorsel Yukle" onClick={() => imageInputRef.current?.click()} disabled={editorReadOnly} className="h-8 px-2" />
-                        <Button label="Dipnot" onClick={() => { const note = window.prompt("Dipnot"); if (note) editor?.chain().focus().insertFootnote(note).run(); }} disabled={editorReadOnly} className="h-8 px-2" />
                         <Button label="Sayfa Sonu" onClick={insertPageBreak} disabled={editorReadOnly} className="h-8 px-2" />
                         <Button label="Oto Sayfala" onClick={autoFormatPages} disabled={editorReadOnly} className="h-8 px-2" />
                         <Button label="Ayirici" onClick={() => editor?.chain().focus().setHorizontalRule().run()} disabled={editorReadOnly} className="h-8 px-2" />
@@ -2126,6 +3647,86 @@ export default function EditorUnified({
             ) : null}
           </div>
 
+          <div data-toolbar-menu className="relative">
+            <button
+              type="button"
+              className={toolbarMenuTriggerClass("layout")}
+              onClick={() => setOpenToolbarMenu((prev) => (prev === "layout" ? null : "layout"))}
+            >
+              Duzen
+            </button>
+            {openToolbarMenu === "layout" ? (
+              typeof document !== "undefined"
+                ? createPortal(
+                    <div data-toolbar-floating className={toolbarMenuPanelClass} style={{ ...toolbarMenuPanelStyle, zIndex: 9999 }}>
+                      {layoutMenuContent}
+                    </div>,
+                    document.body,
+                  )
+                : null
+            ) : null}
+          </div>
+
+          <div data-toolbar-menu className="relative">
+            <button
+              type="button"
+              className={toolbarMenuTriggerClass("view")}
+              onClick={() => setOpenToolbarMenu((prev) => (prev === "view" ? null : "view"))}
+            >
+              Gorunum
+            </button>
+            {openToolbarMenu === "view" ? (
+              typeof document !== "undefined"
+                ? createPortal(
+                    <div data-toolbar-floating className={toolbarMenuPanelClass} style={{ ...toolbarMenuPanelStyle, zIndex: 9999 }}>
+                      {viewMenuContent}
+                    </div>,
+                    document.body,
+                  )
+                : null
+            ) : null}
+          </div>
+
+          <div data-toolbar-menu className="relative">
+            <button
+              type="button"
+              className={toolbarMenuTriggerClass("references")}
+              onClick={() => setOpenToolbarMenu((prev) => (prev === "references" ? null : "references"))}
+            >
+              Basvurular
+            </button>
+            {openToolbarMenu === "references" ? (
+              typeof document !== "undefined"
+                ? createPortal(
+                    <div data-toolbar-floating className={toolbarMenuPanelClass} style={{ ...toolbarMenuPanelStyle, zIndex: 9999 }}>
+                      {referencesMenuContent}
+                    </div>,
+                    document.body,
+                  )
+                : null
+            ) : null}
+          </div>
+
+          <div data-toolbar-menu className="relative">
+            <button
+              type="button"
+              className={toolbarMenuTriggerClass("outline")}
+              onClick={() => setOpenToolbarMenu((prev) => (prev === "outline" ? null : "outline"))}
+            >
+              Icindekiler
+            </button>
+            {openToolbarMenu === "outline" ? (
+              typeof document !== "undefined"
+                ? createPortal(
+                    <div data-toolbar-floating className={toolbarMenuPanelClass} style={{ ...toolbarMenuPanelStyle, zIndex: 9999 }}>
+                      {outlineMenuContent}
+                    </div>,
+                    document.body,
+                  )
+                : null
+            ) : null}
+          </div>
+
           <Button
             label={isFindBarOpen ? "Find Kapat" : "Find"}
             onClick={() => {
@@ -2135,18 +3736,23 @@ export default function EditorUnified({
                 return next;
               });
             }}
+            active={isFindBarOpen}
             className="h-8 px-2.5"
           />
-          <Button label={isFocusMode ? "Odak Cik" : "Odak"} onClick={() => setIsFocusMode((prev) => !prev)} className="h-8 px-2.5" />
+          <Button label={isFocusMode ? "Odak Cik" : "Odak"} onClick={() => setIsFocusMode((prev) => !prev)} active={isFocusMode} className="h-8 px-2.5" />
         </div>
 
-        <div className="flex w-full flex-wrap items-center gap-2 md:hidden">
+        <div className="flex w-full flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2 md:hidden">
           <Button label="Undo" onClick={() => editor?.chain().focus().undo().run()} disabled={editorReadOnly} className="h-9 flex-1 px-2" />
           <Button label="Redo" onClick={() => editor?.chain().focus().redo().run()} disabled={editorReadOnly} className="h-9 flex-1 px-2" />
-          <Button label="Bicim" onClick={() => setOpenToolbarMenu((prev) => (prev === "typography" ? null : "typography"))} className="h-9 flex-1 px-2" />
-          <Button label="Renk" onClick={() => setOpenToolbarMenu((prev) => (prev === "color" ? null : "color"))} className="h-9 flex-1 px-2" />
-          <Button label="Ekle" onClick={() => setOpenToolbarMenu((prev) => (prev === "insert" ? null : "insert"))} className="h-9 flex-1 px-2" />
-          <Button label="Find" onClick={() => { setIsFindBarOpen(true); window.setTimeout(() => findInputRef.current?.focus(), 0); }} className="h-9 flex-1 px-2" />
+          <Button label="Stiller" onClick={() => setOpenToolbarMenu((prev) => (prev === "typography" ? null : "typography"))} active={openToolbarMenu === "typography"} className="h-9 flex-1 px-2" />
+          <Button label="Renk" onClick={() => setOpenToolbarMenu((prev) => (prev === "color" ? null : "color"))} active={openToolbarMenu === "color"} className="h-9 flex-1 px-2" />
+          <Button label="Ekle" onClick={() => setOpenToolbarMenu((prev) => (prev === "insert" ? null : "insert"))} active={openToolbarMenu === "insert"} className="h-9 flex-1 px-2" />
+          <Button label="Duzen" onClick={() => setOpenToolbarMenu((prev) => (prev === "layout" ? null : "layout"))} active={openToolbarMenu === "layout"} className="h-9 flex-1 px-2" />
+          <Button label="Gorunum" onClick={() => setOpenToolbarMenu((prev) => (prev === "view" ? null : "view"))} active={openToolbarMenu === "view"} className="h-9 flex-1 px-2" />
+          <Button label="Basvurular" onClick={() => setOpenToolbarMenu((prev) => (prev === "references" ? null : "references"))} active={openToolbarMenu === "references"} className="h-9 flex-1 px-2" />
+          <Button label="Icindekiler" onClick={() => setOpenToolbarMenu((prev) => (prev === "outline" ? null : "outline"))} active={openToolbarMenu === "outline"} className="h-9 flex-1 px-2" />
+          <Button label="Find" onClick={() => { setIsFindBarOpen(true); window.setTimeout(() => findInputRef.current?.focus(), 0); }} active={isFindBarOpen} className="h-9 flex-1 px-2" />
         </div>
 
         <div className="flex w-full items-center gap-2 md:ml-auto md:w-auto">
@@ -2174,24 +3780,26 @@ export default function EditorUnified({
             </button>
           </div>
           <Button
-            label="Kaydet"
+            label={saveState === "saving" ? "Kaydediliyor" : "Kaydet"}
             onClick={() => { void saveCurrentDocument(); }}
-            disabled={editorReadOnly}
+            disabled={editorReadOnly || saveState === "saving"}
             variant="secondary"
             className="h-9 flex-1 px-2 md:h-8 md:flex-none md:px-2.5"
           />
           <Button
-            label="Paylaş"
+            label={creatingShareLink ? "Paylasiliyor" : "Paylas"}
             onClick={() => { void createShareLink(); }}
+            disabled={creatingShareLink}
             variant="primary"
             className="h-9 flex-1 px-2 md:h-8 md:flex-none md:px-2.5"
           />
           <div data-export-menu className="relative flex-1 md:flex-none">
             <Button
-              label="Exportlar"
+              label={requestingExportFormat ? `${requestingExportFormat.toUpperCase()} Hazirlaniyor` : "Exportlar"}
               onClick={() => {
                 setIsExportMenuOpen((prev) => !prev);
               }}
+              disabled={Boolean(requestingExportFormat)}
               variant="secondary"
               className="h-9 w-full px-2 md:h-8 md:w-auto md:px-2.5"
             />
@@ -2201,7 +3809,11 @@ export default function EditorUnified({
                     <div data-export-floating className="fixed right-3 top-20 w-44 rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.16)]" style={{ zIndex: 9999, top: 80, right: 12 }}>
                       <button
                         type="button"
-                        className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        className={cn(
+                          "flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100",
+                          requestingExportFormat ? "cursor-not-allowed opacity-55" : "",
+                        )}
+                        disabled={Boolean(requestingExportFormat)}
                         onClick={() => {
                           setIsExportMenuOpen(false);
                           downloadUdf();
@@ -2211,23 +3823,31 @@ export default function EditorUnified({
                       </button>
                       <button
                         type="button"
-                        className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        className={cn(
+                          "flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100",
+                          requestingExportFormat ? "cursor-not-allowed opacity-55" : "",
+                        )}
+                        disabled={Boolean(requestingExportFormat)}
                         onClick={() => {
                           setIsExportMenuOpen(false);
                           void requestExport("pdf");
                         }}
                       >
-                        PDF
+                        {requestingExportFormat === "pdf" ? "PDF Hazirlaniyor" : "PDF"}
                       </button>
                       <button
                         type="button"
-                        className="flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        className={cn(
+                          "flex h-8 w-full items-center rounded-md px-3 text-xs font-medium text-slate-700 hover:bg-slate-100",
+                          requestingExportFormat ? "cursor-not-allowed opacity-55" : "",
+                        )}
+                        disabled={Boolean(requestingExportFormat)}
                         onClick={() => {
                           setIsExportMenuOpen(false);
                           void requestExport("docx");
                         }}
                       >
-                        DOCX
+                        {requestingExportFormat === "docx" ? "DOCX Hazirlaniyor" : "DOCX"}
                       </button>
                     </div>,
                     document.body,
@@ -2236,6 +3856,33 @@ export default function EditorUnified({
             ) : null}
           </div>
         </div>
+
+        {newLink ? (
+          <div className="mt-2 flex w-full flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/60 p-2">
+            <input
+              readOnly
+              value={newLink}
+              className="h-9 min-w-[220px] flex-1 rounded-md border border-blue-200 bg-white px-2 text-xs text-slate-700"
+            />
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-md border border-blue-300 bg-white px-3 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+              onClick={() => {
+                void copyShareLink();
+              }}
+            >
+              Kopyala
+            </button>
+            <a
+              href={newLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-9 items-center justify-center rounded-md border border-blue-300 bg-white px-3 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+            >
+              Ac
+            </a>
+          </div>
+        ) : null}
 
         {openToolbarMenu ? (
           typeof document !== "undefined"
@@ -2247,6 +3894,50 @@ export default function EditorUnified({
                 >
                   {openToolbarMenu === "typography" ? (
                     <div className="space-y-2">
+                      <div className="space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Hukuki Presetler</p>
+                        <div className="space-y-1.5">
+                          {LEGAL_STYLE_PRESETS.map((preset) => (
+                            <button
+                              key={`preset-mobile-${preset.id}`}
+                              type="button"
+                              onClick={() => applyLegalStylePreset(preset.id)}
+                              disabled={editorReadOnly}
+                              className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-left hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-55"
+                            >
+                              <p className="text-[11px] font-semibold text-slate-800">{preset.label}</p>
+                              <p className="text-[10px] text-slate-500">{preset.description}</p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <select
+                        className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
+                        defaultValue="'Times New Roman',serif"
+                        disabled={editorReadOnly}
+                        onChange={(event) => editor?.chain().focus().setFontFamily(event.target.value).run()}
+                      >
+                        <option value="'Times New Roman',serif">Times New Roman</option>
+                        <option value="Arial,Helvetica,sans-serif">Arial</option>
+                        <option value="Calibri,'Segoe UI',sans-serif">Calibri</option>
+                        <option value="Georgia,serif">Georgia</option>
+                        <option value="Tahoma,Geneva,sans-serif">Tahoma</option>
+                      </select>
+                      <select
+                        className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
+                        defaultValue="16px"
+                        disabled={editorReadOnly}
+                        onChange={(event) => editor?.chain().focus().setMark("textStyle", { fontSize: event.target.value }).run()}
+                      >
+                        <option value="10px">10px</option>
+                        <option value="11px">11px</option>
+                        <option value="12px">12px</option>
+                        <option value="14px">14px</option>
+                        <option value="16px">16px</option>
+                        <option value="18px">18px</option>
+                        <option value="20px">20px</option>
+                        <option value="24px">24px</option>
+                      </select>
                       <select
                         className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
                         defaultValue="paragraph"
@@ -2271,6 +3962,19 @@ export default function EditorUnified({
                         <Button label="I" onClick={() => editor?.chain().focus().toggleItalic().run()} active={Boolean(editor?.isActive("italic"))} disabled={editorReadOnly} className="h-8 px-2" />
                         <Button label="U" onClick={() => editor?.chain().focus().toggleUnderline().run()} active={Boolean(editor?.isActive("underline"))} disabled={editorReadOnly} className="h-8 px-2" />
                       </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button label="Liste" onClick={() => editor?.chain().focus().toggleBulletList().run()} active={Boolean(editor?.isActive("bulletList"))} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Numarali" onClick={() => editor?.chain().focus().toggleOrderedList().run()} active={Boolean(editor?.isActive("orderedList"))} disabled={editorReadOnly} className="h-8 px-2" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button label="Girinti +" onClick={indentListItem} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Girinti -" onClick={outdentListItem} disabled={editorReadOnly} className="h-8 px-2" />
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <Button label="Link Ekle" onClick={setLinkFromPrompt} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Link Sil" onClick={() => editor?.chain().focus().unsetLink().run()} disabled={editorReadOnly} className="h-8 px-2" />
+                        <Button label="Temizle" onClick={() => editor?.chain().focus().clearNodes().unsetAllMarks().run()} disabled={editorReadOnly} className="h-8 px-2" />
+                      </div>
                     </div>
                   ) : null}
                   {openToolbarMenu === "color" ? (
@@ -2278,11 +3982,12 @@ export default function EditorUnified({
                   ) : null}
                   {openToolbarMenu === "insert" ? (
                     <div className="grid grid-cols-1 gap-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Icerik Ekle</p>
                       <Button label="Gorsel URL" onClick={() => { const src = window.prompt("Gorsel URL", "https://"); if (src) editor?.chain().focus().setImage({ src }).run(); }} disabled={editorReadOnly} className="h-8 px-2" />
                       <Button label="Gorsel Yukle" onClick={() => imageInputRef.current?.click()} disabled={editorReadOnly} className="h-8 px-2" />
-                      <Button label="Dipnot" onClick={() => { const note = window.prompt("Dipnot"); if (note) editor?.chain().focus().insertFootnote(note).run(); }} disabled={editorReadOnly} className="h-8 px-2" />
                       <Button label="Sayfa Sonu" onClick={insertPageBreak} disabled={editorReadOnly} className="h-8 px-2" />
                       <Button label="Oto Sayfala" onClick={autoFormatPages} disabled={editorReadOnly} className="h-8 px-2" />
+                      <Button label="Ayirici" onClick={() => editor?.chain().focus().setHorizontalRule().run()} disabled={editorReadOnly} className="h-8 px-2" />
                       <Button label="UDF indir" onClick={downloadUdf} className="h-8 px-2" />
                       <Button label="UDF yükle" onClick={() => udfInputRef.current?.click()} disabled={editorReadOnly} className="h-8 px-2" />
                       <Button label="UDF iç kopyala" onClick={() => { void copyInternalUdf(); }} disabled={editorReadOnly} className="h-8 px-2" />
@@ -2291,11 +3996,680 @@ export default function EditorUnified({
                       <Button label="Lexge Kaydet" onClick={saveLexgeLocal} disabled={editorReadOnly} className="h-8 px-2" />
                     </div>
                   ) : null}
+                  {openToolbarMenu === "layout" ? (
+                    layoutMenuContent
+                  ) : null}
+                  {openToolbarMenu === "view" ? (
+                    viewMenuContent
+                  ) : null}
+                  {openToolbarMenu === "references" ? (
+                    referencesMenuContent
+                  ) : null}
+                  {openToolbarMenu === "outline" ? (
+                    outlineMenuContent
+                  ) : null}
                 </div>,
                 document.body,
               )
             : null
         ) : null}
+
+        <div className="w-full rounded-xl border border-slate-200 bg-slate-50/80 p-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(
+              [
+                ["workflow", "Workflow"],
+                ["versions", "Versiyonlar"],
+                ["exports", "Export"],
+                ["shares", "Paylasim"],
+                ["library", "Kutuphane"],
+                ["collab", "Isbirligi"],
+                ["comments", "Yorumlar"],
+                ["notes", "Notlar"],
+                ["suggestions", "Oneriler"],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveInspectorTab(id)}
+                className={cn(
+                  "rounded-md border px-2.5 py-1 text-[11px] font-semibold transition",
+                  activeInspectorTab === id
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {activeInspectorTab === "workflow" ? (
+            <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-lg border border-slate-200 bg-white p-2">
+                <p className="text-[11px] font-semibold text-slate-600">Durum</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                    {status}
+                  </span>
+                  <select
+                    value={status}
+                    onChange={(event) => {
+                      void updateDocumentStatus(event.target.value as DocStatus);
+                    }}
+                    className="h-7 rounded border border-slate-300 bg-white px-2 text-[11px] text-slate-700"
+                    disabled={!canEnterEdit}
+                  >
+                    {[status, ...statusOptions].map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-2">
+                <p className="text-[11px] font-semibold text-slate-600">Kayit Durumu</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", saveStateClass)}>
+                    {saveStateLabel}
+                  </span>
+                  <Button
+                    label="Kaydet"
+                    onClick={() => {
+                      void saveCurrentDocument();
+                    }}
+                    disabled={editorReadOnly}
+                    className="h-7 px-2"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-2">
+                <p className="text-[11px] font-semibold text-slate-600">Belge Islemi</p>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  <Button
+                    label="Finalize"
+                    onClick={() => {
+                      void finalizeDocument();
+                    }}
+                    disabled={!canEnterEdit}
+                    className="h-7 px-2"
+                  />
+                  <Button
+                    label="Draft Kopya"
+                    onClick={() => {
+                      void forkDraft();
+                    }}
+                    className="h-7 px-2"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-2">
+                <p className="text-[11px] font-semibold text-slate-600">Oneri Modu</p>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <Button
+                    label={suggestionMode ? "Oneri Acik" : "Oneri Kapali"}
+                    onClick={() => setSuggestionMode((prev) => !prev)}
+                    className="h-7 px-2"
+                    active={suggestionMode}
+                  />
+                  <Button
+                    label="Secimi Oneriye Cevir"
+                    onClick={createSuggestion}
+                    disabled={!suggestionMode}
+                    className="h-7 px-2"
+                  />
+                </div>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  Baslik sayisi: {outlineItems.length}
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          {activeInspectorTab === "versions" ? (
+            <div className="mt-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-slate-600">
+                  Son Surumler ({versions.length})
+                </p>
+                <Button
+                  label="Yenile"
+                  onClick={() => {
+                    void refreshVersions();
+                  }}
+                  className="h-7 px-2"
+                />
+              </div>
+              <div className="max-h-40 space-y-1 overflow-auto rounded-lg border border-slate-200 bg-white p-1.5">
+                {versions.length === 0 ? (
+                  <p className="px-1 py-1 text-[11px] text-slate-500">Surum kaydi bulunamadi.</p>
+                ) : (
+                  versions.map((version) => (
+                    <div key={version.id} className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold text-slate-700">
+                          v{version.versionNumber}
+                          {version.isFinalSnapshot ? " (Final Snapshot)" : ""}
+                        </p>
+                        <p className="truncate text-[10px] text-slate-500">
+                          {formatDate(version.createdAt)} · {version.snapshotHash.slice(0, 10)}
+                        </p>
+                      </div>
+                      <Button
+                        label={restoringVersionId === version.id ? "Yukleniyor" : "Geri Yukle"}
+                        onClick={() => {
+                          void restoreVersion(version);
+                        }}
+                        disabled={
+                          restoringVersionId !== null ||
+                          status === "FINAL" ||
+                          status === "ARCHIVED"
+                        }
+                        className="h-7 px-2"
+                      />
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {activeInspectorTab === "exports" ? (
+            <div className="mt-2 space-y-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button
+                  label={requestingExportFormat === "pdf" ? "PDF Hazirlaniyor" : "PDF Istek"}
+                  onClick={() => {
+                    void requestExport("pdf");
+                  }}
+                  disabled={Boolean(requestingExportFormat)}
+                  className="h-7 px-2"
+                />
+                <Button
+                  label={requestingExportFormat === "docx" ? "DOCX Hazirlaniyor" : "DOCX Istek"}
+                  onClick={() => {
+                    void requestExport("docx");
+                  }}
+                  disabled={Boolean(requestingExportFormat)}
+                  className="h-7 px-2"
+                />
+                <Button
+                  label="Liste Yenile"
+                  onClick={() => {
+                    void refreshExports();
+                  }}
+                  className="h-7 px-2"
+                />
+              </div>
+              <div className="max-h-40 space-y-1 overflow-auto rounded-lg border border-slate-200 bg-white p-1.5">
+                {exports.length === 0 ? (
+                  <p className="px-1 py-1 text-[11px] text-slate-500">Export kaydi bulunamadi.</p>
+                ) : (
+                  exports.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold text-slate-700">
+                          {item.format} · {item.status}
+                        </p>
+                        <p className="truncate text-[10px] text-slate-500">
+                          {formatDate(item.createdAt)}{item.completedAt ? ` -> ${formatDate(item.completedAt)}` : ""}
+                        </p>
+                      </div>
+                      <Button
+                        label={
+                          downloadingExportId === item.id
+                            ? "Hazirlaniyor"
+                            : "COMPLETED" === item.status
+                              ? "Indir"
+                              : "Bekle"
+                        }
+                        onClick={() => {
+                          void downloadExport(item.id);
+                        }}
+                        disabled={item.status !== "COMPLETED" || downloadingExportId !== null}
+                        className="h-7 px-2"
+                      />
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {activeInspectorTab === "shares" ? (
+            <div className="mt-2 space-y-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <select
+                  value={permission}
+                  onChange={(event) => setPermission(event.target.value as SharePermission)}
+                  className="h-7 rounded border border-slate-300 bg-white px-2 text-[11px] text-slate-700"
+                >
+                  <option value="VIEW">VIEW</option>
+                  <option value="COMMENT">COMMENT</option>
+                </select>
+                <Button
+                  label={creatingShareLink ? "Olusturuluyor" : "Link Olustur"}
+                  onClick={() => {
+                    void createShareLink();
+                  }}
+                  disabled={creatingShareLink}
+                  className="h-7 px-2"
+                />
+                <Button
+                  label="Liste Yenile"
+                  onClick={() => {
+                    void refreshLinks();
+                  }}
+                  className="h-7 px-2"
+                />
+              </div>
+              <div className="max-h-40 space-y-1 overflow-auto rounded-lg border border-slate-200 bg-white p-1.5">
+                {links.length === 0 ? (
+                  <p className="px-1 py-1 text-[11px] text-slate-500">Paylasim kaydi bulunamadi.</p>
+                ) : (
+                  links.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold text-slate-700">
+                          {item.permission} · {item.revokedAt ? "REVOKED" : "ACTIVE"}
+                        </p>
+                        <p className="truncate text-[10px] text-slate-500">
+                          Olusma: {formatDate(item.createdAt)} · Son: {formatDate(item.lastAccessedAt)}
+                        </p>
+                      </div>
+                      <Button
+                        label={revokingShareId === item.id ? "Bekleyin" : "Revoke"}
+                        onClick={() => {
+                          void revokeShareLink(item.id);
+                        }}
+                        disabled={Boolean(item.revokedAt) || revokingShareId !== null}
+                        className="h-7 px-2"
+                      />
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {activeInspectorTab === "library" ? (
+            <div className="mt-2 grid gap-2 xl:grid-cols-4">
+              <div className="rounded-lg border border-slate-200 bg-white p-1.5">
+                <p className="px-1 text-[11px] font-semibold text-slate-600">Templates</p>
+                <div className="mt-1 max-h-32 space-y-1 overflow-auto">
+                  {templates.map((template) => (
+                    <button
+                      key={template.id}
+                      type="button"
+                      onClick={() => applyTemplate(template)}
+                      className="block w-full rounded border border-slate-200 px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-100"
+                    >
+                      {template.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-1.5">
+                <p className="px-1 text-[11px] font-semibold text-slate-600">Clauses</p>
+                <div className="mt-1 max-h-32 space-y-1 overflow-auto">
+                  {clauses.map((clause) => (
+                    <button
+                      key={clause.id}
+                      type="button"
+                      onClick={() => insertClause(clause)}
+                      className="block w-full rounded border border-slate-200 px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-100"
+                    >
+                      {clause.title}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-1.5">
+                <p className="px-1 text-[11px] font-semibold text-slate-600">Dinamik Alanlar</p>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {LOCAL_DYNAMIC_FIELDS.map((field) => (
+                    <button
+                      key={field.fieldKey}
+                      type="button"
+                      onClick={() => insertDynamicField(field)}
+                      className="rounded border border-slate-200 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-100"
+                    >
+                      {field.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-1.5">
+                <p className="px-1 text-[11px] font-semibold text-slate-600">Hukuki Bloklar</p>
+                <div className="mt-1 max-h-32 space-y-1 overflow-auto">
+                  {LEGAL_BLOCKS.map((block) => (
+                    <button
+                      key={block.id}
+                      type="button"
+                      onClick={() => insertLegalBlock(block.id)}
+                      className="block w-full rounded border border-slate-200 px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-100"
+                    >
+                      {block.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {activeInspectorTab === "collab" ? (
+            <div className="mt-2 grid gap-2 md:grid-cols-2">
+              <div className="rounded-lg border border-slate-200 bg-white p-2">
+                <p className="text-[11px] font-semibold text-slate-600">Canli Kilit</p>
+                {currentLock ? (
+                  <p className="mt-1 text-[11px] text-slate-700">
+                    Kilit sahibi: {currentLock.userId.slice(0, 10)}... · Bitis: {formatDate(currentLock.expiresAt)}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-[11px] text-slate-500">Aktif kilit yok.</p>
+                )}
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-2">
+                <p className="text-[11px] font-semibold text-slate-600">
+                  Canli Oturumlar ({activePeersCount})
+                </p>
+                <div className="mt-1 max-h-20 space-y-1 overflow-auto">
+                  {peerSessions.length === 0 ? (
+                    <p className="text-[11px] text-slate-500">Ayni dokumanda diger aktif oturum gorunmuyor.</p>
+                  ) : (
+                    peerSessions.map((peer) => (
+                      <p key={peer.id} className="text-[11px] text-slate-700">
+                        {peer.id.slice(0, 10)}... · {peer.mode} · {formatDate(new Date(peer.updatedAt).toISOString())}
+                      </p>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {activeInspectorTab === "comments" ? (
+            <div className="mt-2 space-y-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button
+                  label="Secimden Yorum Ekle"
+                  onClick={createCommentFromSelection}
+                  disabled={editorReadOnly}
+                  className="h-7 px-2"
+                />
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                  Acik: {unresolvedCommentsCount}/{documentComments.length}
+                </span>
+              </div>
+              <div className="max-h-48 space-y-1 overflow-auto rounded-lg border border-slate-200 bg-white p-1.5">
+                {documentComments.length === 0 ? (
+                  <p className="px-1 py-1 text-[11px] text-slate-500">Henuz yorum yok.</p>
+                ) : (
+                  documentComments.map((comment) => (
+                    <div key={comment.id} className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-[11px] font-semibold text-slate-700">
+                          {comment.resolved ? "Cozuldu" : "Acik"} · {formatDate(comment.createdAt)}
+                        </p>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            label={comment.resolved ? "Geri Ac" : "Coz"}
+                            onClick={() => toggleCommentResolved(comment.id)}
+                            className="h-6 px-2"
+                          />
+                          <Button
+                            label="Sil"
+                            onClick={() => removeComment(comment.id)}
+                            className="h-6 px-2"
+                          />
+                        </div>
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-700">{comment.body}</p>
+                      <p className="mt-1 rounded bg-white px-1.5 py-1 text-[10px] text-slate-600">
+                        Secim: {comment.selectedText}
+                      </p>
+                      <div className="mt-1 flex justify-end">
+                        <Button
+                          label="Secime Git"
+                          onClick={() => focusCommentSelection(comment)}
+                          disabled={
+                            typeof comment.from !== "number" ||
+                            typeof comment.to !== "number"
+                          }
+                          className="h-6 px-2"
+                        />
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {activeInspectorTab === "notes" ? (
+            <div className="mt-2 space-y-2">
+              <div className="rounded-lg border border-slate-200 bg-white p-2">
+                <p className="text-[11px] font-semibold text-slate-600">Belge Notu Ekle</p>
+                <textarea
+                  value={noteDraft}
+                  onChange={(event) => setNoteDraft(event.target.value)}
+                  placeholder="Kisa notunuzu yazin..."
+                  className="mt-1 h-20 w-full resize-none rounded border border-slate-300 bg-white px-2 py-1.5 text-[11px] text-slate-700 outline-none focus:border-slate-500"
+                />
+                <div className="mt-1.5 grid gap-1.5 md:grid-cols-3">
+                  <input
+                    value={noteTagsDraft}
+                    onChange={(event) => setNoteTagsDraft(event.target.value)}
+                    placeholder="Etiketler: dava, acil"
+                    className="h-7 rounded border border-slate-300 bg-white px-2 text-[11px] text-slate-700 outline-none focus:border-slate-500"
+                  />
+                  <select
+                    value={noteScope}
+                    onChange={(event) => setNoteScope(event.target.value as DocumentNoteScope)}
+                    className="h-7 rounded border border-slate-300 bg-white px-2 text-[11px] text-slate-700 outline-none focus:border-slate-500"
+                  >
+                    <option value="PRIVATE">Ozel Not</option>
+                    <option value="TEAM">Ekip Notu</option>
+                  </select>
+                  <label className="inline-flex h-7 items-center gap-1 rounded border border-slate-300 bg-slate-50 px-2 text-[11px] text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={noteAttachSelection}
+                      onChange={(event) => setNoteAttachSelection(event.target.checked)}
+                    />
+                    Secime bagla
+                  </label>
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <Button
+                    label="Not Ekle"
+                    onClick={createDocumentNote}
+                    disabled={editorReadOnly}
+                    className="h-7 px-2"
+                  />
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                    Sabit: {pinnedNotesCount}/{documentNotes.length}
+                  </span>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                    Ekip: {teamNotesCount}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Hizli Filtre:</p>
+                  <button
+                    type="button"
+                    onClick={() => applyNoteQuickFilter("all")}
+                    className={cn(
+                      "inline-flex h-6 items-center rounded-full border px-2.5 text-[10px] font-semibold transition",
+                      noteSearchScope === "ALL" && !noteSearchPinnedOnly && !noteSearchQuery.trim()
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
+                    )}
+                  >
+                    Tum
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyNoteQuickFilter("team")}
+                    className={cn(
+                      "inline-flex h-6 items-center rounded-full border px-2.5 text-[10px] font-semibold transition",
+                      noteSearchScope === "TEAM" && !noteSearchPinnedOnly && !noteSearchQuery.trim()
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
+                    )}
+                  >
+                    Ekip
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyNoteQuickFilter("pinned")}
+                    className={cn(
+                      "inline-flex h-6 items-center rounded-full border px-2.5 text-[10px] font-semibold transition",
+                      noteSearchPinnedOnly && noteSearchScope === "ALL" && !noteSearchQuery.trim()
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
+                    )}
+                  >
+                    Sabit
+                  </button>
+                  {noteQuickTags.map((tag) => (
+                    <button
+                      key={`note-quick-tag-${tag}`}
+                      type="button"
+                      onClick={() => applyNoteQuickFilter("tag", tag)}
+                      className={cn(
+                        "inline-flex h-6 items-center rounded-full border px-2.5 text-[10px] font-semibold transition",
+                        noteSearchScope === "ALL" && !noteSearchPinnedOnly && noteSearchQuery.trim().toLocaleLowerCase("tr") === tag
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
+                      )}
+                    >
+                      #{tag}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-1.5 grid gap-1.5 md:grid-cols-3">
+                  <input
+                    value={noteSearchQuery}
+                    onChange={(event) => setNoteSearchQuery(event.target.value)}
+                    placeholder="Notlarda ara..."
+                    className="h-7 rounded border border-slate-300 bg-white px-2 text-[11px] text-slate-700 outline-none focus:border-slate-500"
+                  />
+                  <select
+                    value={noteSearchScope}
+                    onChange={(event) => setNoteSearchScope(event.target.value as "ALL" | DocumentNoteScope)}
+                    className="h-7 rounded border border-slate-300 bg-white px-2 text-[11px] text-slate-700 outline-none focus:border-slate-500"
+                  >
+                    <option value="ALL">Tum Notlar</option>
+                    <option value="PRIVATE">Sadece Ozel</option>
+                    <option value="TEAM">Sadece Ekip</option>
+                  </select>
+                  <label className="inline-flex h-7 items-center gap-1 rounded border border-slate-300 bg-slate-50 px-2 text-[11px] text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={noteSearchPinnedOnly}
+                      onChange={(event) => setNoteSearchPinnedOnly(event.target.checked)}
+                    />
+                    Sadece Sabit
+                  </label>
+                </div>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  Gorunen not: {visibleNotesCount}/{documentNotes.length}
+                </p>
+              </div>
+              <div className="max-h-56 space-y-1 overflow-auto rounded-lg border border-slate-200 bg-white p-1.5">
+                {visibleNotesCount === 0 ? (
+                  <p className="px-1 py-1 text-[11px] text-slate-500">
+                    {documentNotes.length === 0
+                      ? "Henuz belge notu yok."
+                      : "Filtreye uygun not bulunamadi."}
+                  </p>
+                ) : (
+                  filteredDocumentNotes.map((note) => (
+                    <div key={note.id} className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-[11px] font-semibold text-slate-700">
+                          {note.scope === "TEAM" ? "Ekip" : "Ozel"} · {formatDate(note.createdAt)}
+                        </p>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            label={note.pinned ? "Sabitlemeyi Kaldir" : "Sabitle"}
+                            onClick={() => toggleDocumentNotePinned(note.id)}
+                            className="h-6 px-2"
+                          />
+                          <Button
+                            label="Sil"
+                            onClick={() => removeDocumentNote(note.id)}
+                            className="h-6 px-2"
+                          />
+                        </div>
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-700">{note.body}</p>
+                      {note.tags.length ? (
+                        <p className="mt-1 text-[10px] text-slate-500">Etiketler: {note.tags.join(", ")}</p>
+                      ) : null}
+                      {note.selectedText ? (
+                        <p className="mt-1 rounded bg-white px-1.5 py-1 text-[10px] text-slate-600">
+                          Secim: {note.selectedText}
+                        </p>
+                      ) : null}
+                      <div className="mt-1 flex justify-end">
+                        <Button
+                          label="Secime Git"
+                          onClick={() => focusDocumentNoteSelection(note)}
+                          disabled={
+                            typeof note.from !== "number" ||
+                            typeof note.to !== "number"
+                          }
+                          className="h-6 px-2"
+                        />
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {activeInspectorTab === "suggestions" ? (
+            <div className="mt-2 space-y-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button
+                  label={suggestionMode ? "Oneri Modu Acik" : "Oneri Modu Kapali"}
+                  onClick={() => setSuggestionMode((prev) => !prev)}
+                  active={suggestionMode}
+                  className="h-7 px-2"
+                />
+                <Button
+                  label="Secimi Oneriye Cevir"
+                  onClick={createSuggestion}
+                  disabled={!suggestionMode}
+                  className="h-7 px-2"
+                />
+              </div>
+              <div className="max-h-40 space-y-1 overflow-auto rounded-lg border border-slate-200 bg-white p-1.5">
+                {suggestions.length === 0 ? (
+                  <p className="px-1 py-1 text-[11px] text-slate-500">Henuz oneriniz yok.</p>
+                ) : (
+                  suggestions.map((item) => (
+                    <div key={item.id} className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                      <p className="text-[11px] font-semibold text-slate-700">Secili Metin</p>
+                      <p className="mt-0.5 text-[11px] text-slate-600">{item.selectedText}</p>
+                      <p className="mt-1 text-[11px] font-semibold text-slate-700">Oneri</p>
+                      <p className="mt-0.5 text-[11px] text-slate-600">{item.proposedText}</p>
+                      {item.note ? <p className="mt-1 text-[10px] text-slate-500">Not: {item.note}</p> : null}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
 
         <div className="hidden items-center gap-2 md:flex">
           {wordGoal > 0 ? (
@@ -2326,7 +4700,72 @@ export default function EditorUnified({
                 placeholder="Belgede bul..."
                 className="h-9 min-w-[220px] flex-1 rounded-lg border border-slate-300 bg-white px-3 text-xs text-slate-700 outline-none focus:border-slate-500"
               />
+              <input
+                ref={replaceInputRef}
+                value={replaceQuery}
+                onChange={(event) => {
+                  setReplaceQuery(event.target.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  if (event.shiftKey) {
+                    replaceAllFindMatches();
+                    return;
+                  }
+                  replaceCurrentFindMatch();
+                }}
+                placeholder="Degistir..."
+                className="h-9 min-w-[180px] flex-1 rounded-lg border border-slate-300 bg-white px-3 text-xs text-slate-700 outline-none focus:border-slate-500"
+              />
+              <label className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={findCaseSensitive}
+                  onChange={(event) => {
+                    setFindCaseSensitive(event.target.checked);
+                    setActiveFindMatch(-1);
+                  }}
+                />
+                Harf duyarlı
+              </label>
+              <label className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={findWholeWord}
+                  onChange={(event) => {
+                    setFindWholeWord(event.target.checked);
+                    setActiveFindMatch(-1);
+                  }}
+                />
+                Tam kelime
+              </label>
+              <label className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={findInSelection}
+                  onChange={(event) => {
+                    toggleFindScopeSelection(event.target.checked);
+                  }}
+                />
+                Secimde
+              </label>
+              <label className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={findIncludeNotes}
+                  onChange={(event) => {
+                    setFindIncludeNotes(event.target.checked);
+                  }}
+                />
+                Notlarda
+              </label>
               <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600">{findProgressLabel}</span>
+              {findIncludeNotes ? (
+                <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600">
+                  Not: {findMatchedNotes.length}
+                </span>
+              ) : null}
               <button
                 type="button"
                 className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-100"
@@ -2346,16 +4785,62 @@ export default function EditorUnified({
               <button
                 type="button"
                 className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                onClick={replaceCurrentFindMatch}
+                disabled={!findMatches.length || editorReadOnly}
+              >
+                Degistir
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                onClick={replaceAllFindMatches}
+                disabled={!findMatches.length || editorReadOnly}
+              >
+                Tumunu Degistir
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-100"
                 onClick={() => {
                   setFindQuery("");
                   setFindMatches([]);
                   setActiveFindMatch(-1);
+                  setFindInSelection(false);
+                  setFindSelectionWindow(null);
+                  setFindIncludeNotes(false);
                   setIsFindBarOpen(false);
                 }}
               >
                 Kapat
               </button>
             </div>
+            {findIncludeNotes && findQuery.trim() ? (
+              <div className="mt-2 rounded-lg border border-slate-200 bg-white p-2">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <p className="text-[11px] font-semibold text-slate-700">Not Sonuclari</p>
+                  <p className="text-[10px] text-slate-500">{findMatchedNotes.length} eslesme</p>
+                </div>
+                {findMatchedNotes.length === 0 ? (
+                  <p className="text-[11px] text-slate-500">Notlarda eslesen sonuc yok.</p>
+                ) : (
+                  <div className="max-h-36 space-y-1 overflow-auto">
+                    {findMatchedNotes.map((note) => (
+                      <button
+                        key={`find-note-${note.id}`}
+                        type="button"
+                        onClick={() => openFindMatchedNote(note)}
+                        className="w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-left hover:bg-slate-100"
+                      >
+                        <p className="truncate text-[11px] font-semibold text-slate-700">
+                          {note.scope === "TEAM" ? "Ekip" : "Ozel"} · {formatDate(note.createdAt)}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-slate-600">{note.body}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -2472,7 +4957,7 @@ export default function EditorUnified({
       {mentionPreviewCard}
 
       <style jsx global>{`
-        .ProseMirror { min-height: 940px; line-height: 1.72; color: #0f172a; }
+        .ProseMirror { min-height: 940px; line-height: 1.72; color: #0f172a; counter-reset: footnote-counter; }
         .ProseMirror:focus { outline: none; }
         .ProseMirror h1, .ProseMirror h2, .ProseMirror h3 { color: #020617; letter-spacing: -0.01em; }
         .ProseMirror p { margin: 0.4rem 0; }
@@ -2481,7 +4966,8 @@ export default function EditorUnified({
         .ProseMirror td, .ProseMirror th { border: 1px solid #64748b; padding: 8px; vertical-align: top; }
         .law-mention-node { background: #e2e8f0; border: 1px solid #64748b; border-radius: 8px; color: #0f172a; padding: 2px 6px; font-size: 12px; font-weight: 700; }
         .dynamic-field-node { background: #f1f5f9; border: 1px solid #94a3b8; border-radius: 8px; color: #1e293b; padding: 2px 6px; font-size: 12px; font-weight: 700; }
-        sup[data-footnote] { color: #334155; font-weight: 700; font-size: 11px; background: #e2e8f0; border: 1px solid #94a3b8; border-radius: 5px; padding: 1px 4px; margin: 0 2px; }
+        sup[data-footnote] { color: #334155; font-weight: 700; font-size: 11px; background: #e2e8f0; border: 1px solid #94a3b8; border-radius: 5px; padding: 1px 4px; margin: 0 2px; counter-increment: footnote-counter; }
+        sup[data-footnote]::after { content: counter(footnote-counter); }
       `}</style>
     </div>
   );

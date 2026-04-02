@@ -27,7 +27,10 @@ export class StorageService {
     this.bucket = process.env.S3_BUCKET?.trim() || "documents";
     const nodeEnv = (process.env.NODE_ENV ?? "development").trim().toLowerCase();
     const isProduction = nodeEnv === "production";
-    const allowInsecureDevFallback = isTrueFlag(process.env.S3_ALLOW_INSECURE_DEV_FALLBACK);
+    const allowInsecureDevFallback =
+      process.env.S3_ALLOW_INSECURE_DEV_FALLBACK === undefined
+        ? !isProduction
+        : isTrueFlag(process.env.S3_ALLOW_INSECURE_DEV_FALLBACK);
     const rawAccessKeyId = process.env.S3_ACCESS_KEY?.trim() ?? "";
     const rawSecretAccessKey = process.env.S3_SECRET_KEY?.trim() ?? "";
 

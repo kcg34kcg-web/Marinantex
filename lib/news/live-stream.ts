@@ -16,6 +16,13 @@ type DomainSourceConfig = {
   searchTerms: string[];
 };
 
+type GoogleQuerySourceConfig = {
+  id: string;
+  name: string;
+  query: string;
+  websiteUrl: string;
+};
+
 type RawFeedItem = {
   sourceId: string;
   sourceName: string;
@@ -62,6 +69,7 @@ type PreparedNewsSnapshot = {
 
 let googleDecoderPromise: Promise<GoogleDecoderClient | null> | null = null;
 let newsSummaryModelPromise: Promise<NewsSummaryModelSelection | null> | null = null;
+let newsSummaryQuotaCooldownUntil = 0;
 let preparedNewsSnapshotPromise: Promise<PreparedNewsSnapshot> | null = null;
 const NEWS_SUMMARY_CACHE = new Map<string, { value: StructuredNewsSummary; expiresAt: number }>();
 let preparedNewsSnapshotCache: { value: PreparedNewsSnapshot; expiresAt: number } | null = null;
@@ -97,6 +105,20 @@ const GOOGLE_NEWS_SOURCES: DomainSourceConfig[] = [
   { id: 'sayistay', name: 'Sayistay', domain: 'sayistay.gov.tr', websiteUrl: 'https://www.sayistay.gov.tr', searchTerms: ['karar', 'rapor', 'duyuru'] },
   { id: 'enerji-bakanligi', name: 'Enerji Bakanligi', domain: 'enerji.gov.tr', websiteUrl: 'https://www.enerji.gov.tr', searchTerms: ['enerji', 'duzenleme', 'duyuru'] },
 ];
+const GOOGLE_NEWS_QUERY_SOURCES: GoogleQuerySourceConfig[] = [
+  {
+    id: 'google-hukuk-gundemi',
+    name: 'Google Hukuk Gundemi',
+    query: '(hukuk OR mevzuat OR yargitay OR danistay OR anayasa mahkemesi OR kvkk OR resmi gazete OR teblig OR kanun) when:3d',
+    websiteUrl: 'https://news.google.com',
+  },
+  {
+    id: 'google-regulasyon-gundemi',
+    name: 'Google Regulasyon Gundemi',
+    query: '(rekabet kurumu OR spk OR bddk OR tcmb OR gib OR ticaret bakanligi OR epdk) when:3d',
+    websiteUrl: 'https://news.google.com',
+  },
+];
 const DEFAULT_TRUSTED_X_ACCOUNTS = 'ResmiGazete,TBMMresmi,adalet_bakanlik,KVKKKurumu,YargitayBaskanlik';
 const TRUSTED_OFFICIAL_SOURCE_IDS = new Set(GOOGLE_NEWS_SOURCES.map((source) => source.id));
 const SOURCE_DOMAIN_BY_ID = new Map(GOOGLE_NEWS_SOURCES.map((source) => [source.id, source.domain.toLowerCase()] as const));
@@ -131,20 +153,36 @@ const STOP_WORDS = new Set(['ve', 'ile', 'icin', 'olan', 'gibi', 'hakkinda', 'ka
 const TRACKING_PARAM_PREFIXES = ['utm_', 'fbclid', 'gclid', 'igshid', 'ref', 'oc', 'ved'];
 const GOOGLE_NEWS_DECODE_LIMIT = 12;
 const GOOGLE_NEWS_DECODE_CONCURRENCY = 6;
-const GOOGLE_NEWS_RECENCY_FILTER = 'when:30d';
+const GOOGLE_NEWS_RECENCY_FILTER = 'when:14d';
 const NEWS_ENRICH_LIMIT = 70;
 const NEWS_ENRICH_CONCURRENCY = 8;
 const NEWS_SUMMARY_BUDGET_PER_RUN = 90;
 const NEWS_SUMMARY_ENFORCE_CONCURRENCY = 5;
+const NEWS_SUMMARY_ENFORCE_MAX_ITEMS = 24;
+const NEWS_SUMMARY_ENFORCE_TIMEOUT_MS = 4500;
+const NEWS_SUMMARY_MODEL_RESOLVE_TIMEOUT_MS = 1200;
+const NEWS_SUMMARY_ITEM_MIN_REMAINING_BUDGET_MS = 320;
+const NEWS_DISABLE_GEMINI_SUMMARY =
+  (process.env.NEWS_DISABLE_GEMINI_SUMMARY ?? 'false').toLowerCase() === 'true';
+const NEWS_SUMMARY_QUOTA_COOLDOWN_MS = Math.max(
+  60 * 1000,
+  Number.parseInt(process.env.NEWS_SUMMARY_QUOTA_COOLDOWN_MS ?? '', 10) || 10 * 60 * 1000,
+);
 const NEWS_SUMMARY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const NEWS_SUMMARY_CACHE_LIMIT = 600;
 const NEWS_ARTICLE_FETCH_TIMEOUT_MS = 1200;
 const NEWS_SOURCE_FETCH_TIMEOUT_MS = 3200;
 const NEWS_SOURCE_ITEMS_PER_FEED = 6;
+const NEWS_QUERY_ITEMS_PER_FEED = 8;
 const NEWS_X_FALLBACK_ITEMS_PER_FEED = 6;
 const NEWS_CANDIDATE_POOL_LIMIT = 70;
 const NEWS_PIPELINE_BUDGET_MS = 12000;
 const NEWS_MIN_REMAINING_ENRICH_BUDGET_MS = 2200;
+const NEWS_STRICT_FRESH_AGE_HOURS = 24 * 3;
+const NEWS_SOFT_FRESH_AGE_HOURS = 24 * 10;
+const NEWS_HARD_MAX_AGE_HOURS = 24 * 14;
+const NEWS_MIN_STRICT_FRESH_ITEMS = 12;
+const NEWS_MIN_SOFT_FRESH_ITEMS = 12;
 const DASHBOARD_NEWS_SNAPSHOT_TTL_MS = 2 * 60 * 1000;
 const EMPTY_SNAPSHOT_TTL_MS = 15 * 1000;
 const NEWS_CHUNK_TARGET_WORDS = 950;
@@ -222,23 +260,51 @@ function normalize(input: string) {
 }
 
 function hasSummaryModelConfig() {
-  return Boolean(
-    serverEnv.GOOGLE_GENERATIVE_AI_API_KEY ||
-      serverEnv.COHERE_API_KEY ||
-      serverEnv.OPENAI_API_KEY,
-  );
+  if (NEWS_DISABLE_GEMINI_SUMMARY) {
+    return false;
+  }
+  return Boolean(serverEnv.GOOGLE_GENERATIVE_AI_API_KEY);
 }
 
 async function getNewsSummaryModel() {
   if (!hasSummaryModelConfig()) {
     return null;
   }
+  if (Date.now() < newsSummaryQuotaCooldownUntil) {
+    return null;
+  }
   if (newsSummaryModelPromise) {
     return newsSummaryModelPromise;
   }
 
-  newsSummaryModelPromise = resolveLegalModelWithFallback('summary').catch(() => null);
+  newsSummaryModelPromise = resolveLegalModelWithFallback('summary').catch((error) => {
+    if (isGeminiQuotaError(error)) {
+      markNewsSummaryQuotaCooldown();
+    }
+    return null;
+  });
   return newsSummaryModelPromise;
+}
+
+function buildSummaryFromDetailWhenEchoingTitle(item: Pick<RawFeedItem, 'title' | 'sourceName' | 'detailText' | 'summary'>) {
+  const detailSentences = collectSummarySentences(item.detailText ?? '', item.title)
+    .filter((sentence) => !isTextEchoingTitle(sentence, item.title));
+  if (detailSentences.length === 0) {
+    return '';
+  }
+  const seed = normalizeWhitespace(detailSentences.slice(0, 3).join(' '));
+  return normalizeSummary(seed, item.title, item.sourceName, `${item.detailText ?? ''} ${item.summary}`);
+}
+
+function isGeminiQuotaError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const normalized = normalize(message);
+  return normalized.includes('429') || normalized.includes('quota') || normalized.includes('resource_exhausted');
+}
+
+function markNewsSummaryQuotaCooldown() {
+  newsSummaryQuotaCooldownUntil = Date.now() + NEWS_SUMMARY_QUOTA_COOLDOWN_MS;
+  newsSummaryModelPromise = null;
 }
 
 function pruneSummaryCache(now = Date.now()) {
@@ -285,6 +351,27 @@ function consumeSummaryBudget(budget: { remaining: number }) {
   }
   budget.remaining -= 1;
   return true;
+}
+
+async function withSoftTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  if (timeoutMs <= 0) {
+    return fallback;
+  }
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timeoutHandle = setTimeout(() => resolve(fallback), timeoutMs);
+      }),
+    ]);
+  } catch {
+    return fallback;
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
 }
 
 function decodeXmlEntities(input: string) {
@@ -653,6 +740,10 @@ function normalizeWhitespace(text: string) {
   return text.replace(/\s+/g, ' ').trim();
 }
 
+function escapeRegExp(text: string) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function compactForCompare(text: string) {
   return normalize(text)
     .replace(/ı/g, 'i')
@@ -685,11 +776,15 @@ function isGenericTitle(title: string, sourceName: string) {
   const cleanedTitle = normalizeWhitespace(stripHtml(title));
   const normalizedTitle = normalize(cleanedTitle);
   const normalizedSource = normalize(sourceName);
-  const titleNoSource = normalizeWhitespace(cleanedTitle.replace(new RegExp(`\\s*-\\s*${sourceName}$`, 'i'), ''));
-  const normalizedTitleNoSource = normalize(titleNoSource);
+  const safeSourceName = escapeRegExp(sourceName);
+  const titleNoSource = normalizeWhitespace(cleanedTitle.replace(new RegExp(`\\s*-\\s*${safeSourceName}$`, 'i'), ''));
   const titleCompact = compactForCompare(cleanedTitle);
   const sourceCompact = compactForCompare(sourceName);
   const titleNoSourceCompact = compactForCompare(titleNoSource);
+  const titlePartsCompact = cleanedTitle
+    .split(/\s*-\s*/)
+    .map((part) => compactForCompare(part))
+    .filter(Boolean);
 
   const genericPatterns = [
     'duyurular',
@@ -729,6 +824,12 @@ function isGenericTitle(title: string, sourceName: string) {
   }
 
   if (normalizedTitle === normalizedSource || (titleCompact && sourceCompact && titleCompact === sourceCompact)) {
+    return true;
+  }
+  if (sourceCompact && titleNoSourceCompact && titleNoSourceCompact === sourceCompact) {
+    return true;
+  }
+  if (titlePartsCompact.length >= 2 && titlePartsCompact.every((part) => part === titlePartsCompact[0])) {
     return true;
   }
 
@@ -1055,7 +1156,17 @@ function ensureMinimumSummarySentences(summary: string, title: string, sourceNam
 
 function isFallbackSummary(summary: string) {
   const normalized = normalize(summary);
-  return normalized.includes('ozet cikarmaya yetecek acik ayrinti bulunmuyor');
+  if (!normalized || normalized.length < 12) {
+    return true;
+  }
+  if (normalized.includes('ozet cikarmaya yetecek acik ayrinti bulunmuyor')) {
+    return true;
+  }
+  const sentenceCount = splitSummarySentences(summary).length;
+  if (sentenceCount <= 1 && (normalized.startsWith('kaynak kurum:') || normalized.startsWith('kaynak:'))) {
+    return true;
+  }
+  return false;
 }
 
 function normalizeSummary(summary: string, title: string, sourceName: string, fallbackContext = '') {
@@ -1953,7 +2064,11 @@ async function summarizeArticleWithHybridApproach(item: RawFeedItem, articleText
     }
 
     return null;
-  } catch {
+  } catch (error) {
+    if (isGeminiQuotaError(error)) {
+      markNewsSummaryQuotaCooldown();
+      return null;
+    }
     const fallbackBullets = buildHighlights(
       item.title,
       trimSummary(extractiveSentences.join(' ')),
@@ -2034,7 +2149,10 @@ async function summarizeArticleWithDirectGemini(item: RawFeedItem, articleText: 
       numbers: extractNumbersFromText(`${summaryText} ${articleText}`),
       uncertainties: [],
     } satisfies StructuredNewsSummary;
-  } catch {
+  } catch (error) {
+    if (isGeminiQuotaError(error)) {
+      markNewsSummaryQuotaCooldown();
+    }
     return null;
   }
 }
@@ -2310,12 +2428,15 @@ async function enforceGeminiSummaryForAllItems(items: RawFeedItem[]): Promise<Ra
     return items;
   }
 
-  const modelSelection = await getNewsSummaryModel();
-  if (!modelSelection) {
+  const modelSelection = await withSoftTimeout(
+    getNewsSummaryModel(),
+    NEWS_SUMMARY_MODEL_RESOLVE_TIMEOUT_MS,
+    null,
+  );
+  if (!modelSelection || modelSelection.providerName !== 'google') {
     return items;
   }
 
-  const summaryBudget = { remaining: Math.max(items.length, NEWS_SUMMARY_BUDGET_PER_RUN) };
   const normalizedItems = items.map((item) => {
     const summary = normalizeSummary(item.summary, item.title, item.sourceName, item.detailText ?? '');
     const detailText = normalizeDetail(item.detailText ?? '', summary, item.title);
@@ -2327,15 +2448,62 @@ async function enforceGeminiSummaryForAllItems(items: RawFeedItem[]): Promise<Ra
     };
   });
 
-  const output: RawFeedItem[] = [];
+  const candidateIndexes = normalizedItems
+    .map((item, index) => {
+      let score = 0;
+      const fallbackSummary = isFallbackSummary(item.summary);
+      const fallbackDetail = isFallbackDetail(item.detailText ?? '');
+      const informativeSummary = isInformativeSummary(item.summary, item.title, item.sourceName);
+      if (fallbackSummary) score += 4;
+      if (fallbackDetail) score += 3;
+      if (!informativeSummary) score += 2;
+      if (looksThinSummary(item.summary)) score += 2;
+      if (item.isWhitelistedSource) score += 1;
+      return { index, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, NEWS_SUMMARY_ENFORCE_MAX_ITEMS)
+    .map((entry) => entry.index);
 
-  for (let index = 0; index < normalizedItems.length; index += NEWS_SUMMARY_ENFORCE_CONCURRENCY) {
-    const batch = normalizedItems.slice(index, index + NEWS_SUMMARY_ENFORCE_CONCURRENCY);
+  if (candidateIndexes.length === 0) {
+    return normalizedItems;
+  }
+
+  const deadline = Date.now() + NEWS_SUMMARY_ENFORCE_TIMEOUT_MS;
+  const output = [...normalizedItems];
+  const summaryBudget = {
+    remaining: Math.min(
+      NEWS_SUMMARY_BUDGET_PER_RUN,
+      Math.max(candidateIndexes.length, Math.ceil(candidateIndexes.length * 0.75)),
+    ),
+  };
+
+  for (let index = 0; index < candidateIndexes.length; index += NEWS_SUMMARY_ENFORCE_CONCURRENCY) {
+    if (Date.now() >= deadline) {
+      break;
+    }
+    const batchIndexes = candidateIndexes.slice(index, index + NEWS_SUMMARY_ENFORCE_CONCURRENCY);
     const batchResults = await Promise.all(
-      batch.map(async (item) => {
-        const articleText = await buildBestAvailableSummaryInput(item);
+      batchIndexes.map(async (itemIndex) => {
+        const item = output[itemIndex];
+        const baseText = normalizeWhitespace(`${item.detailText ?? ''} ${item.summary} ${item.title}`);
+        const remainingBeforeInput = deadline - Date.now();
+        if (remainingBeforeInput <= NEWS_SUMMARY_ITEM_MIN_REMAINING_BUDGET_MS) {
+          return { itemIndex, item };
+        }
+
+        const inputTimeoutMs = Math.min(
+          Math.max(250, remainingBeforeInput - 200),
+          NEWS_ARTICLE_FETCH_TIMEOUT_MS + 250,
+        );
+        const articleText = await withSoftTimeout(
+          buildBestAvailableSummaryInput(item),
+          inputTimeoutMs,
+          baseText,
+        );
         if (articleText.length < 80) {
-          return item;
+          return { itemIndex, item };
         }
 
         const cacheKey = buildSummaryCacheKey(item.link || item.sourceUrl, articleText);
@@ -2348,13 +2516,31 @@ async function enforceGeminiSummaryForAllItems(items: RawFeedItem[]): Promise<Ra
           structuredSummary = null;
         }
 
-        if (!structuredSummary && consumeSummaryBudget(summaryBudget)) {
-          structuredSummary = await summarizeArticleWithHybridApproach(item, articleText);
+        const remainingBeforeModel = deadline - Date.now();
+        if (
+          !structuredSummary &&
+          remainingBeforeModel > NEWS_SUMMARY_ITEM_MIN_REMAINING_BUDGET_MS &&
+          consumeSummaryBudget(summaryBudget)
+        ) {
+          const hybridTimeoutMs = Math.min(Math.max(280, remainingBeforeModel - 180), 1800);
+          structuredSummary = await withSoftTimeout(
+            summarizeArticleWithHybridApproach(item, articleText),
+            hybridTimeoutMs,
+            null,
+          );
           if (structuredSummary && !isInformativeSummary(structuredSummary.oneLiner, item.title, item.sourceName)) {
             structuredSummary = null;
           }
           if (!structuredSummary) {
-            structuredSummary = await summarizeArticleWithDirectGemini(item, articleText);
+            const remainingBeforeDirect = deadline - Date.now();
+            if (remainingBeforeDirect > NEWS_SUMMARY_ITEM_MIN_REMAINING_BUDGET_MS) {
+              const directTimeoutMs = Math.min(Math.max(250, remainingBeforeDirect - 120), 1200);
+              structuredSummary = await withSoftTimeout(
+                summarizeArticleWithDirectGemini(item, articleText),
+                directTimeoutMs,
+                null,
+              );
+            }
           }
           if (structuredSummary) {
             setCachedSummary(cacheKey, structuredSummary);
@@ -2362,7 +2548,7 @@ async function enforceGeminiSummaryForAllItems(items: RawFeedItem[]): Promise<Ra
         }
 
         if (!structuredSummary) {
-          return item;
+          return { itemIndex, item };
         }
 
         const structuredDetailText = buildStructuredDetailText(structuredSummary);
@@ -2373,14 +2559,19 @@ async function enforceGeminiSummaryForAllItems(items: RawFeedItem[]): Promise<Ra
           : buildHighlights(item.title, mergedSummary, mergedDetailText);
 
         return {
-          ...item,
-          summary: mergedSummary,
-          detailText: mergedDetailText,
-          highlights,
+          itemIndex,
+          item: {
+            ...item,
+            summary: mergedSummary,
+            detailText: mergedDetailText,
+            highlights,
+          },
         };
       }),
     );
-    output.push(...batchResults);
+    for (const result of batchResults) {
+      output[result.itemIndex] = result.item;
+    }
   }
 
   return output;
@@ -2409,6 +2600,10 @@ function buildGoogleNewsUrl(source: DomainSourceConfig) {
   return `https://news.google.com/rss/search?q=${encodeURIComponent(searchQuery)}&hl=tr&gl=TR&ceid=TR:tr`;
 }
 
+function buildGoogleNewsQueryUrl(searchQuery: string) {
+  return `https://news.google.com/rss/search?q=${encodeURIComponent(searchQuery)}&hl=tr&gl=TR&ceid=TR:tr`;
+}
+
 async function fetchGoogleNewsSource(source: DomainSourceConfig): Promise<FetchResult> {
   const endpoint = buildGoogleNewsUrl(source);
   const startedAt = Date.now();
@@ -2434,6 +2629,62 @@ async function fetchGoogleNewsSource(source: DomainSourceConfig): Promise<FetchR
 
     const xmlText = await response.text();
     const parsedItems = parseRssOrAtom(xmlText, source.name, source.websiteUrl, source.id).slice(0, NEWS_SOURCE_ITEMS_PER_FEED);
+
+    return {
+      status: {
+        id: source.id,
+        name: source.name,
+        endpoint,
+        transport: 'rss',
+        success: true,
+        itemCount: parsedItems.length,
+        latencyMs: elapsed,
+      },
+      items: parsedItems,
+    };
+  } catch (error) {
+    const elapsed = Date.now() - startedAt;
+    return {
+      status: {
+        id: source.id,
+        name: source.name,
+        endpoint,
+        transport: 'rss',
+        success: false,
+        itemCount: 0,
+        latencyMs: elapsed,
+        error: error instanceof Error ? error.message : 'Bilinmeyen hata',
+      },
+      items: [],
+    };
+  }
+}
+
+async function fetchGoogleNewsQuerySource(source: GoogleQuerySourceConfig): Promise<FetchResult> {
+  const endpoint = buildGoogleNewsQueryUrl(source.query);
+  const startedAt = Date.now();
+
+  try {
+    const response = await fetchTextWithTimeout(endpoint, NEWS_SOURCE_FETCH_TIMEOUT_MS);
+    const elapsed = Date.now() - startedAt;
+    if (!response.ok) {
+      return {
+        status: {
+          id: source.id,
+          name: source.name,
+          endpoint,
+          transport: 'rss',
+          success: false,
+          itemCount: 0,
+          latencyMs: elapsed,
+          error: `HTTP ${response.status}`,
+        },
+        items: [],
+      };
+    }
+
+    const xmlText = await response.text();
+    const parsedItems = parseRssOrAtom(xmlText, source.name, source.websiteUrl, source.id).slice(0, NEWS_QUERY_ITEMS_PER_FEED);
 
     return {
       status: {
@@ -2750,8 +3001,20 @@ function buildActionDraft(category: NewsCategory, severity: NewsSeverity, worksp
 
 function mapRawToLiveItem(rawItem: RawFeedItem, activeCases: DashboardCaseLite[]): LiveNewsItem {
   const summaryContext = buildSummaryContextFromDetail(rawItem.detailText ?? '');
-  const summary = trimSummary(normalizeSummary(rawItem.summary, rawItem.title, rawItem.sourceName, summaryContext));
-  const detailText = normalizeDetail(rawItem.detailText ?? '', summary, rawItem.title);
+  let summary = trimSummary(normalizeSummary(rawItem.summary, rawItem.title, rawItem.sourceName, summaryContext));
+  let detailText = normalizeDetail(rawItem.detailText ?? '', summary, rawItem.title);
+  if (isTextEchoingTitle(summary, rawItem.title) || isFallbackSummary(summary)) {
+    const improvedSummary = buildSummaryFromDetailWhenEchoingTitle({
+      title: rawItem.title,
+      sourceName: rawItem.sourceName,
+      detailText,
+      summary,
+    });
+    if (improvedSummary) {
+      summary = trimSummary(improvedSummary);
+      detailText = normalizeDetail(detailText, summary, rawItem.title);
+    }
+  }
   const highlights = rawItem.highlights?.length ? rawItem.highlights : buildHighlights(rawItem.title, summary, detailText);
   const textCorpus = `${rawItem.title} ${summary} ${detailText}`;
   const category = classifyCategory(textCorpus);
@@ -2900,13 +3163,13 @@ function filterLowQualityItems(items: RawFeedItem[]) {
       return false;
     }
 
-    if (summaryEchoesTitle) {
+    if (summaryEchoesTitle && detailSentenceCount < 2 && detailLength < 180) {
       return false;
     }
-    if (summarySentenceCount < MIN_SUMMARY_SENTENCE_COUNT) {
+    if (summarySentenceCount < MIN_SUMMARY_SENTENCE_COUNT && detailSentenceCount < 2 && detailLength < 160) {
       return false;
     }
-    if (summaryLength < 18 && detailLength < 90) {
+    if (summaryLength < 14 && detailLength < 80) {
       return false;
     }
     if (detailEchoesTitle && detailSentenceCount < 2 && detailLength < 220) {
@@ -2974,9 +3237,120 @@ function contentRichnessScore(item: RawFeedItem) {
   return score;
 }
 
+function isHardNoiseItem(item: RawFeedItem) {
+  const title = normalizeWhitespace(stripHtml(item.title));
+  const titleCompact = compactForCompare(title);
+  const sourceCompact = compactForCompare(item.sourceName);
+  const titlePartsCompact = title
+    .split(/\s*[-–—]\s*/)
+    .map((part) => compactForCompare(part))
+    .filter(Boolean);
+  if (!title || /^[-–—]/.test(title)) {
+    return true;
+  }
+  if (/^\d{3,}\.pdf\b/i.test(title) || /\.pdf\b/i.test(title)) {
+    return true;
+  }
+  if (title.length < 12) {
+    return true;
+  }
+  if (sourceCompact && titleCompact && titleCompact === sourceCompact) {
+    return true;
+  }
+  if (titlePartsCompact.length >= 2 && new Set(titlePartsCompact).size === 1) {
+    return true;
+  }
+  if (titleCompact.includes('faturahesaplama') || titleCompact.includes('lisansistatistikleri')) {
+    return true;
+  }
+  if (isGenericTitle(item.title, item.sourceName)) {
+    return true;
+  }
+  if (isFallbackSummary(item.summary) && isFallbackDetail(item.detailText ?? '')) {
+    return true;
+  }
+  if (
+    isTextEchoingTitle(item.summary, item.title) &&
+    isTextEchoingTitle(item.detailText ?? '', item.title)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function itemAgeHours(item: Pick<RawFeedItem, 'publishedAt'>, nowMs = Date.now()) {
+  const publishedAtMs = Date.parse(item.publishedAt);
+  if (!Number.isFinite(publishedAtMs)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.max(0, (nowMs - publishedAtMs) / (1000 * 60 * 60));
+}
+
+function freshnessBoostScore(item: Pick<RawFeedItem, 'publishedAt'>, nowMs = Date.now()) {
+  const ageHours = itemAgeHours(item, nowMs);
+  if (!Number.isFinite(ageHours)) {
+    return -3.5;
+  }
+  if (ageHours <= 12) return 3.2;
+  if (ageHours <= 24) return 2.7;
+  if (ageHours <= 48) return 2.1;
+  if (ageHours <= 72) return 1.6;
+  if (ageHours <= 7 * 24) return 0.9;
+  if (ageHours <= 10 * 24) return 0.35;
+  if (ageHours <= 14 * 24) return -0.4;
+  return -2.6;
+}
+
+function applyFreshnessWindow(items: RawFeedItem[]) {
+  if (items.length === 0) {
+    return items;
+  }
+
+  const strictFresh = items.filter((item) => itemAgeHours(item) <= NEWS_STRICT_FRESH_AGE_HOURS);
+  if (strictFresh.length >= NEWS_MIN_STRICT_FRESH_ITEMS) {
+    return strictFresh;
+  }
+
+  const softFresh = items.filter((item) => itemAgeHours(item) <= NEWS_SOFT_FRESH_AGE_HOURS);
+  if (softFresh.length >= NEWS_MIN_SOFT_FRESH_ITEMS) {
+    return softFresh;
+  }
+
+  const hardFresh = items.filter((item) => itemAgeHours(item) <= NEWS_HARD_MAX_AGE_HOURS);
+  if (hardFresh.length > 0) {
+    return hardFresh;
+  }
+
+  return items;
+}
+
+function mergeCandidatePools(pools: RawFeedItem[][], limit: number) {
+  const seen = new Set<string>();
+  const merged: RawFeedItem[] = [];
+
+  for (const pool of pools) {
+    for (const item of pool) {
+      if (merged.length >= limit) {
+        return merged;
+      }
+      const key = `${canonicalizeUrl(item.link)}::${compactForCompare(item.title)}`;
+      if (!key || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      merged.push(item);
+    }
+  }
+
+  return merged;
+}
+
 function rankItemsByQualityAndRecency(items: RawFeedItem[]) {
+  const nowMs = Date.now();
   return [...items].sort((a, b) => {
-    const scoreDiff = contentRichnessScore(b) - contentRichnessScore(a);
+    const scoreA = contentRichnessScore(a) + freshnessBoostScore(a, nowMs);
+    const scoreB = contentRichnessScore(b) + freshnessBoostScore(b, nowMs);
+    const scoreDiff = scoreB - scoreA;
     if (Math.abs(scoreDiff) > 0.01) {
       return scoreDiff;
     }
@@ -3010,6 +3384,7 @@ async function buildPreparedNewsSnapshot(): Promise<PreparedNewsSnapshot> {
   const pipelineStartedAt = Date.now();
   const sourceResults = await Promise.all([
     ...GOOGLE_NEWS_SOURCES.map((source) => fetchGoogleNewsSource(source)),
+    ...GOOGLE_NEWS_QUERY_SOURCES.map((source) => fetchGoogleNewsQuerySource(source)),
     fetchTwitterSource(),
   ]);
 
@@ -3039,11 +3414,16 @@ async function buildPreparedNewsSnapshot(): Promise<PreparedNewsSnapshot> {
   const sortedContentDedupedRawItems = [...contentDedupedRawItems].sort(
     (a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt),
   );
-  const qualityFilteredRawItems = filterLowQualityItems(sortedContentDedupedRawItems);
+  const hardFreshBaseItems = sortedContentDedupedRawItems.filter((item) => itemAgeHours(item) <= NEWS_HARD_MAX_AGE_HOURS);
+  const qualityInputItems = hardFreshBaseItems.length >= NEWS_MIN_SOFT_FRESH_ITEMS ? hardFreshBaseItems : sortedContentDedupedRawItems;
+  const qualityFilteredRawItems = filterLowQualityItems(qualityInputItems);
   const rankedQualityItems = rankItemsByQualityAndRecency(qualityFilteredRawItems);
-  const nonEchoFallbackItems = sortedContentDedupedRawItems.filter(
+  const nonEchoFallbackItems = qualityInputItems.filter(
     (item) =>
       legalRelevanceScore(item) >= LEGAL_RELEVANCE_MIN_SCORE &&
+      !isGenericTitle(item.title, item.sourceName) &&
+      !/^\d{3,}\.pdf\b/i.test(normalizeWhitespace(stripHtml(item.title))) &&
+      !/\.pdf\b/i.test(normalizeWhitespace(stripHtml(item.title))) &&
       !isFallbackSummary(item.summary) &&
       !isFallbackDetail(item.detailText ?? '') &&
       !(isTextEchoingTitle(item.summary, item.title) && isTextEchoingTitle(item.detailText ?? '', item.title)),
@@ -3051,6 +3431,35 @@ async function buildPreparedNewsSnapshot(): Promise<PreparedNewsSnapshot> {
   const rankedFallbackItems = rankItemsByQualityAndRecency(nonEchoFallbackItems);
   const richQualityItems = rankedQualityItems.filter((item) => contentRichnessScore(item) >= 4.4);
   const primaryItems = richQualityItems.length >= 18 ? richQualityItems : rankedQualityItems;
+  const recencyFallbackItems = rankItemsByQualityAndRecency(
+    qualityInputItems.filter((item) => {
+      const title = normalizeWhitespace(stripHtml(item.title));
+      if (!title || title.length < 14) {
+        return false;
+      }
+      if (/^\d{3,}\.pdf\b/i.test(title) || /\.pdf\b/i.test(title)) {
+        return false;
+      }
+      if (isGenericTitle(item.title, item.sourceName)) {
+        return false;
+      }
+      if (itemAgeHours(item) > NEWS_SOFT_FRESH_AGE_HOURS) {
+        return false;
+      }
+      if (legalRelevanceScore(item) < 1.6) {
+        return false;
+      }
+      if (isTextEchoingTitle(item.summary, item.title)) {
+        return false;
+      }
+      const summaryLength = normalizeWhitespace(item.summary).length;
+      const detailLength = normalizeWhitespace(item.detailText ?? '').length;
+      if (summaryLength < 24 && detailLength < 80) {
+        return false;
+      }
+      return true;
+    }),
+  );
   const emergencyFallbackItems = sortedContentDedupedRawItems.filter((item) => {
     const title = normalizeWhitespace(stripHtml(item.title));
     if (!title || /^[-–—]/.test(title)) {
@@ -3062,10 +3471,19 @@ async function buildPreparedNewsSnapshot(): Promise<PreparedNewsSnapshot> {
     if (isGenericTitle(item.title, item.sourceName)) {
       return false;
     }
+    if (
+      isTextEchoingTitle(item.summary, item.title) &&
+      isTextEchoingTitle(item.detailText ?? '', item.title)
+    ) {
+      return false;
+    }
     if (legalRelevanceScore(item) < 1.2) {
       return false;
     }
     if (normalizeWhitespace(item.summary).length < 12) {
+      return false;
+    }
+    if (isFallbackSummary(item.summary) || isFallbackDetail(item.detailText ?? '')) {
       return false;
     }
     const compactTitle = compactForCompare(title);
@@ -3074,12 +3492,80 @@ async function buildPreparedNewsSnapshot(): Promise<PreparedNewsSnapshot> {
     }
     return true;
   });
-  const safeRawItems = primaryItems.length > 0
-    ? primaryItems.slice(0, NEWS_CANDIDATE_POOL_LIMIT)
-    : rankedFallbackItems.length > 0
-      ? rankedFallbackItems.slice(0, NEWS_CANDIDATE_POOL_LIMIT)
-      : emergencyFallbackItems.slice(0, NEWS_CANDIDATE_POOL_LIMIT);
-  const aiSummarizedRawItems = await enforceGeminiSummaryForAllItems(safeRawItems);
+  const candidateItems = mergeCandidatePools(
+    [
+      primaryItems,
+      rankedFallbackItems,
+      recencyFallbackItems,
+      emergencyFallbackItems,
+    ],
+    NEWS_CANDIDATE_POOL_LIMIT,
+  );
+  const freshnessWindowItems = applyFreshnessWindow(candidateItems);
+  const cleanedFreshnessItems = freshnessWindowItems.filter((item) => !isHardNoiseItem(item));
+  const safeRankedItems = rankItemsByQualityAndRecency(cleanedFreshnessItems).slice(0, NEWS_CANDIDATE_POOL_LIMIT);
+  const resilientFallbackItems = rankItemsByQualityAndRecency(
+    sortedContentDedupedRawItems.filter((item) => {
+      const title = normalizeWhitespace(stripHtml(item.title));
+      if (!title || /^[-–—]/.test(title)) {
+        return false;
+      }
+      if (/^\d{3,}\.pdf\b/i.test(title) || /\.pdf\b/i.test(title)) {
+        return false;
+      }
+      if (itemAgeHours(item) > NEWS_HARD_MAX_AGE_HOURS) {
+        return false;
+      }
+      if (isGenericTitle(item.title, item.sourceName)) {
+        return false;
+      }
+      const summaryLength = normalizeWhitespace(item.summary).length;
+      const detailLength = normalizeWhitespace(item.detailText ?? '').length;
+      if (summaryLength < 12 && detailLength < 80) {
+        return false;
+      }
+      if (isFallbackDetail(item.detailText ?? '')) {
+        return false;
+      }
+      if (isFallbackSummary(item.summary) && detailLength < 160) {
+        return false;
+      }
+      if (
+        isTextEchoingTitle(item.summary, item.title) &&
+        isTextEchoingTitle(item.detailText ?? '', item.title)
+      ) {
+        return false;
+      }
+      return legalRelevanceScore(item) >= 1.3;
+    }),
+  ).slice(0, Math.min(NEWS_CANDIDATE_POOL_LIMIT, 24));
+  const cleanedResilientFallbackItems = resilientFallbackItems.filter((item) => !isHardNoiseItem(item));
+  const cleanedSortedFallback = sortedContentDedupedRawItems.filter((item) => !isHardNoiseItem(item));
+  const emergencyNonEmptyFallback = sortedContentDedupedRawItems.filter((item) => {
+    const title = normalizeWhitespace(stripHtml(item.title));
+    if (!title || /^[-–—]/.test(title)) {
+      return false;
+    }
+    if (/^\d{3,}\.pdf\b/i.test(title)) {
+      return false;
+    }
+    if (itemAgeHours(item) > NEWS_HARD_MAX_AGE_HOURS) {
+      return false;
+    }
+    return true;
+  });
+  const safeRawItems = safeRankedItems.length > 0
+    ? safeRankedItems
+    : cleanedResilientFallbackItems.length > 0
+      ? cleanedResilientFallbackItems
+      : cleanedSortedFallback.length > 0
+        ? cleanedSortedFallback.slice(0, Math.min(NEWS_CANDIDATE_POOL_LIMIT, 20))
+        : emergencyNonEmptyFallback.slice(0, Math.min(NEWS_CANDIDATE_POOL_LIMIT, 20));
+  const aiSummarizedRawItems = await withSoftTimeout(
+    enforceGeminiSummaryForAllItems(safeRawItems),
+    NEWS_SUMMARY_ENFORCE_TIMEOUT_MS + 600,
+    safeRawItems,
+  );
 
   return {
     generatedAt: new Date().toISOString(),
@@ -3120,7 +3606,10 @@ export async function buildDashboardNewsPayload(options: { activeCases: Dashboar
     snapshot = lastNonEmptyPreparedNewsSnapshot;
   }
 
-  const liveItems = snapshot.rawItems
+  const displayRawItems = snapshot.rawItems.filter((rawItem) => !isHardNoiseItem(rawItem));
+  const rawItemsForDisplay = displayRawItems.length > 0 ? displayRawItems : snapshot.rawItems;
+
+  const liveItems = rawItemsForDisplay
     .map((rawItem) => mapRawToLiveItem(rawItem, options.activeCases))
     .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
     .slice(0, limit);

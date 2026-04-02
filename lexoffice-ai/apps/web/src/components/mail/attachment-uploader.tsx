@@ -13,7 +13,7 @@ export function AttachmentUploader({ onSelect }: { onSelect: (files: File[]) => 
   return (
     <div
       className={`rounded-lg border border-dashed p-3 transition ${
-        dragActive ? "border-brand-500 bg-brand-50" : "border-slate-300"
+        dragActive ? "border-blue-400 bg-blue-50/70" : "border-slate-300"
       }`}
       onDragOver={(event) => {
         event.preventDefault();

@@ -13,6 +13,7 @@ export function MailList({
   onToggleSelect,
   onToggleStar,
   onToggleImportant,
+  onTogglePin,
   onActivate,
   onOpen,
   hasMore,
@@ -26,6 +27,7 @@ export function MailList({
   onToggleSelect: (threadId: string) => void;
   onToggleStar: (threadId: string) => void;
   onToggleImportant: (threadId: string) => void;
+  onTogglePin: (threadId: string) => void;
   onActivate: (threadId: string) => void;
   onOpen: (threadId: string) => void;
   hasMore: boolean;
@@ -116,6 +118,7 @@ export function MailList({
           onToggleChecked={onToggleSelect}
           onToggleStar={onToggleStar}
           onToggleImportant={onToggleImportant}
+          onTogglePin={onTogglePin}
           onActivate={onActivate}
           onOpen={onOpen}
         />

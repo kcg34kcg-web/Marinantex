@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { Route } from "next";
 import { 
   Home, 
   MessageCircle, 
@@ -46,7 +47,7 @@ export default function MobileNavbar() {
            <div className="bg-white/90 backdrop-blur-md rounded-2xl shadow-2xl p-2 flex border border-gray-100 ring-1 ring-black/5">
               
               {/* Sol Buton: Sorularım */}
-              <Link href="/my-questions" className="flex-1 group flex items-center justify-center gap-3 py-4 bg-gradient-to-r from-orange-50 to-orange-100/50 rounded-xl mr-2 active:scale-95 transition-all relative overflow-hidden">
+              <Link href={"/my-questions" as Route} className="flex-1 group flex items-center justify-center gap-3 py-4 bg-gradient-to-r from-orange-50 to-orange-100/50 rounded-xl mr-2 active:scale-95 transition-all relative overflow-hidden">
                  <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500"></div>
                  <div className="bg-white p-2 rounded-full shadow-sm text-orange-500">
                     <HelpCircle size={20} />
@@ -57,7 +58,7 @@ export default function MobileNavbar() {
               <div className="w-[1px] bg-gray-200 my-2"></div>
               
               {/* Sağ Buton: Cevaplarım */}
-              <Link href="/my-answers" className="flex-1 group flex items-center justify-center gap-3 py-4 bg-gradient-to-r from-blue-50 to-blue-100/50 rounded-xl ml-2 active:scale-95 transition-all relative overflow-hidden">
+              <Link href={"/my-answers" as Route} className="flex-1 group flex items-center justify-center gap-3 py-4 bg-gradient-to-r from-blue-50 to-blue-100/50 rounded-xl ml-2 active:scale-95 transition-all relative overflow-hidden">
                  <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500"></div>
                  <div className="bg-white p-2 rounded-full shadow-sm text-blue-500">
                     <PenTool size={20} />
@@ -84,7 +85,7 @@ export default function MobileNavbar() {
               return (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  href={item.href as Route}
                   className="flex flex-col items-center justify-end w-full relative mb-1"
                 >
                   <div className={cn(
@@ -112,7 +113,7 @@ export default function MobileNavbar() {
             return (
               <Link
                 key={item.href}
-                href={item.href}
+                href={item.href as Route}
                 className="flex flex-col items-center justify-center w-full h-full pb-1 group"
               >
                 <Icon 

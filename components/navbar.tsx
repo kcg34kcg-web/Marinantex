@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@/utils/supabase/server';
 import { NotificationPopover } from '@/components/notifications/NotificationPopover';
+import { Logo } from '@/components/brand/Logo';
 
 export default async function Navbar() {
   const supabase = await createClient();
@@ -10,8 +11,8 @@ export default async function Navbar() {
 
   return (
     <nav className="bg-[#1e293b] text-[#f59e0b] p-4 flex justify-between items-center relative z-50 shadow-md">
-      <Link href="/">
-        <p className="text-2xl font-bold tracking-tight">Babylexit</p>
+      <Link href="/" aria-label="Ana sayfa">
+        <Logo width={148} height={44} className="h-8 w-auto" />
       </Link>
       
       <div className="flex items-center gap-4">

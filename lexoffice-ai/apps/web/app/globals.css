@@ -12,7 +12,12 @@
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-white text-slate-900 antialiased;
+}
+
+html:not([data-theme="dark"]) .bg-slate-50,
+html:not([data-theme="dark"]) .bg-slate-100 {
+  background-color: #ffffff !important;
 }
 
 html[data-density="compact"] {

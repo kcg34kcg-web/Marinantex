@@ -324,13 +324,17 @@ export function OfficeTeamPanel({ activeRole, initialThreadId }: OfficeTeamPanel
           }),
         });
 
-        const payload = (await response.json()) as { error?: string };
+        const payload = (await response.json()) as { error?: string; threadId?: string };
         if (!response.ok) {
           setStatusMessage(payload.error ?? 'Tüm ofis duyurusu gönderilemedi.');
           return;
         }
 
         setNewMessage('');
+        if (payload.threadId) {
+          setSelectedThreadId(payload.threadId);
+          await loadThreads();
+        }
         setStatusMessage('Duyuru tüm ofise gönderildi.');
         return;
       }
@@ -862,27 +866,6 @@ export function OfficeTeamPanel({ activeRole, initialThreadId }: OfficeTeamPanel
                     ))}
                   </ul>
                 )}
-              </div>
-
-              <div className="rounded-md border border-border bg-slate-50 p-3 text-sm text-slate-700">
-                <p className="font-medium text-slate-800">Planlanan gönderim tipleri</p>
-                <ul className="mt-2 space-y-2">
-                  <li className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-2.5 py-2">
-                    <span>• Bireysel mesaj (1:1)</span>
-                    <span className="text-xs text-slate-500">DM</span>
-                  </li>
-                  <li className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-2.5 py-2">
-                    <span>• Role mesaj (ör. #Asistanlar)</span>
-                    <span className="text-xs text-slate-500">ROL</span>
-                  </li>
-                  <li className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-2.5 py-2">
-                    <span>• Tüm ofise mesaj</span>
-                    <span className="text-xs text-slate-500">YAYIN</span>
-                  </li>
-                </ul>
-                <p className="mt-3 text-xs text-slate-500">
-                  Bu rolde yayın yetkisi: {canBroadcast ? 'Var (tüm ofise mesaj açılacak)' : 'Sınırlı (kişi/rol mesajı)'}
-                </p>
               </div>
 
               {statusMessage ? (

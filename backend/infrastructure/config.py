@@ -368,6 +368,10 @@ class Settings(BaseSettings):
     """When True, embedding requests bypass remote providers and always use deterministic local fallback.
     Useful for development environments with exhausted provider quota."""
 
+    embedding_auto_resize_to_target: bool = False
+    """When True, provider vectors with mismatched dimension are resized to EMBEDDING_DIMENSIONS.
+    Useful for local OpenAI-compatible endpoints that do not support explicit dimensions."""
+
     embedding_model_lock_enforced: bool = True
     """When True, runtime rejects EMBEDDING_MODEL values that do not match the Turkish benchmark lock file."""
 

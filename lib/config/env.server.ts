@@ -8,6 +8,8 @@ const serverEnvSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_SERVICE_KEY: z.string().min(1).optional(),
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
+  GEMINI_API_KEY: z.string().min(1).optional(),
+  GOOGLE_API_KEY: z.string().min(1).optional(),
   COHERE_API_KEY: z.string().min(1).optional(),
   OPENAI_API_KEY: z.string().min(1).optional(),
 });
@@ -19,12 +21,22 @@ const parsed = serverEnvSchema.parse({
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
   SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY,
   GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+  GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
   COHERE_API_KEY: process.env.COHERE_API_KEY,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
 });
 
+const resolvedGoogleApiKey =
+  parsed.GOOGLE_GENERATIVE_AI_API_KEY ?? parsed.GEMINI_API_KEY ?? parsed.GOOGLE_API_KEY;
+
+if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY && resolvedGoogleApiKey) {
+  process.env.GOOGLE_GENERATIVE_AI_API_KEY = resolvedGoogleApiKey;
+}
+
 export const serverEnv = {
   ...parsed,
+  GOOGLE_GENERATIVE_AI_API_KEY: resolvedGoogleApiKey,
   SUPABASE_SERVICE_KEY: parsed.SUPABASE_SERVICE_ROLE_KEY ?? parsed.SUPABASE_SERVICE_KEY ?? '',
 };
 

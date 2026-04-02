@@ -106,6 +106,38 @@ export class DocumentsController {
     return this.documentsService.listVersions(id, req.tenantId!);
   }
 
+  @Get(":id/versions/:versionId")
+  @Roles("OWNER", "ADMIN", "EDITOR", "REVIEWER", "COMMENTER", "VIEWER")
+  @DocumentAccess("view")
+  async getVersion(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Param("versionId") versionId: string,
+  ) {
+    return this.documentsService.getVersionById(id, versionId, req.tenantId!);
+  }
+
+  @Post(":id/versions/:versionId/restore")
+  @Roles("OWNER", "ADMIN", "EDITOR", "REVIEWER")
+  @DocumentAccess("edit")
+  async restoreVersion(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Param("versionId") versionId: string,
+  ) {
+    return this.documentsService.restoreVersion(
+      id,
+      versionId,
+      req.tenantId!,
+      req.user!.sub,
+      {
+        requestId: this.header(req, "x-request-id"),
+        ipAddress: req.ip,
+        userAgent: this.header(req, "user-agent"),
+      },
+    );
+  }
+
   @Get(":id/locks/current")
   @Roles("OWNER", "ADMIN", "EDITOR", "REVIEWER", "COMMENTER", "VIEWER")
   @DocumentAccess("view")

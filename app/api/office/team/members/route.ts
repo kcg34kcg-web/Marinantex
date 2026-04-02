@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/utils/supabase/admin';
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
+import { resolveInternalUserBureauScope } from '@/lib/dashboard/client-access';
 
 export async function GET() {
   const access = await requireInternalOfficeUser();
@@ -8,9 +9,15 @@ export async function GET() {
   }
 
   const admin = createAdminClient();
+  const scope = await resolveInternalUserBureauScope(admin, access.userId);
+  if (!scope) {
+    return Response.json({ error: 'Büro kapsamı doğrulanamadi.' }, { status: 403 });
+  }
+
   const { data, error } = await admin
     .from('profiles')
     .select('id, full_name, role')
+    .in('id', scope.bureauProfileIds)
     .in('role', ['lawyer', 'assistant'])
     .order('full_name', { ascending: true });
 

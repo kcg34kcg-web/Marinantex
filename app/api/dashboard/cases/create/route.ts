@@ -2,6 +2,7 @@
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { logDashboardAudit } from '@/lib/dashboard/audit';
+import { resolveAccessibleClientIds, resolveInternalUserBureauScope } from '@/lib/dashboard/client-access';
 
 const createCaseSchema = z.object({
   title: z.string().min(3).max(180),
@@ -43,6 +44,10 @@ export async function GET() {
   }
 
   const admin = createAdminClient();
+  const scope = await resolveInternalUserBureauScope(admin, access.userId);
+  if (!scope) {
+    return Response.json({ error: 'Büro kapsamı doğrulanamadi.' }, { status: 403 });
+  }
 
   const [clientsResult, lawyersResult] = await Promise.all([
     admin
@@ -50,7 +55,12 @@ export async function GET() {
       .select('id, full_name, email, file_no, public_ref_code')
       .is('deleted_at', null)
       .order('full_name', { ascending: true }),
-    admin.from('profiles').select('id, full_name').in('role', ['lawyer', 'assistant']).order('full_name', { ascending: true }),
+    admin
+      .from('profiles')
+      .select('id, full_name')
+      .in('id', scope.bureauProfileIds)
+      .in('role', ['lawyer', 'assistant'])
+      .order('full_name', { ascending: true }),
   ]);
 
   if (clientsResult.error?.code === '42P01') {
@@ -58,6 +68,7 @@ export async function GET() {
       .from('profiles')
       .select('id, full_name')
       .eq('role', 'client')
+      .in('id', scope.bureauProfileIds)
       .order('full_name', { ascending: true });
 
     if (fallbackClients.error || lawyersResult.error) {
@@ -83,8 +94,22 @@ export async function GET() {
     return Response.json({ error: 'Dosya form verileri alinamadi.' }, { status: 500 });
   }
 
+  const clients = (clientsResult.data ?? []) as Array<{
+    id: string;
+    full_name: string;
+    email: string | null;
+    file_no: string | null;
+    public_ref_code: string | null;
+  }>;
+  const accessibleClientIds = await resolveAccessibleClientIds(admin, {
+    clientIds: clients.map((item) => item.id),
+    bureauId: scope.bureauId,
+    bureauProfileIds: scope.bureauProfileIds,
+  });
+  const scopedClients = clients.filter((item) => accessibleClientIds.has(item.id));
+
   return Response.json({
-    clients: (clientsResult.data ?? []).map((item) => ({
+    clients: scopedClients.map((item) => ({
       id: item.id,
       fullName: item.full_name,
       email: item.email,
@@ -111,6 +136,10 @@ export async function POST(request: Request) {
 
   const payload = parsed.data;
   const admin = createAdminClient();
+  const scope = await resolveInternalUserBureauScope(admin, access.userId);
+  if (!scope) {
+    return Response.json({ error: 'Büro kapsamı doğrulanamadi.' }, { status: 403 });
+  }
   let createdClientCandidate = false;
 
   const normalizedClientDetails = payload.clientDetails
@@ -134,6 +163,7 @@ export async function POST(request: Request) {
       const firstLawyer = await admin
         .from('profiles')
         .select('id')
+        .in('id', scope.bureauProfileIds)
         .eq('role', 'lawyer')
         .order('created_at', { ascending: true })
         .limit(1)
@@ -146,6 +176,7 @@ export async function POST(request: Request) {
     .from('profiles')
     .select('id')
     .eq('id', resolvedLawyerId)
+    .in('id', scope.bureauProfileIds)
     .in('role', ['lawyer', 'assistant'])
     .maybeSingle();
 
@@ -162,18 +193,30 @@ export async function POST(request: Request) {
   const clientsTableAvailable = clientsTableProbe.error?.code !== '42P01';
 
   if (clientsTableAvailable && selectedClientIds.length > 0) {
-    const linkedClients = await admin
-      .from('clients')
+    const accessibleClientIds = await resolveAccessibleClientIds(admin, {
+      clientIds: selectedClientIds,
+      bureauId: scope.bureauId,
+      bureauProfileIds: scope.bureauProfileIds,
+    });
+
+    if (accessibleClientIds.size !== selectedClientIds.length) {
+      return Response.json({ error: 'Seçilen müvekkillerden en az biri geçersiz.' }, { status: 400 });
+    }
+  } else if (!clientsTableAvailable && selectedClientIds.length > 0) {
+    const legacyClientProfiles = await admin
+      .from('profiles')
       .select('id')
       .in('id', selectedClientIds)
-      .is('deleted_at', null);
+      .in('id', scope.bureauProfileIds)
+      .eq('role', 'client');
 
-    if (linkedClients.error || (linkedClients.data ?? []).length !== selectedClientIds.length) {
+    if (legacyClientProfiles.error || (legacyClientProfiles.data ?? []).length !== selectedClientIds.length) {
       return Response.json({ error: 'Seçilen müvekkillerden en az biri geçersiz.' }, { status: 400 });
     }
   }
 
   const resolvedCaseCode = payload.autoCode ? generateCaseCode() : payload.caseCode ?? null;
+  const nowIso = new Date().toISOString();
   const normalizedTags = payload.tags
     .map((item) => item.trim())
     .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index);
@@ -189,12 +232,13 @@ export async function POST(request: Request) {
       status: payload.status,
       lawyer_id: resolvedLawyerId,
       client_id: payload.clientId ?? null,
-      updated_at: new Date().toISOString(),
+      bureau_id: scope.bureauId,
+      updated_at: nowIso,
     })
     .select('id, title, case_code, file_no, tags, client_display_name, status, updated_at')
     .single();
 
-  const caseInsertResult =
+  const fallbackInsertWithBureau =
     caseInsert.error?.code === '42703'
       ? await admin
           .from('cases')
@@ -203,11 +247,27 @@ export async function POST(request: Request) {
             status: payload.status,
             lawyer_id: resolvedLawyerId,
             client_id: payload.clientId ?? null,
-            updated_at: new Date().toISOString(),
+            bureau_id: scope.bureauId,
+            updated_at: nowIso,
           })
           .select('id, title, status, updated_at')
           .single()
       : caseInsert;
+
+  const caseInsertResult =
+    fallbackInsertWithBureau.error?.code === '42703'
+      ? await admin
+          .from('cases')
+          .insert({
+            title: payload.title,
+            status: payload.status,
+            lawyer_id: resolvedLawyerId,
+            client_id: payload.clientId ?? null,
+            updated_at: nowIso,
+          })
+          .select('id, title, status, updated_at')
+          .single()
+      : fallbackInsertWithBureau;
 
   const data = caseInsertResult.data as
     | {

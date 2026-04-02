@@ -11,7 +11,6 @@ export function PortalOtpGate() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = searchParams.get('next') ?? '/portal';
-  const [email, setEmail] = useState('muvekkil@example.com');
   const [sessionId, setSessionId] = useState('');
   const [code, setCode] = useState('');
   const [demoCode, setDemoCode] = useState<string | null>(null);
@@ -22,7 +21,7 @@ export function PortalOtpGate() {
     const response = await fetch('/api/portal/otp/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({}),
     });
 
     if (!response.ok) {
@@ -30,10 +29,10 @@ export function PortalOtpGate() {
       return;
     }
 
-    const data = (await response.json()) as { sessionId: string; demoOtpCode: string };
+    const data = (await response.json()) as { sessionId: string; demoOtpCode?: string };
     setSessionId(data.sessionId);
-    setDemoCode(data.demoOtpCode);
-    setMessage('OTP gönderildi. Demo kodu ekranda gösteriliyor.');
+    setDemoCode(data.demoOtpCode ?? null);
+    setMessage(data.demoOtpCode ? 'OTP gönderildi. Demo kodu ekranda gösteriliyor.' : 'OTP gönderildi.');
   }
 
   async function verifyOtp() {
@@ -60,7 +59,6 @@ export function PortalOtpGate() {
         <CardTitle>Portal Güvenlik Doğrulaması (2FA)</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="E-posta" />
         <Button type="button" onClick={sendOtp}>
           OTP Gönder
         </Button>

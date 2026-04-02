@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -10,7 +10,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CalendarWorkspace } from '@/components/dashboard/calendar-workspace';
 import { formatDateTR } from '@/lib/date';
 import { fetchDashboardCases } from '@/lib/queries';
 
@@ -108,8 +107,21 @@ function getStatusVariant(status: TaskListItem['status']): 'blue' | 'orange' | '
 
 function getPriorityLabel(priority: TaskListItem['priority']) {
   if (priority === 'high') return 'Acil';
-  if (priority === 'low') return 'Dusuk';
-  return 'Normal';
+  if (priority === 'low') return 'Vakti Olan';
+  return 'Ortalama';
+}
+
+function getPriorityVariant(priority: TaskListItem['priority']): 'critical' | 'blue' | 'success' {
+  if (priority === 'high') return 'critical';
+  if (priority === 'low') return 'success';
+  return 'blue';
+}
+
+function isTaskOverdue(task: TaskListItem) {
+  if (task.status === 'done' || !task.dueAt) return false;
+  const dueAtTs = new Date(task.dueAt).getTime();
+  if (!Number.isFinite(dueAtTs)) return false;
+  return dueAtTs < Date.now();
 }
 
 async function fetchDashboardTasks(): Promise<{ items: TaskListItem[] }> {
@@ -123,7 +135,7 @@ async function fetchDashboardTasks(): Promise<{ items: TaskListItem[] }> {
   };
 }
 
-export default function DashboardTasksPage() {
+function DashboardTasksPageContent() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -132,6 +144,7 @@ export default function DashboardTasksPage() {
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | TaskListItem['status']>('all');
   const [priorityFilter, setPriorityFilter] = useState<'all' | TaskListItem['priority']>('all');
+  const [overdueOnly, setOverdueOnly] = useState(false);
   const [entryMode, setEntryMode] = useState<TaskEntryMode>('quick');
   const [modalOpen, setModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -213,6 +226,9 @@ export default function DashboardTasksPage() {
         if (priorityFilter !== 'all' && task.priority !== priorityFilter) {
           return false;
         }
+        if (overdueOnly && !isTaskOverdue(task)) {
+          return false;
+        }
         if (!query.trim()) {
           return true;
         }
@@ -230,7 +246,7 @@ export default function DashboardTasksPage() {
 
         return haystack.includes(query.trim().toLowerCase());
       }),
-    [priorityFilter, query, statusFilter, tasks]
+    [overdueOnly, priorityFilter, query, statusFilter, tasks]
   );
 
   const stats = useMemo(
@@ -239,6 +255,10 @@ export default function DashboardTasksPage() {
       open: tasks.filter((task) => task.status === 'open').length,
       inProgress: tasks.filter((task) => task.status === 'in_progress').length,
       done: tasks.filter((task) => task.status === 'done').length,
+      highPriority: tasks.filter((task) => task.priority === 'high').length,
+      normalPriority: tasks.filter((task) => task.priority === 'normal').length,
+      lowPriority: tasks.filter((task) => task.priority === 'low').length,
+      overdue: tasks.filter((task) => isTaskOverdue(task)).length,
     }),
     [tasks]
   );
@@ -494,6 +514,34 @@ export default function DashboardTasksPage() {
             </div>
           </div>
 
+          <div className="grid gap-3 md:grid-cols-4">
+            <button
+              type="button"
+              onClick={() => setOverdueOnly((prev) => !prev)}
+              className={`rounded-xl border px-3 py-2 text-left text-sm transition ${
+                overdueOnly
+                  ? 'border-red-400 bg-red-100 ring-2 ring-red-200'
+                  : 'border-red-300 bg-red-50 hover:bg-red-100'
+              }`}
+              aria-pressed={overdueOnly}
+            >
+              <p className="text-xs text-red-700">Geciken</p>
+              <p className="text-xl font-semibold text-red-900">{isTasksLoading ? '...' : stats.overdue}</p>
+            </button>
+            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm">
+              <p className="text-xs text-red-700">Acil</p>
+              <p className="text-xl font-semibold text-red-900">{isTasksLoading ? '...' : stats.highPriority}</p>
+            </div>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
+              <p className="text-xs text-blue-700">Ortalama</p>
+              <p className="text-xl font-semibold text-blue-900">{isTasksLoading ? '...' : stats.normalPriority}</p>
+            </div>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
+              <p className="text-xs text-emerald-700">Vakti Olan</p>
+              <p className="text-xl font-semibold text-emerald-900">{isTasksLoading ? '...' : stats.lowPriority}</p>
+            </div>
+          </div>
+
           <div className="grid gap-3 md:grid-cols-[1fr_220px_220px]">
             <Input
               placeholder="Gorev, dosya veya sorumlu adina gore ara"
@@ -519,9 +567,26 @@ export default function DashboardTasksPage() {
             >
               <option value="all">Tum oncelikler</option>
               <option value="high">Acil</option>
-              <option value="normal">Normal</option>
-              <option value="low">Dusuk</option>
+              <option value="normal">Ortalama</option>
+              <option value="low">Vakti Olan</option>
             </select>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={overdueOnly ? 'destructive' : 'outline'}
+              onClick={() => setOverdueOnly((prev) => !prev)}
+            >
+              {overdueOnly ? 'Geciken Filtresi Acik' : 'Sadece Geciken'}
+              {!isTasksLoading ? ` (${stats.overdue})` : ''}
+            </Button>
+            {overdueOnly ? (
+              <Button type="button" size="sm" variant="ghost" onClick={() => setOverdueOnly(false)}>
+                Filtreyi Kapat
+              </Button>
+            ) : null}
           </div>
 
           {statusMessage ? <p className="text-xs text-slate-600">{statusMessage}</p> : null}
@@ -556,34 +621,46 @@ export default function DashboardTasksPage() {
                       </td>
                     </tr>
                   ) : (
-                    filteredTasks.map((task) => (
-                      <tr key={task.id} className="border-t border-border hover:bg-slate-50/60">
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-slate-900">{task.title}</p>
-                          {task.description ? <p className="mt-1 line-clamp-2 text-xs text-slate-500">{task.description}</p> : null}
-                        </td>
-                        <td className="px-4 py-3">
-                          {task.caseId && task.caseTitle ? (
-                            <Link href={`/dashboard/cases/${task.caseId}` as Route} className="text-blue-600 hover:underline">
-                              {task.caseTitle}
-                            </Link>
-                          ) : (
-                            <span className="text-slate-500">Bagli dosya yok</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant={getStatusVariant(task.status)}>{getStatusLabel(task.status)}</Badge>
-                        </td>
-                        <td className="px-4 py-3">{getPriorityLabel(task.priority)}</td>
-                        <td className="px-4 py-3">{task.assignedName ?? 'Atanmamis'}</td>
-                        <td className="px-4 py-3">
-                          {TASK_DEADLINE_TYPE_OPTIONS.find((option) => option.value === task.deadlineType)?.label ?? 'Genel Son Tarih'}
-                        </td>
-                        <td className="px-4 py-3" suppressHydrationWarning>
-                          {task.dueAt ? formatDateTR(task.dueAt) : '-'}
-                        </td>
-                      </tr>
-                    ))
+                    filteredTasks.map((task) => {
+                      const taskOverdue = isTaskOverdue(task);
+                      return (
+                        <tr key={task.id} className={`border-t border-border ${taskOverdue ? 'bg-red-50/40 hover:bg-red-50/70' : 'hover:bg-slate-50/60'}`}>
+                          <td className="px-4 py-3">
+                            <p className="font-medium text-slate-900">{task.title}</p>
+                            {task.description ? <p className="mt-1 line-clamp-2 text-xs text-slate-500">{task.description}</p> : null}
+                          </td>
+                          <td className="px-4 py-3">
+                            {task.caseId && task.caseTitle ? (
+                              <Link href={`/dashboard/cases/${task.caseId}` as Route} className="text-blue-600 hover:underline">
+                                {task.caseTitle}
+                              </Link>
+                            ) : (
+                              <span className="text-slate-500">Bagli dosya yok</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant={getStatusVariant(task.status)}>{getStatusLabel(task.status)}</Badge>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant={getPriorityVariant(task.priority)}>{getPriorityLabel(task.priority)}</Badge>
+                          </td>
+                          <td className="px-4 py-3">{task.assignedName ?? 'Atanmamis'}</td>
+                          <td className="px-4 py-3">
+                            {TASK_DEADLINE_TYPE_OPTIONS.find((option) => option.value === task.deadlineType)?.label ?? 'Genel Son Tarih'}
+                          </td>
+                          <td className="px-4 py-3" suppressHydrationWarning>
+                            {task.dueAt ? (
+                              <div className="flex flex-col gap-1">
+                                <span>{formatDateTR(task.dueAt)}</span>
+                                {taskOverdue ? <Badge variant="critical">Gecikti</Badge> : null}
+                              </div>
+                            ) : (
+                              '-'
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -591,16 +668,6 @@ export default function DashboardTasksPage() {
           )}
         </CardContent>
       </Card>
-
-      <div className="space-y-2">
-        <h2 className="text-lg font-semibold text-slate-900">Takvim Operasyonlari</h2>
-        <p className="text-sm text-slate-500">
-          Gorevler sayfasindan ozel gun, durusma ve gorev senkron kayitlarini yonetebilirsiniz. Burada eklenen kayitlar Takvim ekraninda
-          gercek takvim gorunumune yansir.
-        </p>
-      </div>
-
-      <CalendarWorkspace mode="full" />
 
       {modalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -687,8 +754,8 @@ export default function DashboardTasksPage() {
                     onChange={(event) => setTaskPriority(event.target.value as 'low' | 'normal' | 'high')}
                     className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
                   >
-                    <option value="low">Dusuk</option>
-                    <option value="normal">Normal</option>
+                    <option value="low">Vakti Olan</option>
+                    <option value="normal">Ortalama</option>
                     <option value="high">Acil</option>
                   </select>
                 </div>
@@ -895,5 +962,13 @@ export default function DashboardTasksPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+export default function DashboardTasksPage() {
+  return (
+    <Suspense fallback={<div className="p-4 text-sm text-slate-500">Gorevler yukleniyor...</div>}>
+      <DashboardTasksPageContent />
+    </Suspense>
   );
 }

@@ -92,7 +92,7 @@ export function CosmographLiveGraph({ caseId }: { caseId: string }) {
   const parentRef = useRef<HTMLDivElement | null>(null);
   const contradictionsRef = useRef<HTMLDivElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
-  const cosmographRef = useRef<CosmographRef>(undefined);
+  const cosmographRef = useRef<CosmographRef | null>(null);
   const graphRebuildWaitersRef = useRef<Array<() => void>>([]);
   const [layoutNodes, setLayoutNodes] = useState<Record<string, { x: number; y: number }>>({});
   const [layoutMeta, setLayoutMeta] = useState<WorkerLayoutResult['meta'] | null>(null);

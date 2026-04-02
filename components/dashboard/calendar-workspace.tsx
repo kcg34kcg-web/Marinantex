@@ -1893,7 +1893,7 @@ export function CalendarWorkspace({ mode = 'full' }: CalendarWorkspaceProps) {
           ) : isError ? (
             <p className="text-sm text-orange-600">{error instanceof Error ? error.message : 'Takvim verisi alinamadi.'}</p>
           ) : isCalendarOnly ? (
-            <div className="grid gap-4 xl:grid-cols-[260px_minmax(0,1fr)_320px]">
+            <div className="grid gap-4 xl:grid-cols-[260px_320px]">
               <aside className="space-y-3">
                 <section className="rounded-2xl border border-slate-200 bg-white p-3">
                   <div className="mb-3 flex items-center justify-between">
@@ -2000,7 +2000,8 @@ export function CalendarWorkspace({ mode = 'full' }: CalendarWorkspaceProps) {
                 </section>
               </aside>
 
-              <section className="rounded-2xl border border-slate-200 bg-white p-3">
+              {false && (
+                <section className="rounded-2xl border border-slate-200 bg-white p-3">
                 {viewMode === 'day' ? (
                   dayHourGroups.length === 0 ? (
                     <p className="text-sm text-slate-500">Secili gun icin takvim kaydi bulunmuyor.</p>
@@ -2192,7 +2193,8 @@ export function CalendarWorkspace({ mode = 'full' }: CalendarWorkspaceProps) {
                     </div>
                   </div>
                 )}
-              </section>
+                </section>
+              )}
 
               <aside className="space-y-3">
                 <section className="rounded-2xl border border-slate-200 bg-white p-3">

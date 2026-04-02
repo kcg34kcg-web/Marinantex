@@ -582,8 +582,8 @@ function buildLiveCandidates(params: {
       fallback: requestedTab,
     });
     const sourceName = inferSourceName({
-      issuingAuthority: doc.issuing_authority,
-      sourceId: doc.source_id,
+      issuingAuthority: doc.issuing_authority ?? undefined,
+      sourceId: doc.source_id ?? undefined,
       inferredTab,
     });
     const decisionNo = doc.decision_no ?? bestCitation?.decision_no;
@@ -623,13 +623,13 @@ function buildLiveCandidates(params: {
       doi: inferredTab === 'akademik' ? inferDoi(doc.source_id, title) : null,
       tags: buildTags({
         inferredTab,
-        sourceType: doc.source_type,
-        issuingAuthority: doc.issuing_authority,
+        sourceType: doc.source_type ?? undefined,
+        issuingAuthority: doc.issuing_authority ?? undefined,
         articleNo: doc.article_no,
         clauseNo: doc.clause_no,
         query,
       }),
-      url_original: inferSourceUrl(inferredTab, doc.source_id, sourceName),
+      url_original: inferSourceUrl(inferredTab, doc.source_id ?? undefined, sourceName),
       created_at: nowIso,
       updated_at: nowIso,
     };

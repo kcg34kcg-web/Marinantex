@@ -5,6 +5,7 @@ import {
   cancelScheduledSendSchema,
   createMailLabelSchema,
   createDraftSchema,
+  getThreadProductivitySchema,
   linkThreadToMatterSchema,
   scheduledMailSendJobSchema,
   scheduleSendMailSchema,
@@ -13,6 +14,7 @@ import {
   listThreadsSchema,
   markMessageReadSchema,
   toggleMessageLabelSchema,
+  updateThreadProductivitySchema,
   updateMessageFlagsSchema,
   updateMessageStateSchema,
   type LinkThreadToMatterInput,
@@ -60,6 +62,11 @@ type ThreadListItem = {
   updatedAt: Date;
   kind: "THREAD" | "DRAFT";
   draftId: string | null;
+  isPinned: boolean;
+  pinnedAt: Date | null;
+  readLaterAt: Date | null;
+  reminderAt: Date | null;
+  note: string | null;
   mailbox: {
     id: string;
     email: string;
@@ -145,6 +152,15 @@ export class MailThreadService {
             provider: true
           }
         },
+        productivity: {
+          select: {
+            isPinned: true,
+            pinnedAt: true,
+            readLaterAt: true,
+            reminderAt: true,
+            note: true
+          }
+        },
         messages: {
           where: messageFilter,
           take: 1,
@@ -179,6 +195,11 @@ export class MailThreadService {
       updatedAt: thread.updatedAt,
       kind: "THREAD",
       draftId: null,
+      isPinned: thread.productivity?.isPinned ?? false,
+      pinnedAt: thread.productivity?.pinnedAt ?? null,
+      readLaterAt: thread.productivity?.readLaterAt ?? null,
+      reminderAt: thread.productivity?.reminderAt ?? null,
+      note: thread.productivity?.note ?? null,
       mailbox: thread.mailbox,
       messages: thread.messages.map((message) => ({
         id: message.id,
@@ -263,6 +284,11 @@ export class MailThreadService {
         updatedAt: draft.updatedAt,
         kind: "DRAFT",
         draftId: draft.id,
+        isPinned: false,
+        pinnedAt: null,
+        readLaterAt: null,
+        reminderAt: null,
+        note: null,
         mailbox: draft.mailbox,
         messages: [
           {
@@ -309,6 +335,16 @@ export class MailThreadService {
             email: true,
             displayName: true,
             provider: true
+          }
+        },
+        productivity: {
+          select: {
+            id: true,
+            isPinned: true,
+            pinnedAt: true,
+            readLaterAt: true,
+            reminderAt: true,
+            note: true
           }
         },
         matter: {
@@ -1117,6 +1153,143 @@ export class MailThreadService {
       scheduledDraftId: draft.id,
       skipped: false as const,
       ...sent
+    };
+  }
+
+  async getThreadProductivity(tenantId: string, threadId: string) {
+    const input = getThreadProductivitySchema.parse({ tenantId, threadId });
+
+    const thread = await this.prisma.mailThread.findFirst({
+      where: {
+        id: input.threadId,
+        tenantId: input.tenantId,
+        deletedAt: null
+      },
+      select: {
+        id: true,
+        productivity: {
+          select: {
+            isPinned: true,
+            pinnedAt: true,
+            readLaterAt: true,
+            reminderAt: true,
+            note: true
+          }
+        }
+      }
+    });
+
+    if (!thread) {
+      throw new NotFoundError("Thread bulunamadi");
+    }
+
+    return {
+      threadId: thread.id,
+      isPinned: thread.productivity?.isPinned ?? false,
+      pinnedAt: thread.productivity?.pinnedAt ?? null,
+      readLaterAt: thread.productivity?.readLaterAt ?? null,
+      reminderAt: thread.productivity?.reminderAt ?? null,
+      note: thread.productivity?.note ?? null
+    };
+  }
+
+  async updateThreadProductivity(actorUserId: string, payload: unknown) {
+    const input = updateThreadProductivitySchema.parse(payload);
+
+    const thread = await this.prisma.mailThread.findFirst({
+      where: {
+        id: input.threadId,
+        tenantId: input.tenantId,
+        deletedAt: null
+      },
+      select: {
+        id: true,
+        productivity: {
+          select: {
+            isPinned: true,
+            pinnedAt: true,
+            readLaterAt: true,
+            reminderAt: true,
+            note: true
+          }
+        }
+      }
+    });
+
+    if (!thread) {
+      throw new NotFoundError("Thread bulunamadi");
+    }
+
+    const previous = {
+      isPinned: thread.productivity?.isPinned ?? false,
+      pinnedAt: thread.productivity?.pinnedAt ?? null,
+      readLaterAt: thread.productivity?.readLaterAt ?? null,
+      reminderAt: thread.productivity?.reminderAt ?? null,
+      note: thread.productivity?.note ?? null
+    };
+
+    const nextIsPinned = input.isPinned ?? previous.isPinned;
+    const nextPinnedAt =
+      input.isPinned === undefined
+        ? previous.pinnedAt
+        : input.isPinned
+          ? previous.pinnedAt ?? new Date()
+          : null;
+    const nextReadLaterAt =
+      input.readLaterAt === undefined ? previous.readLaterAt : input.readLaterAt ? new Date(input.readLaterAt) : null;
+    const nextReminderAt =
+      input.reminderAt === undefined ? previous.reminderAt : input.reminderAt ? new Date(input.reminderAt) : null;
+    const nextNote = input.note === undefined ? previous.note : input.note;
+
+    const updated = await this.prisma.mailThreadProductivity.upsert({
+      where: {
+        threadId: thread.id
+      },
+      create: {
+        tenantId: input.tenantId,
+        threadId: thread.id,
+        isPinned: nextIsPinned,
+        pinnedAt: nextPinnedAt,
+        readLaterAt: nextReadLaterAt,
+        reminderAt: nextReminderAt,
+        note: nextNote ?? null,
+        createdById: actorUserId
+      },
+      update: {
+        ...(input.isPinned === undefined
+          ? {}
+          : {
+              isPinned: nextIsPinned,
+              pinnedAt: nextPinnedAt
+            }),
+        ...(input.readLaterAt === undefined ? {} : { readLaterAt: nextReadLaterAt }),
+        ...(input.reminderAt === undefined ? {} : { reminderAt: nextReminderAt }),
+        ...(input.note === undefined ? {} : { note: nextNote ?? null })
+      },
+      select: {
+        isPinned: true,
+        pinnedAt: true,
+        readLaterAt: true,
+        reminderAt: true,
+        note: true
+      }
+    });
+
+    await this.auditService.log({
+      tenantId: input.tenantId,
+      actorUserId,
+      action: "mail.thread.productivity_updated",
+      resourceType: "mail_thread",
+      resourceId: thread.id,
+      metadata: {
+        previous,
+        current: updated
+      }
+    });
+
+    return {
+      threadId: thread.id,
+      ...updated
     };
   }
 

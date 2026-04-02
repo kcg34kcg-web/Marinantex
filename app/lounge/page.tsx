@@ -1,13 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/utils/supabase/client';
 import { Loader2, CheckCircle2, Sparkles, BrainCircuit, ArrowRight } from 'lucide-react';
 import LoungeContainer from '@/components/lounge/LoungeContainer'; 
 import toast from 'react-hot-toast';
 
-export default function LoungePage() {
+function navigate(router: ReturnType<typeof useRouter>, href: string) {
+  router.push(href as never);
+}
+
+function LoungePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = createClient();
@@ -22,8 +26,8 @@ export default function LoungePage() {
   const [statusText, setStatusText] = useState('Sistem hazırlanıyor...');
 
   const goToResult = () => {
-    if (questionId) router.push(`/questions/${questionId}`);
-    else router.push('/my-questions'); // Fallback
+    if (questionId) navigate(router, `/questions/${questionId}`);
+    else navigate(router, '/my-questions'); // Fallback
   };
 
   // 1. GÖRSEL İLERLEME (Fake Progress - Psikolojik)
@@ -250,5 +254,13 @@ export default function LoungePage() {
       `}</style>
 
     </div>
+  );
+}
+
+export default function LoungePage() {
+  return (
+    <Suspense fallback={<div className="p-4 text-sm text-slate-500">Lounge yükleniyor...</div>}>
+      <LoungePageContent />
+    </Suspense>
   );
 }

@@ -8,28 +8,49 @@ import {
 import { JwtService } from "@nestjs/jwt";
 import type { JwtPayload } from "../../auth/types/jwt-payload.type";
 import type { AuthenticatedRequest } from "../types/authenticated-request.type";
+import { ACCESS_TOKEN_COOKIE, readCookie } from "../utils/cookies";
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(private readonly jwtService: JwtService) {}
 
+  private async verifyToken(token: string): Promise<JwtPayload | null> {
+    try {
+      return await this.jwtService.verifyAsync<JwtPayload>(token);
+    } catch {
+      return null;
+    }
+  }
+
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const authHeader = request.headers.authorization;
-
-    if (!authHeader?.startsWith("Bearer ")) {
-      throw new UnauthorizedException("Missing or invalid Authorization header");
-    }
-
-    const token = authHeader.slice("Bearer ".length).trim();
-    if (!token) {
+    const tokenFromHeader = authHeader?.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length).trim()
+      : undefined;
+    const tokenFromCookie = readCookie(
+      request.headers.cookie,
+      ACCESS_TOKEN_COOKIE,
+    );
+    if (!tokenFromHeader && !tokenFromCookie) {
       throw new UnauthorizedException("Missing bearer token");
     }
 
-    let payload: JwtPayload;
-    try {
-      payload = await this.jwtService.verifyAsync<JwtPayload>(token);
-    } catch {
+    const payloadFromHeader = tokenFromHeader
+      ? await this.verifyToken(tokenFromHeader)
+      : null;
+    const payloadFromCookie = tokenFromCookie
+      ? await this.verifyToken(tokenFromCookie)
+      : null;
+    let payload = payloadFromHeader || payloadFromCookie;
+    if (request.tenantId) {
+      if (payloadFromHeader?.tenantId === request.tenantId) {
+        payload = payloadFromHeader;
+      } else if (payloadFromCookie?.tenantId === request.tenantId) {
+        payload = payloadFromCookie;
+      }
+    }
+    if (!payload) {
       throw new UnauthorizedException("Invalid token");
     }
 

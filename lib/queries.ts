@@ -1,5 +1,6 @@
 import { createClient } from '@/utils/supabase/client';
 import type { CaseStatus } from '@/types';
+import { fetchPortalWithSessionRefresh } from '@/lib/portal/client-fetch';
 
 interface CaseRowLite {
   id: string;
@@ -11,13 +12,6 @@ interface CaseUpdateRowLite {
   id: string;
   case_id: string;
   date: string;
-}
-
-interface PortalCaseRowLite {
-  id: string;
-  title: string;
-  status: CaseStatus;
-  updated_at: string;
 }
 
 interface DashboardCaseRowLite {
@@ -169,35 +163,46 @@ export async function fetchDashboardData(): Promise<DashboardData> {
 }
 
 export async function fetchPortalCases(): Promise<PortalCaseItem[]> {
-  const supabase = createClient();
+  const response = await fetchPortalWithSessionRefresh('/api/portal/cases', {
+    cache: 'no-store',
+  });
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+  const responseText = await response.text();
+  let payload:
+    | {
+        items?: Array<{
+          id: string;
+          title: string;
+          status: CaseStatus;
+          updatedAt: string;
+        }>;
+        error?: string;
+      }
+    | undefined;
 
-  if (userError || !user) {
-    throw new Error('Kullanıcı oturumu doğrulanamadı.');
+  if (responseText) {
+    try {
+      payload = JSON.parse(responseText) as {
+        items?: Array<{
+          id: string;
+          title: string;
+          status: CaseStatus;
+          updatedAt: string;
+        }>;
+        error?: string;
+      };
+    } catch {
+      payload = undefined;
+    }
   }
 
-  const { data, error } = await supabase
-    .from('cases')
-    .select('id, title, status, updated_at')
-    .eq('client_id', user.id)
-    .order('updated_at', { ascending: false });
-
-  if (error) {
-    throw new Error('Paylaşılan dosyalar alınamadı.');
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Paylaşılan dosyalar alınamadı.');
   }
 
-  const rows = (data as PortalCaseRowLite[] | null) ?? [];
+  const rows = payload?.items ?? [];
 
-  return rows.map((item) => ({
-    id: item.id,
-    title: item.title,
-    status: item.status,
-    updatedAt: item.updated_at,
-  }));
+  return rows.map((item) => ({ ...item }));
 }
 
 export async function fetchPortalAnnouncements(): Promise<PortalAnnouncementItem[]> {

@@ -1,18 +1,35 @@
-import { getRecentOfficeNotifications, subscribeOfficeNotifications } from '@/lib/office/notifications';
+import {
+  getRecentOfficeNotificationsForAudience,
+  isOfficeNotificationVisibleToAudience,
+  subscribeOfficeNotifications,
+} from '@/lib/office/notifications';
+import { requireInternalOfficeUser } from '@/lib/office/team-access';
 
 export async function GET() {
+  const access = await requireInternalOfficeUser();
+  if (!access.ok) {
+    return Response.json({ error: access.message }, { status: access.status });
+  }
+
+  const audience = {
+    bureauId: access.bureauId,
+    userId: access.userId,
+  };
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      const initial = getRecentOfficeNotifications().slice(0, 10);
+      const initial = getRecentOfficeNotificationsForAudience(audience, 10);
       initial.forEach((event) => {
         controller.enqueue(encoder.encode(`event: notification\ndata: ${JSON.stringify(event)}\n\n`));
       });
 
       unsubscribe = subscribeOfficeNotifications((event) => {
+        if (!isOfficeNotificationVisibleToAudience(event, audience)) {
+          return;
+        }
         controller.enqueue(encoder.encode(`event: notification\ndata: ${JSON.stringify(event)}\n\n`));
       });
 

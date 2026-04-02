@@ -5,17 +5,22 @@ export interface CosmographRef {
 }
 
 interface CosmographProps {
-  points?: Array<Record<string, unknown>>;
-  links?: Array<Record<string, unknown>>;
-  pointLabelBy?: string;
-  onGraphRebuilt?: () => void;
+  points?: unknown;
+  links?: unknown;
+  pointLabelBy?: unknown;
+  onGraphRebuilt?: unknown;
   [key: string]: unknown;
 }
 
 export const Cosmograph = React.forwardRef<CosmographRef, CosmographProps>(function Cosmograph(
-  { points = [], links = [], pointLabelBy = 'label', onGraphRebuilt },
+  rawProps,
   ref,
 ) {
+  const points = Array.isArray(rawProps.points) ? rawProps.points : [];
+  const links = Array.isArray(rawProps.links) ? rawProps.links : [];
+  const pointLabelBy = typeof rawProps.pointLabelBy === 'string' ? rawProps.pointLabelBy : 'label';
+  const onGraphRebuilt = typeof rawProps.onGraphRebuilt === 'function' ? rawProps.onGraphRebuilt : undefined;
+
   React.useImperativeHandle(
     ref,
     () => ({

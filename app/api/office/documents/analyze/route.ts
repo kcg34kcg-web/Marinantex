@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { publishOfficeNotification } from '@/lib/office/notifications';
+import { requireInternalOfficeUser } from '@/lib/office/team-access';
 
 const bodySchema = z.object({
   documentName: z.string().min(1),
@@ -9,10 +10,15 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const access = await requireInternalOfficeUser();
+  if (!access.ok) {
+    return Response.json({ error: access.message }, { status: access.status });
+  }
+
   const parsed = bodySchema.safeParse(await request.json());
 
   if (!parsed.success) {
-    return new Response('Geçersiz belge analizi isteği.', { status: 400 });
+    return Response.json({ error: 'Geçersiz belge analizi isteği.' }, { status: 400 });
   }
 
   const payload = parsed.data;
@@ -32,8 +38,9 @@ export async function POST(request: Request) {
     category: 'documents',
     title: 'Yeni belge işlendi',
     detail: `${payload.documentName} belgesi ${provider} ile işlendi.`,
-    actionUrl: '/office/documents',
+    actionUrl: '/office',
     actionLabel: 'Belgelere Git',
+    bureauId: access.bureauId,
   });
 
   const watermark = null;

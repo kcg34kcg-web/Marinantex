@@ -4,6 +4,10 @@ export type MailListItemViewModel = {
   subject: string | null;
   snippet: string | null;
   unreadCount: number;
+  isPinned: boolean;
+  readLaterAt: string | null;
+  reminderAt: string | null;
+  note: string | null;
   lastMessageAt: string | null;
   sender: string;
   latestMessageIsSensitive: boolean;
@@ -19,6 +23,7 @@ export function MailListItem({
   onToggleChecked,
   onToggleStar,
   onToggleImportant,
+  onTogglePin,
   onActivate,
   onOpen
 }: {
@@ -28,6 +33,7 @@ export function MailListItem({
   onToggleChecked: (threadId: string) => void;
   onToggleStar: (threadId: string) => void;
   onToggleImportant: (threadId: string) => void;
+  onTogglePin: (threadId: string) => void;
   onActivate: (threadId: string) => void;
   onOpen: (threadId: string) => void;
 }) {
@@ -39,8 +45,17 @@ export function MailListItem({
   return (
     <div
       className={`app-mail-row border-b border-slate-100 px-3 py-2 transition ${
-        active ? "bg-brand-50/70" : "bg-white hover:bg-slate-50/80"
+        active ? "bg-blue-50/70" : "bg-white hover:bg-slate-50/80"
       }`}
+      draggable={item.kind === "THREAD"}
+      onDragStart={(event) => {
+        if (item.kind !== "THREAD") {
+          event.preventDefault();
+          return;
+        }
+        event.dataTransfer.setData("application/x-lexoffice-thread-id", item.id);
+        event.dataTransfer.effectAllowed = "move";
+      }}
       style={{
         contentVisibility: "auto",
         containIntrinsicSize: "132px"
@@ -71,6 +86,19 @@ export function MailListItem({
           aria-label="Yıldız durumu değiştir"
         >
           ★
+        </button>
+        <button
+          type="button"
+          className={`mt-0.5 rounded border px-1.5 py-0.5 text-[10px] ${
+            item.isPinned ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-500"
+          }`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onTogglePin(item.id);
+          }}
+          aria-label="Pin durumunu degistir"
+        >
+          📌
         </button>
         <div
           role="button"
@@ -119,6 +147,21 @@ export function MailListItem({
                 {item.latestMessageIsSensitive ? (
                   <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] text-rose-700">
                     Hassas
+                  </span>
+                ) : null}
+                {item.readLaterAt ? (
+                  <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700">
+                    Sonra Oku
+                  </span>
+                ) : null}
+                {item.reminderAt ? (
+                  <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700">
+                    Hatirlatma
+                  </span>
+                ) : null}
+                {item.note ? (
+                  <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-700">
+                    Not
                   </span>
                 ) : null}
               </div>

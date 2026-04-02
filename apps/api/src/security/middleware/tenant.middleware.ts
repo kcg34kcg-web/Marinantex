@@ -1,6 +1,7 @@
 import { Injectable, type NestMiddleware } from "@nestjs/common";
 import type { NextFunction, Response } from "express";
 import type { AuthenticatedRequest } from "../types/authenticated-request.type";
+import { TENANT_ID_COOKIE, readCookie } from "../utils/cookies";
 
 const TENANT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -18,8 +19,13 @@ export class TenantMiddleware implements NestMiddleware {
     }
 
     const rawTenantId = req.headers["x-tenant-id"];
-    const tenantId =
+    const headerTenantId =
       typeof rawTenantId === "string" ? rawTenantId.trim() : undefined;
+    const cookieTenantId = readCookie(req.headers.cookie, TENANT_ID_COOKIE);
+    const tenantId =
+      headerTenantId && cookieTenantId && headerTenantId !== cookieTenantId
+        ? cookieTenantId
+        : headerTenantId || cookieTenantId;
 
     if (!tenantId) {
       res.status(400).json({

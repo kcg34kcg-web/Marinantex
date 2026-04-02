@@ -297,7 +297,7 @@ export default function DashboardNewsPage() {
   const [categoryFilter, setCategoryFilter] = useState<NewsCategory | typeof ALL_FILTER>(ALL_FILTER);
   const [workspaceFilter, setWorkspaceFilter] = useState<WorkspaceTag | typeof ALL_FILTER>(ALL_FILTER);
   const [severityFilter, setSeverityFilter] = useState<NewsSeverity | typeof ALL_FILTER>(ALL_FILTER);
-  const [trustedOnly, setTrustedOnly] = useState(true);
+  const [trustedOnly, setTrustedOnly] = useState(false);
   const [keywordFilter, setKeywordFilter] = useState<string | typeof ALL_FILTER>(ALL_FILTER);
   const [notificationMode, setNotificationMode] = useState<'anlik-kritik' | 'gunluk' | 'haftalik'>('gunluk');
 

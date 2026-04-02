@@ -3,7 +3,7 @@ import Script from 'next/script';
 import { Manrope, Source_Serif_4 } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/providers';
-import { FloatingGavelButton } from '@/components/layout/floating-gavel-button';
+import { AssistantShell } from '@/components/assistant/assistant-shell';
 
 const manrope = Manrope({
   subsets: ['latin'],
@@ -20,6 +20,11 @@ const sourceSerif = Source_Serif_4({
 export const metadata: Metadata = {
   title: 'Babylexit',
   description: 'Yapay zekâ destekli hukuk işletim sistemi',
+  icons: {
+    icon: '/brand/lextopus.svg',
+    shortcut: '/brand/lextopus.svg',
+    apple: '/brand/lextopus.svg',
+  },
 };
 
 const APPEARANCE_STORAGE_KEY = 'babylexit_ui_appearance_v1';
@@ -101,14 +106,46 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   pathname.indexOf('/editor/') === 0 ||
                   pathname === '/social' ||
                   pathname.indexOf('/social/') === 0;
-                var effectiveTheme = isThemeLockedRoute ? 'reading-mode' : normalizedTheme;
+                var isMailRoute =
+                  pathname === '/mail' ||
+                  pathname.indexOf('/mail/') === 0 ||
+                  pathname === '/dashboard/mail' ||
+                  pathname.indexOf('/dashboard/mail/') === 0;
+                var effectiveTheme = isMailRoute ? 'light-mode' : (isThemeLockedRoute ? 'reading-mode' : normalizedTheme);
 
                 root.setAttribute('data-theme', effectiveTheme);
                 localStorage.setItem('${THEME_STORAGE_KEY}', normalizedTheme);
-                if (parsed.fontFamily) root.setAttribute('data-font-family', parsed.fontFamily);
-                if (parsed.fontSize) root.setAttribute('data-font-size', parsed.fontSize);
-                if (parsed.lineHeight) root.setAttribute('data-line-height', parsed.lineHeight);
-                if (parsed.sidebarDensity) root.setAttribute('data-sidebar-density', parsed.sidebarDensity);
+                var allowedFontFamilies = {
+                  inter: true,
+                  system: true,
+                  legalSans: true,
+                  serif: true,
+                  modernSans: true,
+                  mono: true
+                };
+                var allowedFontSizes = { small: true, medium: true, large: true, xl: true };
+                var allowedLineHeights = { compact: true, normal: true, relaxed: true };
+                var allowedSidebarDensity = { comfortable: true, normal: true, compact: true };
+                if (parsed.fontFamily && allowedFontFamilies[parsed.fontFamily]) {
+                  root.setAttribute('data-font-family', parsed.fontFamily);
+                } else {
+                  root.setAttribute('data-font-family', 'system');
+                }
+                if (parsed.fontSize && allowedFontSizes[parsed.fontSize]) {
+                  root.setAttribute('data-font-size', parsed.fontSize);
+                } else {
+                  root.setAttribute('data-font-size', 'medium');
+                }
+                if (parsed.lineHeight && allowedLineHeights[parsed.lineHeight]) {
+                  root.setAttribute('data-line-height', parsed.lineHeight);
+                } else {
+                  root.setAttribute('data-line-height', 'normal');
+                }
+                if (parsed.sidebarDensity && allowedSidebarDensity[parsed.sidebarDensity]) {
+                  root.setAttribute('data-sidebar-density', parsed.sidebarDensity);
+                } else {
+                  root.setAttribute('data-sidebar-density', 'normal');
+                }
                 var contrastLevel = parsed.contrastLevel === 'high' ? 'high' : 'normal';
                 if (typeof parsed.highContrast === 'boolean' && parsed.highContrast) contrastLevel = 'high';
                 root.setAttribute('data-contrast-level', contrastLevel);
@@ -131,7 +168,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         <Providers>
           {children}
-          <FloatingGavelButton />
+          <AssistantShell />
         </Providers>
       </body>
     </html>

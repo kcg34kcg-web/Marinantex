@@ -21,9 +21,9 @@
     "ci": "corepack pnpm --filter @lexoffice/db prisma:generate && corepack pnpm -r typecheck && corepack pnpm -r test && corepack pnpm build && corepack pnpm e2e:smoke"
   },
   "devDependencies": {
+    "@types/node": "^22.13.8",
     "@typescript-eslint/eslint-plugin": "^8.46.3",
     "@typescript-eslint/parser": "^8.46.3",
-    "@types/node": "^22.13.8",
     "eslint": "^9.22.0",
     "husky": "^9.1.7",
     "lint-staged": "^15.5.0",
@@ -35,5 +35,8 @@
     "*.{ts,tsx,js,jsx,json,md}": [
       "prettier --write"
     ]
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.2"
   }
 }

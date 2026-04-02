@@ -3,6 +3,9 @@ export interface ZipReadEntry {
   data: Uint8Array;
 }
 
+const MAX_ZIP_ENTRY_COUNT = 500;
+const MAX_ZIP_TOTAL_BYTES = 16 * 1024 * 1024;
+
 function readUInt16LE(input: Uint8Array, offset: number): number {
   return input[offset]! | (input[offset + 1]! << 8);
 }
@@ -24,8 +27,13 @@ export function readStoredZipEntries(archive: Uint8Array): ZipReadEntry[] {
   const entries: ZipReadEntry[] = [];
   const headerSignature = 0x04034b50;
   let cursor = 0;
+  let totalBytes = 0;
 
   while (cursor + 30 <= archive.length) {
+    if (entries.length >= MAX_ZIP_ENTRY_COUNT) {
+      throw new Error(`UDF arsivi cok fazla dosya iceriyor (>${MAX_ZIP_ENTRY_COUNT}).`);
+    }
+
     const signature = readUInt32LE(archive, cursor);
     if (signature !== headerSignature) {
       break;
@@ -46,6 +54,10 @@ export function readStoredZipEntries(archive: Uint8Array): ZipReadEntry[] {
     const dataStart = fileNameEnd + extraFieldLength;
     const dataEnd = dataStart + compressedSize;
 
+    if (fileNameEnd > archive.length || dataStart > archive.length) {
+      throw new Error("Corrupted ZIP: invalid file header offsets");
+    }
+
     if (dataEnd > archive.length) {
       throw new Error("Corrupted ZIP: entry data exceeds archive length");
     }
@@ -55,6 +67,11 @@ export function readStoredZipEntries(archive: Uint8Array): ZipReadEntry[] {
 
     if (compressedSize !== uncompressedSize) {
       throw new Error(`Compressed size mismatch for ${name}`);
+    }
+
+    totalBytes += uncompressedSize;
+    if (totalBytes > MAX_ZIP_TOTAL_BYTES) {
+      throw new Error(`UDF arsivi cok buyuk (>${MAX_ZIP_TOTAL_BYTES} byte).`);
     }
 
     entries.push({ name, data });

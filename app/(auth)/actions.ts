@@ -2,10 +2,12 @@
 
 import { z } from 'zod';
 import { redirect } from 'next/navigation';
+import { cookies, headers } from 'next/headers';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '../../utils/supabase/admin';
 import type { ActionResult } from '@/types';
 import type { UserRole } from '@/types';
+import { clearPortalSessionCookies, getPortalSessionCookies, revokePortalSessionByRefreshToken } from '@/lib/portal/session';
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -27,6 +29,25 @@ const onboardingSchema = z.object({
   role: z.enum(['lawyer', 'assistant', 'client']),
   nextPath: z.string().optional(),
 });
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || 'http://localhost:4000';
+
+async function bridgeApiLogout(): Promise<void> {
+  const cookieHeader = (await headers()).get('cookie');
+  if (!cookieHeader) return;
+
+  try {
+    await fetch(`${API_BASE_URL}/auth/logout`, {
+      method: 'POST',
+      headers: {
+        Cookie: cookieHeader,
+      },
+      cache: 'no-store',
+    });
+  } catch {
+    // Supabase cikisini bozma: API cookie temizligi best-effort calisir.
+  }
+}
 
 function isSafeRedirect(pathname: string | undefined): pathname is string {
   if (!pathname) {
@@ -260,7 +281,29 @@ export async function signupAction(
 
 export async function logoutAction(): Promise<ActionResult<null>> {
   try {
+    const cookieStore = await cookies();
+    const sessionCookies = getPortalSessionCookies(cookieStore);
     const supabase = await createClient();
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (user && sessionCookies.refreshToken) {
+      const profileResult = await supabase.from('profiles').select('bureau_id').eq('id', user.id).maybeSingle();
+      if (profileResult.data?.bureau_id) {
+        await revokePortalSessionByRefreshToken({
+          refreshToken: sessionCookies.refreshToken,
+          userId: user.id,
+          tenantId: profileResult.data.bureau_id,
+          reason: 'logout',
+        }).catch(() => undefined);
+      }
+    }
+
+    clearPortalSessionCookies(cookieStore);
+
+    await bridgeApiLogout();
     const { error } = await supabase.auth.signOut();
 
     if (error) {

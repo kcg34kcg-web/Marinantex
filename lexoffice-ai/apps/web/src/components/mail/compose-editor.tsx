@@ -28,12 +28,31 @@ type ComposeSignature = {
   isDefault: boolean;
 };
 
+type ComposeMailboxOption = {
+  id: string;
+  email: string;
+  displayName: string | null;
+};
+
+type ComposeFont = "system" | "sans" | "serif" | "mono";
+
 type ComposeTemplate = {
   id: string;
   name: string;
   subject: string;
   bodyText: string;
   bodyHtml?: string;
+};
+
+type TemplateUsageRecord = {
+  count: number;
+  lastUsedAt: number;
+};
+
+type ScheduleSuggestion = {
+  id: string;
+  label: string;
+  value: Date;
 };
 
 const COMPOSE_TEMPLATES: ComposeTemplate[] = [
@@ -60,6 +79,8 @@ const COMPOSE_TEMPLATES: ComposeTemplate[] = [
   }
 ];
 
+const TEMPLATE_USAGE_STORAGE_KEY = "lexoffice.mail.template-usage.v1";
+
 type InitialDraft = {
   id?: string;
   subject: string;
@@ -85,19 +106,24 @@ type RecipientSuggestion = {
 export function ComposeEditor({
   tenantSlug,
   tenantId,
-  mailboxId,
+  mailboxOptions,
+  initialMailboxId,
+  composeDefaultFont,
   signatures = [],
   initialDraft,
   sendContext
 }: {
   tenantSlug: string;
   tenantId: string;
-  mailboxId: string;
+  mailboxOptions: ComposeMailboxOption[];
+  initialMailboxId: string;
+  composeDefaultFont: ComposeFont;
   signatures?: ComposeSignature[];
   initialDraft?: InitialDraft;
   sendContext?: SendContext;
 }) {
   const router = useRouter();
+  const mailboxSelectionLocked = Boolean(sendContext);
   const [to, setTo] = useState((initialDraft?.toRecipients ?? []).join(", "));
   const [cc, setCc] = useState((initialDraft?.ccRecipients ?? []).join(", "));
   const [bcc, setBcc] = useState((initialDraft?.bccRecipients ?? []).join(", "));
@@ -108,12 +134,14 @@ export function ComposeEditor({
   const [bodyText, setBodyText] = useState(initialDraft?.bodyText ?? "");
   const [bodyHtml, setBodyHtml] = useState("");
   const [mode, setMode] = useState<ComposeMode>("plain");
+  const [selectedMailboxId, setSelectedMailboxId] = useState(initialMailboxId);
   const [draftId, setDraftId] = useState<string | null>(initialDraft?.id ?? null);
   const [attachments, setAttachments] = useState<StagedAttachment[]>([]);
   const [selectedSignatureId, setSelectedSignatureId] = useState(
     () => signatures.find((signature) => signature.isDefault)?.id ?? signatures[0]?.id ?? ""
   );
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [templateUsage, setTemplateUsage] = useState<Record<string, TemplateUsageRecord>>({});
   const [status, setStatus] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -125,12 +153,21 @@ export function ComposeEditor({
   const [scheduledAtLocal, setScheduledAtLocal] = useState(() =>
     toDateTimeLocalValue(new Date(Date.now() + 30 * 60 * 1000))
   );
+  const [scheduleSuggestions, setScheduleSuggestions] = useState<ScheduleSuggestion[]>([]);
   const [undoScheduledDraftId, setUndoScheduledDraftId] = useState<string | null>(null);
   const [undoDeadlineAt, setUndoDeadlineAt] = useState<number | null>(null);
   const [undoSecondsLeft, setUndoSecondsLeft] = useState(0);
   const skipAutosaveRef = useRef(true);
+  const lastMailboxIdRef = useRef(initialMailboxId);
   const richEditorRef = useRef<HTMLDivElement>(null);
   const inlineImageInputRef = useRef<HTMLInputElement>(null);
+  const composeFontFamily = useMemo(
+    () => resolveComposeFontFamily(composeDefaultFont),
+    [composeDefaultFont]
+  );
+  const activeMailbox =
+    mailboxOptions.find((mailbox) => mailbox.id === selectedMailboxId) ?? mailboxOptions[0] ?? null;
+  const activeMailboxId = activeMailbox?.id ?? "";
 
   const toRecipients = useMemo(() => parseRecipients(to), [to]);
   const ccRecipients = useMemo(() => parseRecipients(cc), [cc]);
@@ -162,6 +199,20 @@ export function ComposeEditor({
         .slice(0, 6)
         .filter((item, index, list) => list.findIndex((entry) => entry.email === item.email) === index),
     [recipientSuggestions]
+  );
+  const sortedTemplates = useMemo(() => {
+    return [...COMPOSE_TEMPLATES].sort((left, right) => {
+      const leftUsage = templateUsage[left.id]?.count ?? 0;
+      const rightUsage = templateUsage[right.id]?.count ?? 0;
+      if (leftUsage !== rightUsage) {
+        return rightUsage - leftUsage;
+      }
+      return left.name.localeCompare(right.name, "tr", { sensitivity: "base" });
+    });
+  }, [templateUsage]);
+  const frequentTemplates = useMemo(
+    () => sortedTemplates.filter((template) => (templateUsage[template.id]?.count ?? 0) > 0).slice(0, 3),
+    [sortedTemplates, templateUsage]
   );
 
   useEffect(() => {
@@ -240,6 +291,29 @@ export function ComposeEditor({
   }, [tenantId]);
 
   useEffect(() => {
+    const firstMailbox = mailboxOptions[0];
+    if (!firstMailbox) {
+      return;
+    }
+
+    if (!mailboxOptions.some((mailbox) => mailbox.id === selectedMailboxId)) {
+      setSelectedMailboxId(firstMailbox.id);
+    }
+  }, [mailboxOptions, selectedMailboxId]);
+
+  useEffect(() => {
+    if (!activeMailboxId || lastMailboxIdRef.current === activeMailboxId) {
+      return;
+    }
+
+    lastMailboxIdRef.current = activeMailboxId;
+    if (attachments.length > 0) {
+      setAttachments([]);
+      setStatus("Gönderici hesabı değiştiği için ekler temizlendi.");
+    }
+  }, [activeMailboxId, attachments.length]);
+
+  useEffect(() => {
     if (signatures.length === 0) {
       setSelectedSignatureId("");
       return;
@@ -252,7 +326,36 @@ export function ComposeEditor({
     }
   }, [selectedSignatureId, signatures]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(TEMPLATE_USAGE_STORAGE_KEY);
+      if (!raw) {
+        return;
+      }
+      const parsed = JSON.parse(raw) as Record<string, TemplateUsageRecord>;
+      if (!parsed || typeof parsed !== "object") {
+        return;
+      }
+      setTemplateUsage(parsed);
+    } catch {
+      return;
+    }
+  }, []);
+
+  useEffect(() => {
+    setScheduleSuggestions(buildScheduleSuggestions(new Date()));
+  }, []);
+
   async function autosave(silent = false): Promise<void> {
+    if (!activeMailboxId) {
+      setStatus("Taslak kaydı için gönderici hesabı seçilemedi");
+      return;
+    }
+
     const richText = richEditorRef.current?.innerText ?? "";
     const draftBody = mode === "rich" ? richText : bodyText;
 
@@ -280,7 +383,7 @@ export function ComposeEditor({
       body: JSON.stringify({
         ...(draftId ? { draftId } : {}),
         tenantId,
-        mailboxId,
+        mailboxId: activeMailboxId,
         subject,
         bodyText: draftBody,
         toRecipients,
@@ -382,8 +485,31 @@ export function ComposeEditor({
     }
   }
 
-  function applyTemplate(): void {
-    const template = COMPOSE_TEMPLATES.find((entry) => entry.id === selectedTemplateId);
+  function markTemplateUsage(templateId: string): void {
+    setTemplateUsage((previous) => {
+      const nextEntry: TemplateUsageRecord = {
+        count: (previous[templateId]?.count ?? 0) + 1,
+        lastUsedAt: Date.now()
+      };
+      const next = {
+        ...previous,
+        [templateId]: nextEntry
+      };
+
+      if (typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(TEMPLATE_USAGE_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          return next;
+        }
+      }
+
+      return next;
+    });
+  }
+
+  function applyTemplate(templateId: string = selectedTemplateId): void {
+    const template = COMPOSE_TEMPLATES.find((entry) => entry.id === templateId);
     if (!template) {
       return;
     }
@@ -407,6 +533,8 @@ export function ComposeEditor({
       syncRichContent(richEditorRef.current);
     }
 
+    markTemplateUsage(template.id);
+    setSelectedTemplateId(template.id);
     setStatus(`Şablon uygulandı: ${template.name}`);
   }
 
@@ -543,6 +671,11 @@ export function ComposeEditor({
   }
 
   async function stageFiles(files: File[]): Promise<void> {
+    if (!activeMailboxId) {
+      setStatus("Dosya yüklemek için geçerli bir mailbox seçilmeli");
+      return;
+    }
+
     if (files.length === 0) {
       setAttachments([]);
       setStatus("Dosya seçimi temizlendi");
@@ -578,7 +711,7 @@ export function ComposeEditor({
           },
           body: JSON.stringify({
             tenantId,
-            mailboxId,
+            mailboxId: activeMailboxId,
             fileName: file.name,
             mimeType,
             sizeBytes: file.size
@@ -672,8 +805,15 @@ export function ComposeEditor({
   }
 
   async function send(): Promise<void> {
-    const htmlBody =
+    if (!activeMailboxId) {
+      setStatus("Gönderim için geçerli bir mailbox bulunamadı");
+      return;
+    }
+
+    const rawHtmlBody =
       mode === "rich" ? richEditorRef.current?.innerHTML ?? bodyHtml : bodyHtml;
+    const htmlBody =
+      mode === "rich" ? wrapHtmlWithFont(rawHtmlBody, composeFontFamily) : rawHtmlBody;
     const textBody = mode === "rich" ? richEditorRef.current?.innerText ?? bodyText : bodyText;
 
     if (toRecipients.length === 0) {
@@ -732,7 +872,7 @@ export function ComposeEditor({
       }>;
     } = {
       tenantId,
-      mailboxId,
+      mailboxId: activeMailboxId,
       subject,
       bodyText: textBody,
       toRecipients,
@@ -804,8 +944,15 @@ export function ComposeEditor({
     scheduledAtIso: string;
     undoWindowSeconds?: number;
   }): Promise<void> {
-    const htmlBody =
+    if (!activeMailboxId) {
+      setStatus("Zamanlama için geçerli bir mailbox bulunamadı");
+      return;
+    }
+
+    const rawHtmlBody =
       mode === "rich" ? richEditorRef.current?.innerHTML ?? bodyHtml : bodyHtml;
+    const htmlBody =
+      mode === "rich" ? wrapHtmlWithFont(rawHtmlBody, composeFontFamily) : rawHtmlBody;
     const textBody = mode === "rich" ? richEditorRef.current?.innerText ?? bodyText : bodyText;
 
     if (toRecipients.length === 0) {
@@ -850,7 +997,7 @@ export function ComposeEditor({
       undoWindowSeconds?: number;
     } = {
       tenantId,
-      mailboxId,
+      mailboxId: activeMailboxId,
       subject,
       bodyText: textBody,
       toRecipients,
@@ -950,8 +1097,13 @@ export function ComposeEditor({
   }
 
   return (
-    <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <h2 className="text-base font-semibold">Yeni Mail</h2>
+    <section className="space-y-3 rounded-2xl border border-blue-100 bg-white p-4 shadow-[0_24px_64px_-36px_rgba(37,99,235,0.5)]">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-base font-semibold text-slate-900">Yeni Mail</h2>
+        <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-700">
+          White-Orange-Blue
+        </span>
+      </div>
       {sendContext ? (
         <p className="text-xs text-slate-500">
           Mod:{" "}
@@ -975,6 +1127,26 @@ export function ComposeEditor({
             Tekrar Dene
           </button>
         </div>
+      ) : null}
+      <label className="block text-xs text-slate-600">
+        Gönderen Hesap
+        <select
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          value={activeMailboxId}
+          disabled={mailboxSelectionLocked || mailboxOptions.length <= 1}
+          onChange={(event) => setSelectedMailboxId(event.target.value)}
+        >
+          {mailboxOptions.map((mailbox) => (
+            <option key={mailbox.id} value={mailbox.id}>
+              {mailbox.displayName ? `${mailbox.displayName} <${mailbox.email}>` : mailbox.email}
+            </option>
+          ))}
+        </select>
+      </label>
+      {mailboxSelectionLocked ? (
+        <p className="text-xs text-slate-500">
+          Yanıt/ilet modunda thread tutarlılığı için gönderen hesap değiştirilemez.
+        </p>
       ) : null}
       <div className="space-y-2">
         <input
@@ -1116,6 +1288,21 @@ export function ComposeEditor({
         </div>
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
           <p className="text-xs font-medium text-slate-700">Şablon</p>
+          {frequentTemplates.length > 0 ? (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-slate-500">Sık Kullanılan:</span>
+              {frequentTemplates.map((template) => (
+                <button
+                  key={`frequent-${template.id}`}
+                  type="button"
+                  className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:bg-slate-100"
+                  onClick={() => applyTemplate(template.id)}
+                >
+                  {template.name} ({templateUsage[template.id]?.count ?? 0})
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <select
               className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
@@ -1123,9 +1310,11 @@ export function ComposeEditor({
               onChange={(event) => setSelectedTemplateId(event.target.value)}
             >
               <option value="">Şablon seçin</option>
-              {COMPOSE_TEMPLATES.map((template) => (
+              {sortedTemplates.map((template) => (
                 <option key={template.id} value={template.id}>
-                  {template.name}
+                  {(templateUsage[template.id]?.count ?? 0) > 0
+                    ? `${template.name} (${templateUsage[template.id]?.count})`
+                    : template.name}
                 </option>
               ))}
             </select>
@@ -1133,7 +1322,7 @@ export function ComposeEditor({
               type="button"
               className="rounded border border-slate-300 bg-white px-2 py-1 text-xs disabled:opacity-60"
               disabled={selectedTemplateId.length === 0}
-              onClick={applyTemplate}
+              onClick={() => applyTemplate()}
             >
               Şablonu Uygula
             </button>
@@ -1144,14 +1333,22 @@ export function ComposeEditor({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            className={`rounded border px-2 py-1 text-xs ${mode === "plain" ? "border-brand-500 bg-brand-50" : "border-slate-300 bg-white"}`}
+            className={`rounded border px-2 py-1 text-xs ${
+              mode === "plain"
+                ? "border-blue-300 bg-blue-50 text-blue-700"
+                : "border-slate-300 bg-white text-slate-700"
+            }`}
             onClick={() => switchMode("plain")}
           >
             Düz Metin
           </button>
           <button
             type="button"
-            className={`rounded border px-2 py-1 text-xs ${mode === "rich" ? "border-brand-500 bg-brand-50" : "border-slate-300 bg-white"}`}
+            className={`rounded border px-2 py-1 text-xs ${
+              mode === "rich"
+                ? "border-orange-300 bg-orange-50 text-orange-700"
+                : "border-slate-300 bg-white text-slate-700"
+            }`}
             onClick={() => switchMode("rich")}
           >
             Zengin Metin
@@ -1231,6 +1428,7 @@ export function ComposeEditor({
             placeholder="Mesaj"
             spellCheck
             lang="tr"
+            style={{ fontFamily: composeFontFamily }}
             value={bodyText}
             onChange={(event) => setBodyText(event.target.value)}
           />
@@ -1241,6 +1439,7 @@ export function ComposeEditor({
             contentEditable
             spellCheck
             lang="tr"
+            style={{ fontFamily: composeFontFamily }}
             suppressContentEditableWarning
             onInput={(event) => {
               syncRichContent(event.currentTarget);
@@ -1282,6 +1481,22 @@ export function ComposeEditor({
       </div>
       <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
         <p className="text-xs font-medium text-slate-700">Zamanlanmış Gönderim</p>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-slate-500">Gönderim Zaman Önerisi:</span>
+          {scheduleSuggestions.map((suggestion) => (
+            <button
+              key={suggestion.id}
+              type="button"
+              className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:bg-slate-100"
+              onClick={() => {
+                setScheduledAtLocal(toDateTimeLocalValue(suggestion.value));
+                setStatus(`Önerilen gönderim zamanı seçildi: ${suggestion.label}`);
+              }}
+            >
+              {suggestion.label}
+            </button>
+          ))}
+        </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <input
             type="datetime-local"
@@ -1306,7 +1521,7 @@ export function ComposeEditor({
           </button>
           <button
             type="button"
-            className="rounded border border-brand-300 bg-brand-50 px-2 py-1 text-xs text-brand-700"
+            className="rounded border border-orange-300 bg-orange-50 px-2 py-1 text-xs text-orange-700"
             disabled={isSaving || isSending || isScheduling || isUploading}
             onClick={() => {
               const iso = new Date(Date.now() + 10_000).toISOString();
@@ -1335,7 +1550,7 @@ export function ComposeEditor({
       ) : null}
       <div className="flex items-center justify-between">
         <button
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="rounded-lg border border-blue-200 bg-blue-50/50 px-3 py-2 text-sm text-blue-800"
           type="button"
           disabled={isSaving || isSending || isUploading || isScheduling}
           onClick={() => {
@@ -1345,7 +1560,7 @@ export function ComposeEditor({
           {isSaving ? "Kaydediliyor..." : "Taslak Kaydet"}
         </button>
         <button
-          className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+          className="rounded-lg bg-gradient-to-r from-blue-600 to-orange-500 px-3 py-2 text-sm font-medium text-white shadow-[0_14px_28px_-16px_rgba(37,99,235,0.7)] disabled:opacity-60"
           type="button"
           disabled={isSaving || isSending || isUploading || isScheduling}
           onClick={() => {
@@ -1358,6 +1573,70 @@ export function ComposeEditor({
       {status ? <p className="text-xs text-slate-600">{status}</p> : null}
     </section>
   );
+}
+
+function buildScheduleSuggestions(now: Date): ScheduleSuggestion[] {
+  const nextBusinessMorning = nextBusinessDateAt(now, 9, 30);
+  const nextBusinessAfternoon = nextBusinessDateAt(now, 14, 0);
+  const nextMondayMorning = nextSpecificWeekdayAt(now, 1, 9, 30);
+
+  return [
+    {
+      id: "business-morning",
+      label: formatSuggestionLabel("En yakın iş sabahı", nextBusinessMorning),
+      value: nextBusinessMorning
+    },
+    {
+      id: "business-afternoon",
+      label: formatSuggestionLabel("En yakın iş öğleden sonra", nextBusinessAfternoon),
+      value: nextBusinessAfternoon
+    },
+    {
+      id: "next-monday",
+      label: formatSuggestionLabel("Pazartesi 09:30", nextMondayMorning),
+      value: nextMondayMorning
+    }
+  ];
+}
+
+function nextBusinessDateAt(base: Date, hour: number, minute: number): Date {
+  const candidate = new Date(base);
+  candidate.setSeconds(0, 0);
+  candidate.setHours(hour, minute, 0, 0);
+
+  if (candidate.getTime() <= base.getTime() + 60_000) {
+    candidate.setDate(candidate.getDate() + 1);
+  }
+
+  while (candidate.getDay() === 0 || candidate.getDay() === 6) {
+    candidate.setDate(candidate.getDate() + 1);
+  }
+
+  return candidate;
+}
+
+function nextSpecificWeekdayAt(base: Date, weekday: number, hour: number, minute: number): Date {
+  const result = new Date(base);
+  result.setSeconds(0, 0);
+  result.setHours(hour, minute, 0, 0);
+
+  const currentWeekday = result.getDay();
+  let offset = (weekday - currentWeekday + 7) % 7;
+  if (offset === 0 && result.getTime() <= base.getTime() + 60_000) {
+    offset = 7;
+  }
+  result.setDate(result.getDate() + offset);
+
+  return result;
+}
+
+function formatSuggestionLabel(prefix: string, value: Date): string {
+  return `${prefix}: ${value.toLocaleString("tr-TR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  })}`;
 }
 
 function parseRecipients(value: string): string[] {
@@ -1482,6 +1761,30 @@ function plainTextToHtml(text: string): string {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
   return escaped.replaceAll("\n", "<br/>");
+}
+
+function resolveComposeFontFamily(font: ComposeFont): string {
+  if (font === "sans") {
+    return "Arial, Helvetica, sans-serif";
+  }
+
+  if (font === "serif") {
+    return "Georgia, Times New Roman, serif";
+  }
+
+  if (font === "mono") {
+    return "Courier New, Courier, monospace";
+  }
+
+  return "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif";
+}
+
+function wrapHtmlWithFont(html: string, fontFamily: string): string {
+  if (html.trim().length === 0) {
+    return html;
+  }
+
+  return `<div style="font-family:${fontFamily};">${html}</div>`;
 }
 
 function stripHtmlToText(html: string): string {

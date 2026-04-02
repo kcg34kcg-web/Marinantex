@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { canAccessCase } from '@/lib/dashboard/access';
+import { resolveInternalUserBureauScope } from '@/lib/dashboard/client-access';
 import { logDashboardAudit } from '@/lib/dashboard/audit';
 import { syncTaskReminderTimelineEvents } from '@/lib/dashboard/calendar-sync';
 
@@ -35,11 +37,44 @@ export async function POST(request: Request) {
 
   const payload = parsed.data;
   const admin = createAdminClient();
+  const uniqueCaseIds = [...new Set(payload.caseIds)];
+  const scope = await resolveInternalUserBureauScope(admin, access.userId);
+
+  const accessChecks = await Promise.all(
+    uniqueCaseIds.map(async (caseId) => ({
+      caseId,
+      allowed: await canAccessCase(admin, {
+        caseId,
+        userId: access.userId,
+        role: access.role,
+      }),
+    }))
+  );
+  if (accessChecks.some((item) => !item.allowed)) {
+    return Response.json({ error: 'Seçilen dosyalardan en az birine erişim yetkiniz yok.' }, { status: 403 });
+  }
+
+  if (payload.assignedTo) {
+    const assigneeResult = await admin
+      .from('profiles')
+      .select('id')
+      .eq('id', payload.assignedTo)
+      .in('role', ['lawyer', 'assistant'])
+      .maybeSingle();
+
+    if (assigneeResult.error || !assigneeResult.data) {
+      return Response.json({ error: 'Görev atananı geçersiz.' }, { status: 400 });
+    }
+
+    if (scope && !scope.bureauProfileIds.includes(payload.assignedTo)) {
+      return Response.json({ error: 'Görev atananı ofis kapsamı dışında.' }, { status: 400 });
+    }
+  }
 
   const { data: cases, error: casesError } = await admin
     .from('cases')
     .select('id, title')
-    .in('id', payload.caseIds);
+    .in('id', uniqueCaseIds);
 
   if (casesError) {
     return Response.json({ error: 'Dosya listesi doğrulanamadı.' }, { status: 500 });
@@ -124,7 +159,7 @@ export async function POST(request: Request) {
     entityType: 'office_task',
     entityId: null,
     metadata: {
-      caseIds: payload.caseIds,
+      caseIds: uniqueCaseIds,
       count: inserts.length,
       priority: payload.priority,
       dueAt: payload.dueAt ?? null,

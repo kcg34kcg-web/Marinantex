@@ -1,0 +1,197 @@
+generator client {
+  provider = "prisma-client-js"
+  engineType = "binary"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AssistantTone {
+  PROFESSIONAL
+  WARM
+  SHORT
+  DETAILED
+}
+
+enum AssistantLanguage {
+  TR
+  EN
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  BLOCKED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum ToolExecutionStatus {
+  PREVIEW
+  CONFIRMED
+  EXECUTED
+  CANCELED
+  FAILED
+}
+
+enum MemoryKind {
+  NOTE
+  PREFERENCE
+  FACT
+}
+
+model User {
+  id                String               @id @default(uuid())
+  email             String               @unique
+  name              String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  preferences       AssistantPreference?
+  conversations     Conversation[]
+  messages          Message[]
+  tasks             Task[]
+  toolExecutions    ToolExecution[]
+  auditLogs         AuditLog[]
+  memoryItems       MemoryItem[]
+}
+
+model AssistantPreference {
+  id                          String            @id @default(uuid())
+  userId                      String            @unique
+  assistantName               String            @default("Babylexit Asistan")
+  tone                        AssistantTone     @default(PROFESSIONAL)
+  language                    AssistantLanguage @default(TR)
+  responseLength              String            @default("short")
+  proactiveLevel              Int               @default(2)
+  quietHoursStart             Int               @default(22)
+  quietHoursEnd               Int               @default(8)
+  keyboardShortcut            String            @default("Mod+K")
+  bubblePositionX             Int               @default(24)
+  bubblePositionY             Int               @default(120)
+  bubbleSize                  Int               @default(56)
+  animationLevel              Int               @default(2)
+  memoryEnabled               Boolean           @default(true)
+  requireConfirmationCritical Boolean           @default(true)
+  temporaryMode               Boolean           @default(false)
+  createdAt                   DateTime          @default(now())
+  updatedAt                   DateTime          @updatedAt
+  user                        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Conversation {
+  id            String    @id @default(uuid())
+  userId        String
+  title         String
+  isTemporary   Boolean   @default(false)
+  lastMessageAt DateTime? @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages      Message[]
+
+  @@index([userId, updatedAt])
+}
+
+model Message {
+  id             String      @id @default(uuid())
+  conversationId String
+  userId         String?
+  role           MessageRole
+  content        String
+  metadata       Json?
+  createdAt      DateTime    @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+}
+
+model Task {
+  id             String       @id @default(uuid())
+  userId         String
+  title          String
+  description    String?
+  dueAt          DateTime?
+  status         TaskStatus   @default(TODO)
+  priority       TaskPriority @default(MEDIUM)
+  source         String       @default("assistant")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, dueAt])
+}
+
+model ToolExecution {
+  id             String              @id @default(uuid())
+  userId         String
+  conversationId String?
+  toolName       String
+  input          Json
+  preview        Json?
+  output         Json?
+  requiresConfirmation Boolean      @default(false)
+  confirmed      Boolean             @default(false)
+  status         ToolExecutionStatus @default(PREVIEW)
+  createdAt      DateTime            @default(now())
+  executedAt     DateTime?
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String
+  category    String
+  action      String
+  entityType  String?
+  entityId    String?
+  summary     String
+  details     Json?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model QuickAction {
+  id                   String   @id @default(uuid())
+  key                  String   @unique
+  label                String
+  description          String
+  prompt               String
+  icon                 String
+  requiresConfirmation Boolean  @default(false)
+  sortOrder            Int      @default(0)
+  enabled              Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model MemoryItem {
+  id        String     @id @default(uuid())
+  userId    String
+  kind      MemoryKind @default(NOTE)
+  content   String
+  tags      String[]
+  metadata  Json?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, kind, updatedAt])
+}

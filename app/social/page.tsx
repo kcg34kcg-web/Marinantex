@@ -17,6 +17,7 @@ import { UserProfile } from "@/app/types";
 import CreatePost from "@/components/CreatePost";
 import InboxDialog from "@/components/chat copy/InboxDialog";
 import { cn } from "@/utils/cn";
+import { Logo } from "@/components/brand/Logo";
 
 import { NotificationDrawer } from "@/components/notifications/NotificationDrawer";
 import { NotificationBell } from "@/components/notifications/NotificationBell"; 
@@ -100,8 +101,8 @@ export default function LexwoowPage() {
       <AnimatePresence>
         {showTransition && (
           <motion.div exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-slate-900 flex flex-col items-center justify-center text-white">
-            <motion.div initial={{ rotate: -45, y: -50 }} animate={{ rotate: 0, y: 0 }} transition={{ type: "spring", stiffness: 300 }} className="text-amber-500">
-              <Gavel size={100} />
+            <motion.div initial={{ rotate: -6, y: -30 }} animate={{ rotate: 0, y: 0 }} transition={{ type: "spring", stiffness: 300 }}>
+              <Logo width={280} height={84} className="h-16 w-auto sm:h-20" priority />
             </motion.div>
             <h1 className="mt-6 text-2xl font-bold tracking-[0.4em] uppercase text-slate-100">Lexwoow</h1>
           </motion.div>

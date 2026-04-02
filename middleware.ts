@@ -33,7 +33,8 @@ function isPublicRoute(pathname: string): boolean {
     pathname === '/api/health' ||
     isAuthRoute(pathname) ||
     pathname.startsWith('/auth') ||
-    pathname.startsWith('/editor') ||
+    pathname === '/shared' ||
+    pathname.startsWith('/shared/') ||
     isPublicNewsRoute(pathname)
   );
 }
@@ -50,10 +51,18 @@ function getHomeRouteByRole(role: UserRole): '/dashboard' | '/portal' {
   return role === 'client' ? '/portal' : '/dashboard';
 }
 
+function withSecurityHeaders(response: NextResponse): NextResponse {
+  response.headers.set('x-frame-options', 'DENY');
+  response.headers.set('x-content-type-options', 'nosniff');
+  return response;
+}
+
 export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({
-    request,
-  });
+  let response = withSecurityHeaders(
+    NextResponse.next({
+      request,
+    }),
+  );
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
@@ -63,9 +72,11 @@ export async function middleware(request: NextRequest) {
       setAll(cookiesToSet: Array<{ name: string; value: string; options: CookieOptions }>) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
 
-        response = NextResponse.next({
-          request,
-        });
+        response = withSecurityHeaders(
+          NextResponse.next({
+            request,
+          }),
+        );
 
         cookiesToSet.forEach(({ name, value, options }) => {
           response.cookies.set(name, value, options);
@@ -79,6 +90,12 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
+  if (pathname === '/mail' || pathname.startsWith('/mail/')) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = pathname.replace(/^\/mail/, '/dashboard/mail');
+    return withSecurityHeaders(NextResponse.redirect(redirectUrl));
+  }
+
   const isSwitchAccountFlow = request.nextUrl.searchParams.get('switch') === '1';
 
   if (!user) {
@@ -87,16 +104,18 @@ export async function middleware(request: NextRequest) {
     }
 
     if (isApiRoute(pathname)) {
-      return NextResponse.json(
-        { error: 'Oturum bulunamadi.', error_code: 'AUTH_REQUIRED' },
-        { status: 401 },
+      return withSecurityHeaders(
+        NextResponse.json(
+          { error: 'Oturum bulunamadi.', error_code: 'AUTH_REQUIRED' },
+          { status: 401 },
+        ),
       );
     }
 
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = '/login';
     loginUrl.searchParams.set('next', pathname);
-    return NextResponse.redirect(loginUrl);
+    return withSecurityHeaders(NextResponse.redirect(loginUrl));
   }
 
   const { data: profile, error: profileError } = await supabase
@@ -111,16 +130,18 @@ export async function middleware(request: NextRequest) {
     }
 
     if (isApiRoute(pathname)) {
-      return NextResponse.json(
-        { error: 'Profil bulunamadi.', error_code: 'PROFILE_REQUIRED' },
-        { status: 401 },
+      return withSecurityHeaders(
+        NextResponse.json(
+          { error: 'Profil bulunamadi.', error_code: 'PROFILE_REQUIRED' },
+          { status: 401 },
+        ),
       );
     }
 
     const onboardingUrl = request.nextUrl.clone();
     onboardingUrl.pathname = '/onboarding';
     onboardingUrl.searchParams.set('next', `${pathname}${request.nextUrl.search}`);
-    return NextResponse.redirect(onboardingUrl);
+    return withSecurityHeaders(NextResponse.redirect(onboardingUrl));
   }
 
   const role = profile.role as UserRole;
@@ -133,21 +154,21 @@ export async function middleware(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = getHomeRouteByRole(role);
     redirectUrl.search = '';
-    return NextResponse.redirect(redirectUrl);
+    return withSecurityHeaders(NextResponse.redirect(redirectUrl));
   }
 
   if (isDashboardRoute(pathname) && pathname !== '/dashboard/news' && role === 'client') {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = getHomeRouteByRole(role);
     redirectUrl.search = '';
-    return NextResponse.redirect(redirectUrl);
+    return withSecurityHeaders(NextResponse.redirect(redirectUrl));
   }
 
   if (isPortalRoute(pathname) && role !== 'client') {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = getHomeRouteByRole(role);
     redirectUrl.search = '';
-    return NextResponse.redirect(redirectUrl);
+    return withSecurityHeaders(NextResponse.redirect(redirectUrl));
   }
 
   if (isPortalRoute(pathname) && pathname !== '/portal/otp') {
@@ -157,7 +178,7 @@ export async function middleware(request: NextRequest) {
       const otpUrl = request.nextUrl.clone();
       otpUrl.pathname = '/portal/otp';
       otpUrl.searchParams.set('next', `${pathname}${request.nextUrl.search}`);
-      return NextResponse.redirect(otpUrl);
+      return withSecurityHeaders(NextResponse.redirect(otpUrl));
     }
   }
 

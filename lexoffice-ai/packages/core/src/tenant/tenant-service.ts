@@ -178,26 +178,179 @@ export class TenantService {
         id: input.tenantId,
         deletedAt: null
       },
-      select: { id: true, name: true, locale: true, timezone: true }
+      select: {
+        id: true,
+        name: true,
+        locale: true,
+        timezone: true,
+        settings: {
+          select: {
+            mailConversationViewEnabled: true,
+            composeDefaultFont: true,
+            defaultSenderMailboxId: true,
+            mailForwardingEnabled: true,
+            mailForwardingRecipients: true,
+            mailForwardingMailboxId: true,
+            autoResponderEnabled: true,
+            autoResponderSubject: true,
+            autoResponderBodyText: true
+          }
+        }
+      }
     });
 
     if (!tenant) {
       throw new NotFoundError("Tenant bulunamadı");
     }
 
-    const updated = await this.prisma.tenant.update({
-      where: { id: tenant.id },
-      data: {
-        name: input.name,
-        locale: input.locale ?? tenant.locale,
-        timezone: input.timezone ?? tenant.timezone
-      },
-      select: {
-        id: true,
-        name: true,
-        locale: true,
-        timezone: true
+    if (input.defaultSenderMailboxId !== undefined && input.defaultSenderMailboxId !== null) {
+      const mailbox = await this.prisma.mailbox.findFirst({
+        where: {
+          id: input.defaultSenderMailboxId,
+          tenantId: tenant.id,
+          deletedAt: null
+        },
+        select: {
+          id: true
+        }
+      });
+
+      if (!mailbox) {
+        throw new ConflictError("Varsayılan gönderici hesabı bulunamadı");
       }
+    }
+
+    if (input.mailForwardingMailboxId !== undefined && input.mailForwardingMailboxId !== null) {
+      const mailbox = await this.prisma.mailbox.findFirst({
+        where: {
+          id: input.mailForwardingMailboxId,
+          tenantId: tenant.id,
+          deletedAt: null
+        },
+        select: {
+          id: true
+        }
+      });
+
+      if (!mailbox) {
+        throw new ConflictError("Mail yönlendirme mailbox seçimi geçersiz");
+      }
+    }
+
+    const nextForwardingEnabled =
+      input.mailForwardingEnabled ?? tenant.settings?.mailForwardingEnabled ?? false;
+    const nextForwardingRecipients =
+      input.mailForwardingRecipients ?? tenant.settings?.mailForwardingRecipients ?? [];
+
+    if (nextForwardingEnabled && nextForwardingRecipients.length === 0) {
+      throw new ConflictError("Mail yönlendirme açıkken en az bir hedef e-posta zorunludur");
+    }
+
+    const nextAutoResponderEnabled =
+      input.autoResponderEnabled ?? tenant.settings?.autoResponderEnabled ?? false;
+    const nextAutoResponderSubject =
+      input.autoResponderSubject !== undefined
+        ? normalizeNullableText(input.autoResponderSubject)
+        : tenant.settings?.autoResponderSubject ?? null;
+    const nextAutoResponderBodyText =
+      input.autoResponderBodyText !== undefined
+        ? normalizeNullableText(input.autoResponderBodyText)
+        : tenant.settings?.autoResponderBodyText ?? null;
+
+    if (
+      nextAutoResponderEnabled &&
+      (!nextAutoResponderSubject || !nextAutoResponderBodyText)
+    ) {
+      throw new ConflictError("Otomatik yanıtlayıcı için konu ve mesaj metni zorunludur");
+    }
+
+    const [updatedTenant, updatedSettings] = await this.prisma.$transaction(async (tx) => {
+      const nextTenant = await tx.tenant.update({
+        where: { id: tenant.id },
+        data: {
+          name: input.name,
+          locale: input.locale ?? tenant.locale,
+          timezone: input.timezone ?? tenant.timezone
+        },
+        select: {
+          id: true,
+          name: true,
+          locale: true,
+          timezone: true
+        }
+      });
+
+      const nextSettings = await tx.tenantSettings.upsert({
+        where: {
+          tenantId: tenant.id
+        },
+        create: {
+          tenantId: tenant.id,
+          mailConversationViewEnabled: input.mailConversationViewEnabled ?? true,
+          composeDefaultFont: input.composeDefaultFont ?? "system",
+          defaultSenderMailboxId: input.defaultSenderMailboxId ?? null,
+          mailForwardingEnabled: input.mailForwardingEnabled ?? false,
+          mailForwardingRecipients: (input.mailForwardingRecipients ?? []).map((item) =>
+            item.trim().toLowerCase()
+          ),
+          mailForwardingMailboxId: input.mailForwardingMailboxId ?? null,
+          autoResponderEnabled: input.autoResponderEnabled ?? false,
+          autoResponderSubject:
+            input.autoResponderSubject !== undefined
+              ? normalizeNullableText(input.autoResponderSubject)
+              : null,
+          autoResponderBodyText:
+            input.autoResponderBodyText !== undefined
+              ? normalizeNullableText(input.autoResponderBodyText)
+              : null
+        },
+        update: {
+          ...(input.mailConversationViewEnabled !== undefined
+            ? { mailConversationViewEnabled: input.mailConversationViewEnabled }
+            : {}),
+          ...(input.composeDefaultFont !== undefined
+            ? { composeDefaultFont: input.composeDefaultFont }
+            : {}),
+          ...(input.defaultSenderMailboxId !== undefined
+            ? { defaultSenderMailboxId: input.defaultSenderMailboxId }
+            : {}),
+          ...(input.mailForwardingEnabled !== undefined
+            ? { mailForwardingEnabled: input.mailForwardingEnabled }
+            : {}),
+          ...(input.mailForwardingRecipients !== undefined
+            ? {
+                mailForwardingRecipients: input.mailForwardingRecipients.map((item) =>
+                  item.trim().toLowerCase()
+                )
+              }
+            : {}),
+          ...(input.mailForwardingMailboxId !== undefined
+            ? { mailForwardingMailboxId: input.mailForwardingMailboxId }
+            : {}),
+          ...(input.autoResponderEnabled !== undefined
+            ? { autoResponderEnabled: input.autoResponderEnabled }
+            : {}),
+          ...(input.autoResponderSubject !== undefined
+            ? { autoResponderSubject: normalizeNullableText(input.autoResponderSubject) }
+            : {}),
+          ...(input.autoResponderBodyText !== undefined
+            ? { autoResponderBodyText: normalizeNullableText(input.autoResponderBodyText) }
+            : {})
+        },
+        select: {
+          mailConversationViewEnabled: true,
+          composeDefaultFont: true,
+          defaultSenderMailboxId: true,
+          mailForwardingEnabled: true,
+          mailForwardingRecipients: true,
+          mailForwardingMailboxId: true,
+          autoResponderEnabled: true,
+          autoResponderSubject: true,
+          autoResponderBodyText: true
+        }
+      });
+
+      return [nextTenant, nextSettings] as const;
     });
 
     await this.auditService.log({
@@ -210,16 +363,54 @@ export class TenantService {
         previous: {
           name: tenant.name,
           locale: tenant.locale,
-          timezone: tenant.timezone
+          timezone: tenant.timezone,
+          mailConversationViewEnabled: tenant.settings?.mailConversationViewEnabled ?? true,
+          composeDefaultFont: tenant.settings?.composeDefaultFont ?? "system",
+          defaultSenderMailboxId: tenant.settings?.defaultSenderMailboxId ?? null,
+          mailForwardingEnabled: tenant.settings?.mailForwardingEnabled ?? false,
+          mailForwardingRecipients: tenant.settings?.mailForwardingRecipients ?? [],
+          mailForwardingMailboxId: tenant.settings?.mailForwardingMailboxId ?? null,
+          autoResponderEnabled: tenant.settings?.autoResponderEnabled ?? false,
+          autoResponderSubject: tenant.settings?.autoResponderSubject ?? null,
+          autoResponderBodyText: tenant.settings?.autoResponderBodyText ?? null
         },
         current: {
-          name: updated.name,
-          locale: updated.locale,
-          timezone: updated.timezone
+          name: updatedTenant.name,
+          locale: updatedTenant.locale,
+          timezone: updatedTenant.timezone,
+          mailConversationViewEnabled: updatedSettings.mailConversationViewEnabled,
+          composeDefaultFont: updatedSettings.composeDefaultFont,
+          defaultSenderMailboxId: updatedSettings.defaultSenderMailboxId,
+          mailForwardingEnabled: updatedSettings.mailForwardingEnabled,
+          mailForwardingRecipients: updatedSettings.mailForwardingRecipients,
+          mailForwardingMailboxId: updatedSettings.mailForwardingMailboxId,
+          autoResponderEnabled: updatedSettings.autoResponderEnabled,
+          autoResponderSubject: updatedSettings.autoResponderSubject,
+          autoResponderBodyText: updatedSettings.autoResponderBodyText
         }
       }
     });
 
-    return updated;
+    return {
+      ...updatedTenant,
+      mailConversationViewEnabled: updatedSettings.mailConversationViewEnabled,
+      composeDefaultFont: updatedSettings.composeDefaultFont,
+      defaultSenderMailboxId: updatedSettings.defaultSenderMailboxId,
+      mailForwardingEnabled: updatedSettings.mailForwardingEnabled,
+      mailForwardingRecipients: updatedSettings.mailForwardingRecipients,
+      mailForwardingMailboxId: updatedSettings.mailForwardingMailboxId,
+      autoResponderEnabled: updatedSettings.autoResponderEnabled,
+      autoResponderSubject: updatedSettings.autoResponderSubject,
+      autoResponderBodyText: updatedSettings.autoResponderBodyText
+    };
   }
+}
+
+function normalizeNullableText(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }

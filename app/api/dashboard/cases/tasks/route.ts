@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { canAccessCase } from '@/lib/dashboard/access';
+import { resolveInternalUserBureauScope } from '@/lib/dashboard/client-access';
 import { logDashboardAudit } from '@/lib/dashboard/audit';
 import { syncTaskReminderTimelineEvents } from '@/lib/dashboard/calendar-sync';
 
@@ -72,6 +74,15 @@ export async function POST(request: Request) {
 
   const payload = parsed.data;
   const admin = createAdminClient();
+  const allowed = await canAccessCase(admin, {
+    caseId: payload.caseId,
+    userId: access.userId,
+    role: access.role,
+  });
+  if (!allowed) {
+    return Response.json({ error: 'Bu dosyada görev oluşturma yetkiniz yok.' }, { status: 403 });
+  }
+  const scope = await resolveInternalUserBureauScope(admin, access.userId);
 
   const { data: caseRow } = await admin
     .from('cases')
@@ -81,6 +92,23 @@ export async function POST(request: Request) {
 
   if (!caseRow) {
     return Response.json({ error: 'Dosya bulunamadı.' }, { status: 404 });
+  }
+
+  if (payload.assignedTo) {
+    const assigneeResult = await admin
+      .from('profiles')
+      .select('id')
+      .eq('id', payload.assignedTo)
+      .in('role', ['lawyer', 'assistant'])
+      .maybeSingle();
+
+    if (assigneeResult.error || !assigneeResult.data) {
+      return Response.json({ error: 'Görev atananı geçersiz.' }, { status: 400 });
+    }
+
+    if (scope && !scope.bureauProfileIds.includes(payload.assignedTo)) {
+      return Response.json({ error: 'Görev atananı ofis kapsamı dışında.' }, { status: 400 });
+    }
   }
 
   const taskDescription = payload.description ?? `Dosya: ${caseRow.title}`;

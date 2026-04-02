@@ -19,7 +19,7 @@ export function AppShell({
   const isMailWorkspaceRoute = pathname.includes(`/${tenantSlug}/mail`);
 
   if (isMailWorkspaceRoute) {
-    return <div className="min-h-screen bg-slate-100 text-slate-900">{children}</div>;
+    return <div className="min-h-screen bg-white text-slate-900">{children}</div>;
   }
 
   return (

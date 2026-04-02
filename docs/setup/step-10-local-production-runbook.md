@@ -15,6 +15,7 @@ Minimum kritik değişkenler:
 - `JWT_SECRET`
 - `CORS_ORIGINS`
 - `NEXT_PUBLIC_API_BASE_URL`
+- `NEXT_PUBLIC_API_TENANT_SLUG`
 
 ## 2) Containerları build + up
 
@@ -40,6 +41,15 @@ curl http://localhost:3000/api/health
 ## 4) Smoke test çalıştır
 
 ```bash
+npm run smoke:test
+```
+
+Auth cookie-flow e2e doğrulamasını da çalıştırmak için (opsiyonel):
+
+```bash
+SMOKE_AUTH_EMAIL=owner@demo.lexoffice.ai \
+SMOKE_AUTH_PASSWORD=ChangeMe123! \
+SMOKE_AUTH_TENANT_SLUG=demo-hukuk \
 npm run smoke:test
 ```
 

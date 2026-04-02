@@ -5,6 +5,8 @@ import { MailWorkspace } from "@/components/mail/mail-workspace";
 import { services } from "@/lib/services";
 import { getTenantContext } from "@/lib/tenant-context";
 
+type ComposeFont = "system" | "sans" | "serif" | "mono";
+
 export default async function MailPage({
   params,
   searchParams
@@ -98,6 +100,7 @@ export default async function MailPage({
     <MailWorkspace
       tenantSlug={tenantSlug}
       tenantId={tenant.id}
+      composeDefaultFont={normalizeComposeFont(tenant.settings?.composeDefaultFont)}
       {...(query.mailboxId ? { selectedMailboxId: query.mailboxId } : {})}
       {...(query.query ? { initialQuery: query.query } : {})}
       initialView={threadInput.view}
@@ -136,6 +139,11 @@ export default async function MailPage({
         unreadCount: thread.unreadCount,
         kind: thread.kind,
         draftId: thread.draftId,
+        isPinned: thread.isPinned,
+        pinnedAt: thread.pinnedAt ? thread.pinnedAt.toISOString() : null,
+        readLaterAt: thread.readLaterAt ? thread.readLaterAt.toISOString() : null,
+        reminderAt: thread.reminderAt ? thread.reminderAt.toISOString() : null,
+        note: thread.note ?? null,
         lastMessageAt: thread.lastMessageAt ? thread.lastMessageAt.toISOString() : null,
         latestMessageId: thread.messages[0]?.id ?? null,
         sender: thread.messages[0]?.fromName ?? thread.messages[0]?.fromEmail ?? "Unknown",
@@ -147,4 +155,11 @@ export default async function MailPage({
       }))}
     />
   );
+}
+
+function normalizeComposeFont(value: string | null | undefined): ComposeFont {
+  if (value === "system" || value === "sans" || value === "serif" || value === "mono") {
+    return value;
+  }
+  return "sans";
 }

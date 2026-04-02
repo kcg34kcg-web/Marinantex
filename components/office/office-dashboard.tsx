@@ -1,50 +1,51 @@
 ﻿'use client';
 
-import { useState } from 'react';
-import { Bell, FileText, ShieldAlert, Users, Sparkles } from 'lucide-react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Bell, Users, Sparkles } from 'lucide-react';
 import { OfficeNotificationFeed } from '@/components/office/office-notification-feed';
-import { OfficeDocumentAnalyzeForm } from '@/components/office/office-document-analyze-form';
-import { OfficeHmkConfirmForm } from '@/components/office/office-hmk-confirm-form';
 import { OfficeTeamPanel } from './office-team-panel';
 import { OfficeFeedPanel } from './office-feed-panel';
 import { cn } from '@/lib/utils';
 
 interface OfficeDashboardProps {
   activeRole: 'lawyer' | 'assistant';
-  initialTab?: 'notifications' | 'team' | 'documents' | 'hmk' | 'feed';
+  initialTab?: 'notifications' | 'team' | 'feed';
   initialTeamThreadId?: string;
 }
 
-type OfficeTab = 'notifications' | 'team' | 'documents' | 'hmk' | 'feed';
+type OfficeTab = 'notifications' | 'team' | 'feed';
 
 export function OfficeDashboard({ activeRole, initialTab, initialTeamThreadId }: OfficeDashboardProps) {
-  const [activeTab, setActiveTab] = useState<OfficeTab>(initialTab ?? 'notifications');
-
-  const roleLabel = activeRole === 'assistant' ? 'Asistan' : 'Avukat';
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const tabs: Array<{ id: OfficeTab; label: string; icon: typeof Bell }> = [
     { id: 'notifications', label: 'Operasyon', icon: Bell },
     { id: 'team', label: 'Ekip', icon: Users },
     { id: 'feed', label: 'Ana Akis', icon: Sparkles },
-    { id: 'documents', label: 'Belgeler', icon: FileText },
-    { id: 'hmk', label: 'HMK', icon: ShieldAlert },
   ];
+
+  const queryTab = searchParams.get('tab');
+  const activeTab: OfficeTab =
+    queryTab === 'notifications' || queryTab === 'team' || queryTab === 'feed'
+      ? queryTab
+      : initialTab ?? 'notifications';
+
+  const handleTabChange = (tab: OfficeTab) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', tab);
+
+    if (tab !== 'team') {
+      params.delete('threadId');
+    }
+
+    const nextQuery = params.toString();
+    router.replace((nextQuery.length > 0 ? `${pathname}?${nextQuery}` : pathname) as never, { scroll: false });
+  };
 
   return (
     <div className="space-y-3">
-      {/* Ust satir - daha sade */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-900">Ofis Paneli</h2>
-          <p className="text-xs text-slate-500">Operasyon ve belge akislarini yonetin.</p>
-        </div>
-
-        <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700">
-          <span className="h-2 w-2 rounded-full bg-emerald-500" />
-          {roleLabel}
-        </div>
-      </div>
-
       {/* Sekmeler en ustte / asil odak */}
       <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
         <div className="overflow-x-auto">
@@ -57,7 +58,7 @@ export function OfficeDashboard({ activeRole, initialTab, initialTeamThreadId }:
                 <button
                   key={tab.id}
                   type="button"
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => handleTabChange(tab.id)}
                   className={cn(
                     'inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors',
                     selected
@@ -80,8 +81,6 @@ export function OfficeDashboard({ activeRole, initialTab, initialTeamThreadId }:
           {activeTab === 'notifications' ? <OfficeNotificationFeed /> : null}
           {activeTab === 'team' ? <OfficeTeamPanel activeRole={activeRole} initialThreadId={initialTeamThreadId} /> : null}
           {activeTab === 'feed' ? <OfficeFeedPanel activeRole={activeRole} /> : null}
-          {activeTab === 'documents' ? <OfficeDocumentAnalyzeForm activeRole={activeRole} /> : null}
-          {activeTab === 'hmk' ? <OfficeHmkConfirmForm /> : null}
         </div>
       </div>
     </div>

@@ -1,7 +1,12 @@
 import { z } from 'zod';
 import { requireInternalOfficeUser } from '@/lib/office/team-access';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { canAccessCase } from '@/lib/dashboard/access';
 import { logDashboardAudit } from '@/lib/dashboard/audit';
+
+const listCaseNotesSchema = z.object({
+  caseId: z.string().uuid(),
+});
 
 const createCaseNoteSchema = z.object({
   caseId: z.string().uuid(),
@@ -15,14 +20,25 @@ export async function GET(request: Request) {
     return Response.json({ error: access.message }, { status: access.status });
   }
 
-  const url = new URL(request.url);
-  const caseId = url.searchParams.get('caseId');
+  const parsed = listCaseNotesSchema.safeParse({
+    caseId: new URL(request.url).searchParams.get('caseId'),
+  });
+  if (!parsed.success) {
+    return Response.json({ error: 'Geçersiz caseId.' }, { status: 400 });
+  }
+  const caseId = parsed.data.caseId;
 
-  if (!caseId) {
-    return Response.json({ error: 'caseId gereklidir.' }, { status: 400 });
+  const admin = createAdminClient();
+  const allowed = await canAccessCase(admin, {
+    caseId,
+    userId: access.userId,
+    role: access.role,
+  });
+  if (!allowed) {
+    return Response.json({ error: 'Bu dosyadaki notlara erişim yetkiniz yok.' }, { status: 403 });
   }
 
-  const { data, error } = await access.supabase
+  const { data, error } = await admin
     .from('case_updates')
     .select('id, message, is_public_to_client, created_at')
     .eq('case_id', caseId)
@@ -49,15 +65,13 @@ export async function POST(request: Request) {
 
   const payload = parsed.data;
   const admin = createAdminClient();
-
-  const { data: caseRow } = await admin
-    .from('cases')
-    .select('id')
-    .eq('id', payload.caseId)
-    .maybeSingle();
-
-  if (!caseRow) {
-    return Response.json({ error: 'Dosya bulunamadı.' }, { status: 404 });
+  const allowed = await canAccessCase(admin, {
+    caseId: payload.caseId,
+    userId: access.userId,
+    role: access.role,
+  });
+  if (!allowed) {
+    return Response.json({ error: 'Bu dosyada not ekleme yetkiniz yok.' }, { status: 403 });
   }
 
   const { data, error } = await admin

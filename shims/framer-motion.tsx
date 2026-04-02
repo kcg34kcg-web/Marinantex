@@ -26,7 +26,13 @@ export const motion = new Proxy(
   },
 ) as Record<string, React.ComponentType<any>>;
 
-export function AnimatePresence({ children }: { children: React.ReactNode }) {
+export function AnimatePresence({
+  children,
+}: {
+  children: React.ReactNode;
+  mode?: 'sync' | 'wait' | 'popLayout';
+  initial?: boolean;
+}) {
   return <>{children}</>;
 }
 

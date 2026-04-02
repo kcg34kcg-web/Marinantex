@@ -161,12 +161,33 @@ export class DocumentAccessGuard implements CanActivate {
     if (!canonicalJson || typeof canonicalJson !== "object" || Array.isArray(canonicalJson)) {
       return undefined;
     }
+
     const payload = canonicalJson as Record<string, unknown>;
-    const matterId = payload.matterId ?? payload.matter_id ?? payload.caseId ?? payload.case_id;
-    if (typeof matterId !== "string") {
+    const directMatterId =
+      payload.matterId ?? payload.matter_id ?? payload.caseId ?? payload.case_id;
+    if (typeof directMatterId === "string") {
+      const normalized = directMatterId.trim();
+      if (normalized.length > 0) {
+        return normalized;
+      }
+    }
+
+    const content = payload.content;
+    if (!content || typeof content !== "object" || Array.isArray(content)) {
       return undefined;
     }
-    return matterId.trim() || undefined;
+
+    const contentRecord = content as Record<string, unknown>;
+    const nestedMatterId =
+      contentRecord.matterId ??
+      contentRecord.matter_id ??
+      contentRecord.caseId ??
+      contentRecord.case_id;
+    if (typeof nestedMatterId !== "string") {
+      return undefined;
+    }
+    const normalizedNested = nestedMatterId.trim();
+    return normalizedNested.length > 0 ? normalizedNested : undefined;
   }
 
   private async writeDenialAudit(

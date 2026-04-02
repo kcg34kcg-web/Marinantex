@@ -4,6 +4,7 @@
   DocumentExportItem,
   DocumentStatus,
   DocumentSummary,
+  DocumentVersionItem,
   ShareLinkItem,
   SharePermission,
   TemplateItem,
@@ -11,8 +12,8 @@
 
 interface ApiContext {
   apiBaseUrl: string;
-  token: string;
-  tenantId: string;
+  token: string | null;
+  tenantId: string | null;
 }
 
 interface LockResponse {
@@ -61,10 +62,6 @@ function readApiContext(): ApiContext | null {
   const apiBaseUrl =
     process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:4000";
 
-  if (!token || !tenantId) {
-    return null;
-  }
-
   return {
     apiBaseUrl,
     token,
@@ -76,6 +73,17 @@ function apiBaseUrl(): string {
   return process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:4000";
 }
 
+function buildApiAuthHeaders(context: ApiContext): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (context.token) {
+    headers.Authorization = `Bearer ${context.token}`;
+  }
+  if (context.tenantId) {
+    headers["x-tenant-id"] = context.tenantId;
+  }
+  return headers;
+}
+
 async function apiRequest<T>(
   path: string,
   init?: RequestInit,
@@ -85,21 +93,24 @@ async function apiRequest<T>(
     return null;
   }
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string> | undefined),
+    ...buildApiAuthHeaders(context),
+  };
+
   const response = await fetch(`${context.apiBaseUrl}${path}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${context.token}`,
-      "x-tenant-id": context.tenantId,
-      ...(init?.headers ?? {}),
-    },
+    credentials: "include",
+    headers,
   });
 
   if (!response.ok) {
     throw new Error(`API request failed: ${response.status}`);
   }
 
-  return (await response.json()) as T;
+  const body = await response.text();
+  return body ? (JSON.parse(body) as T) : null;
 }
 
 async function publicApiRequest<T>(
@@ -108,6 +119,7 @@ async function publicApiRequest<T>(
 ): Promise<T> {
   const response = await fetch(`${apiBaseUrl()}${path}`, {
     ...init,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(init?.headers ?? {}),
@@ -180,6 +192,37 @@ export async function getDocument(
   return apiRequest<DocumentSummary>(`/documents/${documentId}`, {
     method: "GET",
   });
+}
+
+export async function listDocumentVersions(
+  documentId: string,
+): Promise<DocumentVersionItem[] | null> {
+  return apiRequest<DocumentVersionItem[]>(`/documents/${documentId}/versions`, {
+    method: "GET",
+  });
+}
+
+export async function getDocumentVersion(
+  documentId: string,
+  versionId: string,
+): Promise<(DocumentVersionItem & { canonicalJson: Record<string, unknown> }) | null> {
+  return apiRequest<DocumentVersionItem & { canonicalJson: Record<string, unknown> }>(
+    `/documents/${documentId}/versions/${versionId}`,
+    { method: "GET" },
+  );
+}
+
+export async function restoreDocumentVersion(
+  documentId: string,
+  versionId: string,
+): Promise<DocumentSummary | null> {
+  return apiRequest<DocumentSummary>(
+    `/documents/${documentId}/versions/${versionId}/restore`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+  );
 }
 
 export async function finalizeDocument(

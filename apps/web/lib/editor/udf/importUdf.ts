@@ -13,6 +13,8 @@ import type {
 } from "./types";
 import { EMPTY_PARAGRAPH_PLACEHOLDER } from "./xmlBuilder";
 
+const MAX_UDF_FILE_BYTES = 16 * 1024 * 1024;
+
 interface XmlNode {
   name: string;
   attrs: Record<string, string>;
@@ -502,6 +504,12 @@ export function importUdfArchive(archive: Uint8Array): ImportedUdfDocument {
 }
 
 export async function importUdfFile(file: File): Promise<ImportedUdfDocument> {
+  if (file.size <= 0) {
+    throw new Error("UDF dosyasi bos.");
+  }
+  if (file.size > MAX_UDF_FILE_BYTES) {
+    throw new Error(`UDF dosyasi cok buyuk (>${MAX_UDF_FILE_BYTES} byte).`);
+  }
   const buffer = new Uint8Array(await file.arrayBuffer());
   return importUdfArchive(buffer);
 }

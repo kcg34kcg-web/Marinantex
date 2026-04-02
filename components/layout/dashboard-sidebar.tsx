@@ -6,10 +6,8 @@ import type { Route } from 'next';
 import {
   Briefcase,
   LayoutDashboard,
-  CalendarDays,
   Wallet,
   Users,
-  Scale,
   PanelLeftClose,
   PanelLeftOpen,
   Calculator,
@@ -30,6 +28,7 @@ import {
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui-store';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
+import { Logo } from '@/components/brand/Logo';
 import { cn } from '@/lib/utils';
 
 const NAV_GROUPS = [
@@ -37,7 +36,6 @@ const NAV_GROUPS = [
     label: 'Calisma Alani',
     items: [
       { href: '/dashboard', label: 'Panel', icon: LayoutDashboard },
-      { href: '/dashboard/calendar', label: 'Takvim', icon: CalendarDays },
       { href: '/dashboard/cases', label: 'Dosyalar', icon: Briefcase },
       { href: '/dashboard/mail', label: 'Mail Projesi', icon: Mail },
       { href: '/dashboard/tasks', label: 'Gorevler', icon: CheckSquare },
@@ -76,6 +74,8 @@ const NAV_GROUPS = [
   },
 ] as const;
 
+const SHOW_PORTAL_DEMO = process.env.NEXT_PUBLIC_PORTAL_DEMO_IN_SIDEBAR === 'true';
+
 export function DashboardSidebar() {
   const { isSidebarOpen, toggleSidebar } = useUiStore();
   const pathname = usePathname();
@@ -112,23 +112,13 @@ export function DashboardSidebar() {
           >
             <div className={cn('min-w-0', !isSidebarOpen && 'hidden')}>
               <div className="flex items-center gap-2.5 rounded-2xl border border-[color-mix(in_srgb,var(--sidebar-border,var(--border)),white_8%)] bg-[color-mix(in_srgb,var(--sidebar-bg-1,var(--surface)),white_8%)] px-2.5 py-2 shadow-[0_10px_30px_-20px_rgba(0,0,0,0.35)]">
-                <div className="relative flex h-9 w-9 items-center justify-center rounded-2xl border border-[color-mix(in_srgb,var(--primary),white_35%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--primary),white_15%),var(--primary))] text-white shadow-[0_10px_24px_-16px_var(--primary)]">
-                  <Scale className="h-4 w-4" />
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate font-serif text-sm font-bold leading-tight text-[var(--sidebar-text,var(--text))]">
-                    Babylexit
-                  </p>
-                  <p className="truncate text-[10px] leading-tight text-[var(--sidebar-muted,var(--secondary))]">
-                    Hukuk Isletim Sistemi
-                  </p>
-                </div>
+                <Logo width={136} height={40} className="h-8 w-auto" />
               </div>
             </div>
 
             {!isSidebarOpen ? (
-              <div className="relative flex h-9 w-9 items-center justify-center rounded-2xl border border-[color-mix(in_srgb,var(--primary),white_35%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--primary),white_15%),var(--primary))] text-white shadow-[0_10px_24px_-16px_var(--primary)]">
-                <Scale className="h-4 w-4" />
+              <div className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--primary),white_35%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--primary),white_15%),var(--primary))] shadow-[0_10px_24px_-16px_var(--primary)]">
+                <Logo width={36} height={36} className="h-7 w-auto" />
               </div>
             ) : null}
 
@@ -175,7 +165,10 @@ export function DashboardSidebar() {
               ) : null}
 
               <div className="space-y-1">
-                {group.items.map((item) => {
+                {(group.label === 'Calisma Alani' && SHOW_PORTAL_DEMO
+                  ? [...group.items, { href: '/dashboard/portal-demo', label: 'Muvekkil Demo', icon: UserCircle2 }]
+                  : group.items
+                ).map((item) => {
                   const Icon = item.icon;
                   const [itemPath, itemQueryRaw] = item.href.split('?');
                   const itemTab = itemQueryRaw ? new URLSearchParams(itemQueryRaw).get('tab') : null;
@@ -283,4 +276,3 @@ export function DashboardSidebar() {
     </aside>
   );
 }
-

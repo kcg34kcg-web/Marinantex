@@ -80,3 +80,13 @@ export interface ShareLinkItem {
   lastAccessedAt?: string | null;
   createdAt: string;
 }
+
+export interface DocumentVersionItem {
+  id: string;
+  versionNumber: number;
+  schemaVersion: number;
+  snapshotHash: string;
+  isFinalSnapshot: boolean;
+  createdById: string;
+  createdAt: string;
+}

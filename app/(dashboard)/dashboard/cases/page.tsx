@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -150,11 +150,12 @@ function getActivityRisk(updatedAt: string): { label: string; variant: 'blue' | 
   return { label: `Gecikme Riski (D-${days})`, variant: 'muted' };
 }
 
-export default function CasesPage() {
+function CasesPageContent() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const handledQuickTaskSearchRef = useRef<string | null>(null);
+  const handledQuickNoteSearchRef = useRef<string | null>(null);
 
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | CaseStatus>('all');
@@ -527,6 +528,38 @@ export default function CasesPage() {
     router.replace((nextSearch ? `${pathname}?${nextSearch}` : pathname) as Route, { scroll: false });
   }, [pathname, router, searchParams]);
 
+  useEffect(() => {
+    const shouldOpenQuickNote = searchParams.get('openNote') === '1';
+    if (!shouldOpenQuickNote) {
+      handledQuickNoteSearchRef.current = null;
+      return;
+    }
+
+    if (isLoading) {
+      return;
+    }
+
+    const currentSearch = searchParams.toString();
+    if (handledQuickNoteSearchRef.current === currentSearch) {
+      return;
+    }
+    handledQuickNoteSearchRef.current = currentSearch;
+
+    const preferredCase = filteredCases[0];
+    if (preferredCase) {
+      setNoteModalCase({ id: preferredCase.id, title: preferredCase.title });
+      setNoteText('');
+      setNotePublic(false);
+    } else {
+      setActionMessage('Hızlı not için önce en az bir dosya oluşturmanız gerekiyor.');
+    }
+
+    const nextParams = new URLSearchParams(currentSearch);
+    nextParams.delete('openNote');
+    const nextSearch = nextParams.toString();
+    router.replace((nextSearch ? `${pathname}?${nextSearch}` : pathname) as Route, { scroll: false });
+  }, [filteredCases, isLoading, pathname, router, searchParams]);
+
   async function handleCreateCaseTask(caseId: string, caseTitle: string) {
     const defaultAssigneeId = getPreferredTaskAssigneeId();
     resetTaskDraft({ assigneeId: defaultAssigneeId, mode: 'quick' });
@@ -637,7 +670,7 @@ export default function CasesPage() {
     }
 
     if (createInitialTask && initialTaskTitle.trim().length < 3) {
-      setActionMessage('İlk görev başlığı en az 3 karakter olmalı. ');
+      setActionMessage('İlk görev başlığı en az 3 karakter olmalı.');
       return;
     }
 
@@ -686,31 +719,36 @@ export default function CasesPage() {
       let initialTaskErrorMessage: string | null = null;
 
       if (createInitialTask && payload.case?.id) {
-        const taskResponse = await fetch('/api/dashboard/cases/tasks', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            caseId: payload.case.id,
-            title: initialTaskTitle.trim(),
-            priority: initialTaskPriority,
-            dueAt: initialTaskDueAt ? new Date(initialTaskDueAt).toISOString() : undefined,
-            assignedTo: initialTaskAssignedTo || newCaseLawyerId || undefined,
-          }),
-        });
+        try {
+          const taskResponse = await fetch('/api/dashboard/cases/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              caseId: payload.case.id,
+              title: initialTaskTitle.trim(),
+              priority: initialTaskPriority,
+              dueAt: initialTaskDueAt ? new Date(initialTaskDueAt).toISOString() : undefined,
+              assignedTo: initialTaskAssignedTo || newCaseLawyerId || undefined,
+            }),
+          });
 
-        if (!taskResponse.ok) {
-          const taskPayload = (await taskResponse.json()) as { error?: string };
-          initialTaskErrorMessage = taskPayload.error ?? 'Dosya oluştu fakat ilk görev oluşturulamadı.';
+          if (!taskResponse.ok) {
+            const taskPayload = (await taskResponse.json().catch(() => null)) as { error?: string } | null;
+            initialTaskErrorMessage = taskPayload?.error ?? 'Dosya oluştu fakat ilk görev oluşturulamadı.';
+          }
+        } catch {
+          initialTaskErrorMessage = 'Dosya oluştu fakat ilk görev oluşturulamadı.';
         }
       }
 
-      setActionMessage(
+      const successMessage =
         initialTaskErrorMessage
           ? `Yeni dosya oluşturuldu ancak ilk görev açılamadı: ${initialTaskErrorMessage}`
           : payload.clientCandidateCreated
             ? 'Yeni dosya oluşturuldu. Müvekkil detayıyla bir müvekkil adayı kaydedildi.'
-            : 'Yeni dosya başarıyla oluşturuldu.'
-      );
+            : 'Yeni dosya başarıyla oluşturuldu.';
+
+      setActionMessage(successMessage);
       if (payload.case?.id) {
         setActionLink({ href: `/dashboard/cases/${payload.case.id}`, label: 'Yeni dosyaya git' });
       }
@@ -743,7 +781,7 @@ export default function CasesPage() {
       setPage(1);
       const refreshResult = await refetch();
       if (refreshResult.error) {
-        setActionMessage('Dosya oluşturuldu. Liste yenilenemedi, sayfayı yenileyin.');
+        setActionMessage(`${successMessage} Liste yenilenemedi, sayfayı yenileyin.`);
       }
     } catch {
       setActionMessage('Dosya oluşturulurken hata oluştu.');
@@ -2216,5 +2254,13 @@ export default function CasesPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+export default function CasesPage() {
+  return (
+    <Suspense fallback={<div className="p-4 text-sm text-slate-500">Dosyalar yükleniyor...</div>}>
+      <CasesPageContent />
+    </Suspense>
   );
 }
