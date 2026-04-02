@@ -19,11 +19,10 @@ function parseCorsOrigins(value: string | undefined): string[] {
   return parsed.length > 0 ? parsed : fallback;
 }
 
-// 1. ADIM: Vercel için uygulamanın hafızada tutulacağı değişken
+// Vercel için önbellek
 let cachedServer: any;
 
 async function bootstrap() {
-  // Eğer uygulama zaten çalışıyorsa tekrar kurmasını engelliyoruz
   if (!cachedServer) {
     const app = await NestFactory.create(AppModule);
     const corsOrigins = parseCorsOrigins(process.env.CORS_ORIGINS);
@@ -56,18 +55,15 @@ async function bootstrap() {
       allowedHeaders: ["Content-Type", "Authorization", "x-tenant-id", "x-request-id"],
     });
 
-    // 2. ADIM: Vercel'de port dinlemeyiz, sadece uygulamayı başlatırız (init)
+    // Sadece init yapıyoruz, listen kullanmıyoruz!
     await app.init();
-    
-    // expressApp'i önbelleğe alıyoruz
     cachedServer = expressApp;
   }
 
   return cachedServer;
 }
 
-// 3. ADIM: Eski `void bootstrap();` satırını sildik ve yerine bunu ekledik.
-// Vercel'in uygulamamıza gelen web isteklerini (req, res) ilettiği ana fonksiyon budur.
+// Vercel'in uygulamayı çalıştırabilmesi için zorunlu DIŞA AKTARIM
 export default async function handler(req: any, res: any) {
   const server = await bootstrap();
   return server(req, res);
